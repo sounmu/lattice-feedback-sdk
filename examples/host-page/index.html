@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Demo Host Page</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 40px; color: #111827; }
+      form { display: grid; gap: 12px; max-width: 360px; }
+      button { padding: 8px 14px; }
+    </style>
+  </head>
+  <body>
+    <h1 data-feedback-id="page-title">주문 관리 (데모)</h1>
+    <p>Serve this file from another origin (e.g. <code>npx serve examples/host-page -l 4000</code>) to test cross-origin.</p>
+
+    <form data-feedback-id="order-form" onsubmit="event.preventDefault(); alert('submitted');">
+      <label>
+        고객명
+        <input type="text" name="customerName" data-feedback-id="customer-name-input" />
+      </label>
+      <label>
+        수량
+        <input type="number" name="quantity" data-feedback-id="quantity-input" />
+      </label>
+      <button type="submit" data-feedback-id="submit-order-button">주문 저장</button>
+    </form>
+
+    <p>
+      <button type="button" data-feedback-id="export-button" onclick="alert('export')">엑셀 내보내기</button>
+      <button type="button" data-feedback-id="navigate-button" onclick="history.pushState({}, '', '/orders/2?secret=1')">
+        pushState 이동
+      </button>
+    </p>
+
+    <script src="http://localhost:3000/sdk.js" data-project-key="demo" async></script>
+    <script>
+      window.addEventListener('load', function () {
+        if (window.LatticeFeedback) {
+          window.LatticeFeedback.setUser({ id: 'user-001', name: 'Demo User' });
+        }
+      });
+    </script>
+  </body>
+</html>
