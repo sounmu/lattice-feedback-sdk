@@ -1,0 +1,85 @@
+import type { FeedbackRepository } from '@/lib/feedback-repository';
+import type { Feedback } from '@/types/feedback';
+
+const MAX_FEEDBACK_PER_PROJECT = 1000;
+
+// Kept on globalThis so the store survives dev hot reload. Each list is oldest first.
+const globalForFeedbackStore = globalThis as typeof globalThis & {
+  memoryFeedbackStore?: Map<string, Feedback[]>;
+};
+
+function getStore(): Map<string, Feedback[]> {
+  if (!globalForFeedbackStore.memoryFeedbackStore) {
+    globalForFeedbackStore.memoryFeedbackStore = new Map();
+  }
+  return globalForFeedbackStore.memoryFeedbackStore;
+}
+
+export function resetMemoryFeedbackStore(): void {
+  getStore().clear();
+}
+
+export function createMemoryFeedbackRepository(): FeedbackRepository {
+  return {
+    async create(input) {
+      const now = new Date().toISOString();
+      const feedback: Feedback = {
+        id: crypto.randomUUID(),
+        projectKey: input.projectKey,
+        message: input.message,
+        type: input.type,
+        status: 'open',
+        reporter: input.reporter,
+        page: input.page,
+        attachments: {
+          comments: input.attachments?.comments ?? [],
+          edits: input.attachments?.edits ?? [],
+          flow: input.attachments?.flow ?? null,
+        },
+        adminReply: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const store = getStore();
+      const items = store.get(input.projectKey) ?? [];
+      items.push(feedback);
+      while (items.length > MAX_FEEDBACK_PER_PROJECT) {
+        items.shift();
+      }
+      store.set(input.projectKey, items);
+      return structuredClone(feedback);
+    },
+
+    async findMany(projectKey) {
+      const items = getStore().get(projectKey) ?? [];
+      return structuredClone(items).reverse();
+    },
+
+    async find(projectKey, id) {
+      const item = getStore()
+        .get(projectKey)
+        ?.find((candidate) => candidate.id === id);
+      if (!item) {
+        return null;
+      }
+      return structuredClone(item);
+    },
+
+    async update(projectKey, id, input) {
+      const item = getStore()
+        .get(projectKey)
+        ?.find((candidate) => candidate.id === id);
+      if (!item) {
+        return null;
+      }
+      if (input.status !== undefined) {
+        item.status = input.status;
+      }
+      if (input.adminReply !== undefined) {
+        item.adminReply = input.adminReply;
+      }
+      item.updatedAt = new Date().toISOString();
+      return structuredClone(item);
+    },
+  };
+}

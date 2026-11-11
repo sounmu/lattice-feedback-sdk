@@ -41,3 +41,4 @@ yarn-error.log*
 next-env.d.ts
 /public/sdk.js
 .omo/
+!.env.example

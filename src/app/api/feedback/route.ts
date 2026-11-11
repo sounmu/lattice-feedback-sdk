@@ -1,0 +1,72 @@
+import { NextResponse } from 'next/server';
+import { getFeedbackRepository } from '@/lib/feedback-repository';
+import { authorizeAdmin } from '@/lib/http/admin-auth';
+import { createApiErrorResponse } from '@/lib/http/api-error';
+import { findProject, isOriginAllowed } from '@/lib/projects';
+import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
+import type { CreateFeedbackResponse, FeedbackListResponse } from '@/types/feedback';
+
+const MAX_BODY_BYTES = 65536;
+
+function isDeclaredBodyTooLarge(request: Request): boolean {
+  const contentLength = request.headers.get('content-length');
+  if (contentLength === null) {
+    return false;
+  }
+  return Number(contentLength) > MAX_BODY_BYTES;
+}
+
+function createPayloadTooLargeResponse() {
+  return createApiErrorResponse(413, 'payload_too_large', 'Request body is too large.');
+}
+
+export async function POST(request: Request) {
+  if (isDeclaredBodyTooLarge(request)) {
+    return createPayloadTooLargeResponse();
+  }
+
+  // The header can be absent or wrong, so the actual body size is checked as well.
+  const rawBody = await request.text();
+  if (Buffer.byteLength(rawBody) > MAX_BODY_BYTES) {
+    return createPayloadTooLargeResponse();
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(rawBody);
+  } catch {
+    return createApiErrorResponse(400, 'invalid_json', 'Request body must be valid JSON.');
+  }
+
+  const parsed = createFeedbackInputSchema.safeParse(json);
+  if (!parsed.success) {
+    return createApiErrorResponse(400, 'invalid_body', 'Request body failed validation.');
+  }
+
+  const project = findProject(parsed.data.projectKey);
+  if (!project) {
+    return createApiErrorResponse(404, 'project_not_found', 'Project not found.');
+  }
+  if (!isOriginAllowed(project, parsed.data.hostOrigin)) {
+    return createApiErrorResponse(403, 'origin_not_allowed', 'Origin is not allowed for this project.');
+  }
+
+  const feedback = await getFeedbackRepository().create(parsed.data);
+  const body: CreateFeedbackResponse = { feedback };
+  return NextResponse.json(body, { status: 201 });
+}
+
+export async function GET(request: Request) {
+  const projectKey = new URL(request.url).searchParams.get('projectKey') ?? '';
+  const project = findProject(projectKey);
+  if (!project) {
+    return createApiErrorResponse(404, 'project_not_found', 'Project not found.');
+  }
+  if (!authorizeAdmin(request, project)) {
+    return createApiErrorResponse(401, 'unauthorized', 'Admin authorization is required.');
+  }
+
+  const items = await getFeedbackRepository().findMany(project.projectKey);
+  const body: FeedbackListResponse = { items };
+  return NextResponse.json(body);
+}
