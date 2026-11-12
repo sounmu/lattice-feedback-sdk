@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { createWidgetToHostMessage, isHostToWidgetMessage } from '@/lib/sdk-protocol';
-import type { WidgetToHostMessage } from '@/types/sdk-message';
+import { isCaptureUpdate } from '@/lib/capture-protocol';
+import type { CaptureCommand, CaptureState, WidgetToHostMessage } from '@/types/sdk-message';
 import type { FeedbackReporter, PageContext } from '@/types/feedback';
 
 interface HostBridgeConfig {
@@ -35,6 +36,7 @@ export function useHostBridge() {
   const [reporter, setReporter] = useState<FeedbackReporter | null>(null);
   const [page, setPage] = useState<PageContext | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [captureState, setCaptureState] = useState<CaptureState | null>(null);
 
   const projectKey = searchParams.get('projectKey');
   const hostOrigin = findValidHostOrigin(searchParams.get('hostOrigin'));
@@ -47,7 +49,7 @@ export function useHostBridge() {
   }, [projectKey, hostOrigin]);
 
   const postToHost = useCallback(
-    (message: WidgetToHostMessage) => {
+    (message: WidgetToHostMessage | CaptureCommand) => {
       if (!config) {
         return;
       }
@@ -64,6 +66,10 @@ export function useHostBridge() {
 
     function handleMessage(event: MessageEvent) {
       if (event.origin !== expectedOrigin || event.source !== window.parent) {
+        return;
+      }
+      if (isCaptureUpdate(event.data)) {
+        setCaptureState(event.data.payload);
         return;
       }
       if (!isHostToWidgetMessage(event.data)) {
@@ -111,6 +117,8 @@ export function useHostBridge() {
     reporter,
     page,
     isInitialized,
+    captureState,
+    sendCaptureCommand: postToHost,
     notifyClose,
     notifySubmitted,
   };

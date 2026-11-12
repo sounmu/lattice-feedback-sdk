@@ -32,6 +32,8 @@ export interface ElementRect {
 
 export interface ElementTarget {
   selector: string;
+  /** Pathname at capture time, even if submission happens after an SPA navigation. */
+  pagePath?: string;
   /** Value of data-feedback-id when present. */
   feedbackId: string | null;
   tagName: string;

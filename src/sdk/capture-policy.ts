@@ -40,6 +40,7 @@ export function findCaptureTarget(eventTarget: EventTarget | null, policy: Captu
       element,
       target: {
         selector: allowedTarget.selector,
+        pagePath: window.location.pathname,
         feedbackId: allowedTarget.id,
         tagName: element.tagName.toLowerCase(),
         rect: {

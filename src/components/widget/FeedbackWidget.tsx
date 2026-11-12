@@ -4,6 +4,8 @@ import { useState, type FormEvent } from 'react';
 
 import { useHostBridge } from '@/hooks/useHostBridge';
 import { useSubmitFeedback } from '@/hooks/useSubmitFeedback';
+import { CaptureControls } from '@/components/widget/CaptureControls';
+import { createCaptureCommand } from '@/lib/capture-protocol';
 import type { FeedbackReporter, FeedbackType } from '@/types/feedback';
 
 const MAX_MESSAGE_LENGTH = 5000;
@@ -18,13 +20,14 @@ const FEEDBACK_TYPE_OPTIONS: { value: FeedbackType; label: string }[] = [
 ];
 
 export function FeedbackWidget() {
-  const { config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, notifyClose, notifySubmitted } =
+  const { config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, notifyClose, notifySubmitted, captureState, sendCaptureCommand } =
     useHostBridge();
   const { submit, reset, status, errorMessage } = useSubmitFeedback();
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
 
-  const canSubmit = isInitialized && page !== null && message.trim().length > 0 && status !== 'submitting';
+  const canSubmit = isInitialized && page !== null && message.trim().length > 0 &&
+    status !== 'submitting' && !captureState?.activeMode;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -38,6 +41,7 @@ export function FeedbackWidget() {
       type,
       reporter: reporter ?? ANONYMOUS_REPORTER,
       page,
+      attachments: captureState?.attachments,
     });
     if (result) {
       notifySubmitted(result.feedback.id);
@@ -48,6 +52,7 @@ export function FeedbackWidget() {
     setMessage('');
     setType('bug');
     reset();
+    sendCaptureCommand(createCaptureCommand({ type: 'draft:reset', payload: {} }));
   }
 
   function renderBody() {
@@ -67,6 +72,7 @@ export function FeedbackWidget() {
     return (
       <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
         <select
+          aria-label="피드백 유형"
           className="rounded border p-2 text-sm"
           value={type}
           onChange={(event) => setType(event.target.value as FeedbackType)}
@@ -78,16 +84,32 @@ export function FeedbackWidget() {
           ))}
         </select>
         <textarea
+          aria-label="피드백 내용"
           className="min-h-32 rounded border p-2 text-sm"
           value={message}
           maxLength={MAX_MESSAGE_LENGTH}
           required
           onChange={(event) => setMessage(event.target.value)}
         />
+        {captureState && (
+          <CaptureControls
+            attachments={captureState.attachments}
+            activeMode={captureState.activeMode}
+            selection={captureState.selection}
+            enabled={captureState.enabled}
+            disabled={status === 'submitting'}
+            onStart={(mode) => sendCaptureCommand(createCaptureCommand({ type: 'capture:start', payload: { mode } }))}
+            onCancel={() => sendCaptureCommand(createCaptureCommand({ type: 'capture:cancel', payload: {} }))}
+            onStopFlow={() => sendCaptureCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }))}
+            onAddComment={(comment) => sendCaptureCommand(createCaptureCommand({ type: 'comment:add', payload: { comment } }))}
+            onRemove={(kind, index) => sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }))}
+          />
+        )}
+        {captureState?.errorMessage && <p role="alert" className="text-sm text-red-600">{captureState.errorMessage}</p>}
         {status === 'error' && <p className="text-sm text-red-600">{errorMessage}</p>}
         <button
           type="submit"
-          className="rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-50"
+          className="min-h-11 rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-50"
           disabled={!canSubmit}
         >
           보내기

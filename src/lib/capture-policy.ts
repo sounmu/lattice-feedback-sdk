@@ -59,6 +59,7 @@ export function areFeedbackAttachmentsAllowed(input: CreateFeedbackInput, policy
   if (page.origin !== input.hostOrigin || !policy.allowedPaths.includes(page.pathname)) return false;
   const isAllowedTarget = (target: ElementTarget): boolean =>
     /^[a-z][a-z0-9-]*$/.test(target.tagName) &&
+    policy.allowedPaths.includes(target.pagePath ?? page.pathname) &&
     policy.targets.some((allowed) => allowed.id === target.feedbackId && allowed.selector === target.selector);
   if (!comments.every(({ target }) => isAllowedTarget(target)) || !edits.every(({ target }) => isAllowedTarget(target))) {
     return false;

@@ -27,6 +27,7 @@ it.each([
   { name: 'unlisted ID', target: { ...TARGET, feedbackId: 'private-target' } },
   { name: 'forged selector', target: { ...TARGET, selector: '[data-secret="value"]' } },
   { name: 'forged tag name', target: { ...TARGET, tagName: 'private text' } },
+  { name: 'unapproved source page', target: { ...TARGET, pagePath: '/private' } },
 ])('rejects $name in captured metadata', async ({ target }) => {
   const response = await POST(createJsonRequest('http://localhost:3000/api/feedback', 'POST',
     createFeedbackBody({ attachments: { comments: [{ target, comment: 'Feedback' }] } })));
