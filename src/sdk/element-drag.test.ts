@@ -117,7 +117,7 @@ describe('startElementDrag', () => {
     handle.cancel();
   });
 
-  it.each(['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'keydown', 'keyup'])('blocks original %s actions only while editing', (type) => {
+  it.each(['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'beforeinput', 'keydown', 'keyup'])('blocks original %s actions only while editing', (type) => {
     const handle = startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
     const hostClick = createEvent(type, { target: hostElement, key: 'Enter' });
     const unrelatedClick = createEvent(type, { target: new FakeElement('A'), key: 'Enter' });
@@ -131,6 +131,15 @@ describe('startElementDrag', () => {
 
     handle.cancel();
     expect(fakeDocument.listenerCount).toBe(0);
+  });
+
+  it.each(['a', 'Backspace', 'Delete', 'ArrowUp'])('blocks the original control editing key %s', (key) => {
+    const handle = startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
+    const event = createEvent('keydown', { target: hostElement, key });
+    fakeDocument.dispatch(event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopImmediatePropagation).toHaveBeenCalled();
+    handle.cancel();
   });
 
   it('keeps the overlay controls usable when the selected element is body', () => {
