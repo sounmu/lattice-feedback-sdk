@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 
 import type { ApiErrorResponse, CreateFeedbackInput, CreateFeedbackResponse } from '@/types/feedback';
+import { MAX_FEEDBACK_BYTES } from '@/lib/feedback-limits';
 
 export type SubmitStatus = 'idle' | 'submitting' | 'success' | 'error';
 
@@ -24,10 +25,16 @@ export function useSubmitFeedback() {
     setStatus('submitting');
     setErrorMessage(null);
     try {
+      const serialized = JSON.stringify(input);
+      if (new TextEncoder().encode(serialized).length > MAX_FEEDBACK_BYTES) {
+        setErrorMessage('피드백과 첨부 자료가 너무 큽니다. 본문이나 첨부를 줄여 주세요.');
+        setStatus('error');
+        return null;
+      }
       const response = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+        body: serialized,
       });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) {

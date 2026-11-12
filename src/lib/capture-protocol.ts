@@ -19,6 +19,8 @@ function isRect(value: unknown): boolean {
 }
 function isTarget(value: unknown): boolean {
   return isRecord(value) && isText(value.selector, 500) && value.selector.length > 0 &&
+    (value.pagePath === undefined || (isText(value.pagePath, 2048) &&
+      value.pagePath.startsWith('/') && !/[?#]/.test(value.pagePath))) &&
     (value.feedbackId === null || isText(value.feedbackId, 200)) &&
     isText(value.tagName, 200) && isRect(value.rect);
 }

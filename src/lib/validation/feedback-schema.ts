@@ -60,6 +60,7 @@ const elementRectSchema = z.object({
 
 const elementTargetSchema = z.object({
   selector: z.string().min(1).max(MAX_SELECTOR_LENGTH),
+  pagePath: z.string().max(MAX_URL_LENGTH).refine(isPathOnly).optional(),
   feedbackId: shortTextSchema.nullable(),
   tagName: shortTextSchema.min(1),
   rect: elementRectSchema,
