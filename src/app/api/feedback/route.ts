@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
+import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import type { CreateFeedbackResponse, FeedbackListResponse } from '@/types/feedback';
@@ -21,6 +22,9 @@ function createPayloadTooLargeResponse() {
 }
 
 export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) {
+    return createApiErrorResponse(403, 'cross_origin_request', 'Feedback must be submitted from the widget.');
+  }
   if (isDeclaredBodyTooLarge(request)) {
     return createPayloadTooLargeResponse();
   }

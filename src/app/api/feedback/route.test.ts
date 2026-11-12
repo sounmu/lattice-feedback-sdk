@@ -8,7 +8,8 @@ import {
 import { resetMemoryFeedbackStore } from '@/lib/memory-feedback-repository';
 import type { ApiErrorResponse, CreateFeedbackResponse, FeedbackListResponse } from '@/types/feedback';
 
-const COLLECTION_URL = 'http://localhost:4000/api/feedback';
+const COLLECTION_URL = 'http://localhost:3000/api/feedback';
+const APP_ORIGIN = 'http://localhost:3000';
 const LIST_URL = `${COLLECTION_URL}?projectKey=demo`;
 
 beforeEach(() => {
@@ -42,6 +43,44 @@ describe('POST /api/feedback', () => {
     expect(body.error.code).toBe('origin_not_allowed');
   });
 
+  it('returns 403 cross_origin_request when another site posts an allowed hostOrigin', async () => {
+    const request = createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), {
+      origin: 'https://evil.example.com',
+    });
+    const response = await POST(request);
+    const body = (await response.json()) as ApiErrorResponse;
+
+    expect(response.status).toBe(403);
+    expect(body.error.code).toBe('cross_origin_request');
+  });
+
+  it('returns 403 cross_origin_request when the allowed host page itself posts directly', async () => {
+    const request = createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), {
+      origin: 'http://localhost:4000',
+    });
+    const response = await POST(request);
+
+    expect(response.status).toBe(403);
+  });
+
+  it('returns 403 cross_origin_request without Origin or Sec-Fetch-Site', async () => {
+    const request = new Request(COLLECTION_URL, { method: 'POST', body: JSON.stringify(createFeedbackBody()) });
+    const response = await POST(request);
+
+    expect(response.status).toBe(403);
+  });
+
+  it('accepts Sec-Fetch-Site same-origin when Origin is absent', async () => {
+    const request = new Request(COLLECTION_URL, {
+      method: 'POST',
+      headers: { 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify(createFeedbackBody()),
+    });
+    const response = await POST(request);
+
+    expect(response.status).toBe(201);
+  });
+
   it('returns 404 project_not_found for an unknown project', async () => {
     const response = await POST(createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody({ projectKey: 'nope' })));
     const body = (await response.json()) as ApiErrorResponse;
@@ -62,7 +101,7 @@ describe('POST /api/feedback', () => {
   });
 
   it('returns 400 invalid_json for a malformed body', async () => {
-    const request = new Request(COLLECTION_URL, { method: 'POST', body: '{not json' });
+    const request = new Request(COLLECTION_URL, { method: 'POST', headers: { origin: APP_ORIGIN }, body: '{not json' });
     const response = await POST(request);
     const body = (await response.json()) as ApiErrorResponse;
 
@@ -78,7 +117,11 @@ describe('POST /api/feedback', () => {
   });
 
   it('returns 413 when the actual body exceeds the limit without a content-length header', async () => {
-    const request = new Request(COLLECTION_URL, { method: 'POST', body: 'x'.repeat(65537) });
+    const request = new Request(COLLECTION_URL, {
+      method: 'POST',
+      headers: { origin: APP_ORIGIN },
+      body: 'x'.repeat(65537),
+    });
     const response = await POST(request);
 
     expect(response.status).toBe(413);

@@ -19,10 +19,11 @@ export function createFeedbackBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// Same-origin by default, as sent by the widget iframe.
 export function createJsonRequest(url: string, method: string, body: unknown, headers: Record<string, string> = {}) {
   return new Request(url, {
     method,
-    headers: { 'content-type': 'application/json', ...headers },
+    headers: { 'content-type': 'application/json', origin: new URL(url).origin, ...headers },
     body: JSON.stringify(body),
   });
 }
