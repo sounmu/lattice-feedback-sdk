@@ -31,20 +31,22 @@ const storedRow = {
 const received: ReceivedRequest[] = [];
 let responseBodies: string[] = [];
 let responseStatus = 200;
+let respondToRequest: ((request: ReceivedRequest) => unknown) | null = null;
 let serverUrl = '';
 const server = createServer(async (request, response) => {
   let body = '';
   for await (const chunk of request) {
     body += chunk;
   }
-  received.push({
+  const receivedRequest: ReceivedRequest = {
     method: request.method,
     url: new URL(request.url ?? '/', serverUrl),
     headers: request.headers,
     body,
-  });
+  };
+  received.push(receivedRequest);
   response.writeHead(responseStatus, { 'Content-Type': 'application/json' });
-  response.end(responseBodies.shift() ?? '[]');
+  response.end(respondToRequest ? JSON.stringify(respondToRequest(receivedRequest)) : responseBodies.shift() ?? '[]');
 });
 
 beforeAll(async () => {
@@ -67,6 +69,7 @@ beforeEach(() => {
   received.length = 0;
   responseStatus = 200;
   responseBodies = [];
+  respondToRequest = null;
   vi.stubEnv('SUPABASE_URL', serverUrl);
   vi.stubEnv('SUPABASE_SECRET_KEY', 'sb_secret_local-test-only');
 });
@@ -95,19 +98,53 @@ describe('Supabase REST repository contract', () => {
   });
 
   it('continues through capped responses and requests a stable newest-first order', async () => {
+    const first = { ...storedRow, id: '00000000-0000-4000-8000-000000000003' };
     const second = { ...storedRow, id: '00000000-0000-4000-8000-000000000002' };
-    const third = { ...storedRow, id: '00000000-0000-4000-8000-000000000003' };
-    responseBodies = [JSON.stringify([storedRow, second]), JSON.stringify([third]), '[]'];
+    responseBodies = [JSON.stringify([first, second]), JSON.stringify([storedRow]), '[]'];
 
     const items = await createSupabaseFeedbackRepository().findMany('demo');
 
-    expect(items.map((item) => item.id)).toEqual([storedRow.id, second.id, third.id]);
-    expect(received.map((request) => request.url.searchParams.get('offset'))).toEqual(['0', '2', '3']);
+    expect(items.map((item) => item.id)).toEqual([first.id, second.id, storedRow.id]);
+    expect(received.map((request) => request.url.searchParams.get('or'))).toEqual([
+      null,
+      `(created_at.lt.${second.createdAt},and(created_at.eq.${second.createdAt},id.lt.${second.id}))`,
+      `(created_at.lt.${storedRow.createdAt},and(created_at.eq.${storedRow.createdAt},id.lt.${storedRow.id}))`,
+    ]);
     for (const request of received) {
       expect(request.url.searchParams.get('project_key')).toBe('eq.demo');
       expect(request.url.searchParams.get('order')).toBe('created_at.desc,id.desc');
       expect(request.url.searchParams.get('limit')).toBe('100');
     }
+  });
+
+  it('does not duplicate rows when a new feedback arrives between pages', async () => {
+    const originalRows = Array.from({ length: 101 }, (_, index) => ({
+      ...storedRow,
+      id: `00000000-0000-4000-8000-${String(101 - index).padStart(12, '0')}`,
+    }));
+    const databaseRows = [...originalRows];
+    let pageRequests = 0;
+    respondToRequest = ({ url }) => {
+      const cursor = url.searchParams.get('or')?.match(/created_at\.lt\.([^,]+),and\(created_at\.eq\.[^,]+,id\.lt\.([^)]+)/);
+      const matchingRows = databaseRows.filter((row) => {
+        if (!cursor) return true;
+        return row.createdAt < cursor[1] || (row.createdAt === cursor[1] && row.id < cursor[2]);
+      });
+      const offset = Number(url.searchParams.get('offset') ?? 0);
+      const page = matchingRows.slice(offset, offset + Number(url.searchParams.get('limit')));
+      if (pageRequests++ === 0) {
+        databaseRows.unshift({
+          ...storedRow,
+          id: '00000000-0000-4000-8000-000000000999',
+          createdAt: '2026-11-12T13:00:00+00:00',
+        });
+      }
+      return page;
+    };
+
+    const items = await createSupabaseFeedbackRepository().findMany('demo');
+
+    expect(items.map((item) => item.id)).toEqual(originalRows.map((row) => row.id));
   });
 
   it('scopes detail and update requests to the project even when the ID is known', async () => {

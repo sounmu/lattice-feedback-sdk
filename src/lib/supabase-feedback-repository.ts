@@ -101,19 +101,23 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
 
     async findMany(projectKey) {
       const items: Feedback[] = [];
-      let offset = 0;
+      let cursor: Pick<Feedback, 'createdAt' | 'id'> | undefined;
       while (true) {
+        const cursorFilter: Record<string, string> = {};
+        if (cursor) {
+          cursorFilter.or = `(created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id}))`;
+        }
         const rows = await requestRows({
           project_key: `eq.${projectKey}`,
           order: 'created_at.desc,id.desc',
           limit: String(PAGE_SIZE),
-          offset: String(offset),
+          ...cursorFilter,
         });
         items.push(...rows);
         if (rows.length === 0) {
           return items;
         }
-        offset += rows.length;
+        cursor = rows[rows.length - 1];
       }
     },
 
