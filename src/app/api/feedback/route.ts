@@ -3,6 +3,7 @@ import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
+import { BodyTooLargeError, readBodyTextWithLimit } from '@/lib/http/read-body';
 import { consumeRateLimit, getClientAddress, RATE_LIMIT_RETRY_AFTER_SECONDS } from '@/lib/http/rate-limit';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
@@ -36,10 +37,15 @@ export async function POST(request: Request) {
     return createPayloadTooLargeResponse();
   }
 
-  // The header can be absent or wrong, so the actual body size is checked as well.
-  const rawBody = await request.text();
-  if (Buffer.byteLength(rawBody) > MAX_BODY_BYTES) {
-    return createPayloadTooLargeResponse();
+  // The header can be absent or wrong, so the stream itself is capped as well.
+  let rawBody: string;
+  try {
+    rawBody = await readBodyTextWithLimit(request, MAX_BODY_BYTES);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return createPayloadTooLargeResponse();
+    }
+    throw error;
   }
 
   let json: unknown;
