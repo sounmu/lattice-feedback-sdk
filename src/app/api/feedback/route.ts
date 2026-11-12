@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
+import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
+import { consumeRateLimit, getClientAddress, RATE_LIMIT_RETRY_AFTER_SECONDS } from '@/lib/http/rate-limit';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
@@ -24,6 +26,11 @@ function createPayloadTooLargeResponse() {
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) {
     return createApiErrorResponse(403, 'cross_origin_request', 'Feedback must be submitted from the widget.');
+  }
+  if (!consumeRateLimit(getClientAddress(request))) {
+    const response = createApiErrorResponse(429, 'rate_limited', 'Too many feedback requests. Try again later.');
+    response.headers.set('Retry-After', String(RATE_LIMIT_RETRY_AFTER_SECONDS));
+    return response;
   }
   if (isDeclaredBodyTooLarge(request)) {
     return createPayloadTooLargeResponse();
@@ -55,9 +62,16 @@ export async function POST(request: Request) {
     return createApiErrorResponse(403, 'origin_not_allowed', 'Origin is not allowed for this project.');
   }
 
-  const feedback = await getFeedbackRepository().create(parsed.data);
-  const body: CreateFeedbackResponse = { feedback };
-  return NextResponse.json(body, { status: 201 });
+  try {
+    const feedback = await getFeedbackRepository().create(parsed.data);
+    const body: CreateFeedbackResponse = { feedback };
+    return NextResponse.json(body, { status: 201 });
+  } catch (error) {
+    if (error instanceof FeedbackStorageFullError) {
+      return createApiErrorResponse(503, 'storage_full', 'Feedback storage is full.');
+    }
+    throw error;
+  }
 }
 
 export async function GET(request: Request) {

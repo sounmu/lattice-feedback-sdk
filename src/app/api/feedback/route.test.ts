@@ -5,6 +5,7 @@ import {
   createFeedbackBody,
   createJsonRequest,
 } from '@/app/api/feedback/feedback-test-fixtures';
+import { RATE_LIMIT_MAX_REQUESTS, resetRateLimit } from '@/lib/http/rate-limit';
 import { resetMemoryFeedbackStore } from '@/lib/memory-feedback-repository';
 import type { ApiErrorResponse, CreateFeedbackResponse, FeedbackListResponse } from '@/types/feedback';
 
@@ -16,6 +17,7 @@ beforeEach(() => {
   delete process.env.FEEDBACK_ALLOWED_ORIGINS;
   delete process.env.FEEDBACK_ADMIN_TOKEN;
   resetMemoryFeedbackStore();
+  resetRateLimit();
 });
 
 describe('POST /api/feedback', () => {
@@ -79,6 +81,22 @@ describe('POST /api/feedback', () => {
     const response = await POST(request);
 
     expect(response.status).toBe(201);
+  });
+
+  it('returns 429 with Retry-After once a client exceeds the rate limit', async () => {
+    const headers = { 'x-forwarded-for': '203.0.113.7' };
+    for (let index = 0; index < RATE_LIMIT_MAX_REQUESTS; index += 1) {
+      const accepted = await POST(createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), headers));
+      expect(accepted.status).toBe(201);
+    }
+    const limited = await POST(createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), headers));
+    const otherClient = await POST(
+      createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), { 'x-forwarded-for': '203.0.113.8' }),
+    );
+
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('retry-after')).toBe('60');
+    expect(otherClient.status).toBe(201);
   });
 
   it('returns 404 project_not_found for an unknown project', async () => {

@@ -1,7 +1,8 @@
 import type { FeedbackRepository } from '@/lib/feedback-repository';
+import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import type { Feedback } from '@/types/feedback';
 
-const MAX_FEEDBACK_PER_PROJECT = 1000;
+export const MAX_FEEDBACK_PER_PROJECT = 1000;
 
 // Kept on globalThis so the store survives dev hot reload. Each list is oldest first.
 const globalForFeedbackStore = globalThis as typeof globalThis & {
@@ -22,6 +23,12 @@ export function resetMemoryFeedbackStore(): void {
 export function createMemoryFeedbackRepository(): FeedbackRepository {
   return {
     async create(input) {
+      const store = getStore();
+      const items = store.get(input.projectKey) ?? [];
+      // Refuse new items instead of evicting old ones, so a flood cannot erase existing feedback.
+      if (items.length >= MAX_FEEDBACK_PER_PROJECT) {
+        throw new FeedbackStorageFullError();
+      }
       const now = new Date().toISOString();
       const feedback: Feedback = {
         id: crypto.randomUUID(),
@@ -40,12 +47,7 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
         createdAt: now,
         updatedAt: now,
       };
-      const store = getStore();
-      const items = store.get(input.projectKey) ?? [];
       items.push(feedback);
-      while (items.length > MAX_FEEDBACK_PER_PROJECT) {
-        items.shift();
-      }
       store.set(input.projectKey, items);
       return structuredClone(feedback);
     },
