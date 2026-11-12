@@ -27,7 +27,8 @@ const EDIT_OVERLAY_ATTRIBUTE = 'data-lattice-overlay';
 const EDIT_OVERLAY_VALUE = 'edit';
 const CONFIRM_LABEL = '변경 첨부';
 const CANCEL_LABEL = '취소';
-const GUARDED_EVENTS = ['pointerdown', 'mousedown', 'click', 'keydown', 'keyup'] as const;
+const GUARDED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'touchstart', 'touchend', 'keydown', 'keyup'] as const;
+const INTERACTION_CAPTURE: AddEventListenerOptions = { capture: true, passive: false };
 
 const OVERLAY_ROOT_STYLE = `position: fixed; inset: 0; z-index: ${SDK_Z_INDEX}; pointer-events: none; margin: 0; padding: 0;`;
 const GHOST_STYLE = [
@@ -232,7 +233,7 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     window.removeEventListener('pointercancel', handlePointerEnd, true);
     window.removeEventListener('resize', handleViewportChange);
     document.removeEventListener('scroll', handleViewportChange, true);
-    for (const type of GUARDED_EVENTS) document.removeEventListener(type, handleDocumentAction, true);
+    for (const type of GUARDED_EVENTS) document.removeEventListener(type, handleDocumentAction, INTERACTION_CAPTURE);
     document.removeEventListener('keydown', handleKeyDown, true);
     root.remove();
   }
@@ -273,7 +274,7 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   window.addEventListener('pointercancel', handlePointerEnd, true);
   window.addEventListener('resize', handleViewportChange);
   document.addEventListener('scroll', handleViewportChange, true);
-  for (const type of GUARDED_EVENTS) document.addEventListener(type, handleDocumentAction, true);
+  for (const type of GUARDED_EVENTS) document.addEventListener(type, handleDocumentAction, INTERACTION_CAPTURE);
   document.addEventListener('keydown', handleKeyDown, true);
   document.body.appendChild(root);
 

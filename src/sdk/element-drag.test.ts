@@ -231,7 +231,7 @@ describe('startElementDrag', () => {
     handle.cancel();
   });
 
-  it.each(['pointerdown', 'mousedown', 'click', 'keydown', 'keyup'])('blocks original %s actions only while editing', (type) => {
+  it.each(['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'touchstart', 'touchend', 'keydown', 'keyup'])('blocks original %s actions only while editing', (type) => {
     const handle = startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
     const hostClick = createEvent(type, { target: hostElement, key: 'Enter' });
     const unrelatedClick = createEvent(type, { target: new FakeElement('A'), key: 'Enter' });
