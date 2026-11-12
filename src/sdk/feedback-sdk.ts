@@ -49,6 +49,7 @@ export class FeedbackSdk {
   private originalReplaceState: HistoryStateMethod | null = null;
   private wrappedPushState: HistoryStateMethod | null = null;
   private wrappedReplaceState: HistoryStateMethod | null = null;
+  private pendingResizeFrame: number | null = null;
 
   constructor(appOrigin: string) {
     this.appOrigin = appOrigin;
@@ -102,6 +103,9 @@ export class FeedbackSdk {
     this.panelElement.classList.add(PANEL_OPEN_CLASS_NAME);
     this.launcherButton.setAttribute('aria-expanded', 'true');
     this.isPanelOpen = true;
+    // The viewport may have changed since the iframe was created, so refresh on every open.
+    this.handleNavigation();
+    window.addEventListener('resize', this.handleResize);
   }
 
   close(): void {
@@ -111,12 +115,14 @@ export class FeedbackSdk {
     this.panelElement.classList.remove(PANEL_OPEN_CLASS_NAME);
     this.launcherButton.setAttribute('aria-expanded', 'false');
     this.isPanelOpen = false;
+    this.stopResizeTracking();
   }
 
   destroy(): void {
     window.removeEventListener('message', this.handleMessage);
     window.removeEventListener('popstate', this.handleNavigation);
     document.removeEventListener('DOMContentLoaded', this.handleDomContentLoaded);
+    this.stopResizeTracking();
     this.launcherButton?.removeEventListener('click', this.handleLauncherClick);
     this.restoreHistory();
     this.hostElement?.remove();
@@ -222,6 +228,25 @@ export class FeedbackSdk {
     this.wrappedPushState = null;
     this.wrappedReplaceState = null;
   }
+
+  private stopResizeTracking(): void {
+    window.removeEventListener('resize', this.handleResize);
+    if (this.pendingResizeFrame !== null) {
+      window.cancelAnimationFrame(this.pendingResizeFrame);
+      this.pendingResizeFrame = null;
+    }
+  }
+
+  // Coalesce resize bursts into at most one page:update per animation frame.
+  private readonly handleResize = (): void => {
+    if (this.pendingResizeFrame !== null) {
+      return;
+    }
+    this.pendingResizeFrame = window.requestAnimationFrame(() => {
+      this.pendingResizeFrame = null;
+      this.handleNavigation();
+    });
+  };
 
   private readonly handleDomContentLoaded = (): void => {
     document.removeEventListener('DOMContentLoaded', this.handleDomContentLoaded);
