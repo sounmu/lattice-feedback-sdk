@@ -16,6 +16,7 @@ const LIST_URL = `${COLLECTION_URL}?projectKey=demo`;
 beforeEach(() => {
   delete process.env.FEEDBACK_ALLOWED_ORIGINS;
   delete process.env.FEEDBACK_ADMIN_TOKEN;
+  delete process.env.FEEDBACK_CLIENT_IP_HEADER;
   resetMemoryFeedbackStore();
   resetRateLimit();
 });
@@ -86,14 +87,15 @@ describe('POST /api/feedback', () => {
   });
 
   it('returns 429 with Retry-After once a client exceeds the rate limit', async () => {
-    const headers = { 'x-forwarded-for': '203.0.113.7' };
+    process.env.FEEDBACK_CLIENT_IP_HEADER = 'x-real-ip';
+    const headers = { 'x-real-ip': '203.0.113.7' };
     for (let index = 0; index < RATE_LIMIT_MAX_REQUESTS; index += 1) {
       const accepted = await POST(createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), headers));
       expect(accepted.status).toBe(201);
     }
     const limited = await POST(createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), headers));
     const otherClient = await POST(
-      createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), { 'x-forwarded-for': '203.0.113.8' }),
+      createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), { 'x-real-ip': '203.0.113.8' }),
     );
 
     expect(limited.status).toBe(429);
