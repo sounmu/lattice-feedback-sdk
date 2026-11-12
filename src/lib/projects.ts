@@ -1,8 +1,11 @@
+import { findCapturePolicyFromJson, type CapturePolicy } from '@/lib/capture-policy';
+
 export interface Project {
   projectKey: string;
   name: string;
   allowedOrigins: string[];
   adminToken: string | null;
+  capturePolicy: CapturePolicy | null;
 }
 
 const DEMO_PROJECT_KEY = 'demo';
@@ -44,6 +47,7 @@ export function findProject(projectKey: string): Project | undefined {
     name: 'Demo project',
     allowedOrigins: getAllowedOrigins(),
     adminToken: findAdminToken(),
+    capturePolicy: findCapturePolicyFromJson(process.env.FEEDBACK_CAPTURE_POLICY),
   };
 }
 

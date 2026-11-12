@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { areFeedbackAttachmentsAllowed } from '@/lib/capture-policy';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
@@ -67,6 +68,9 @@ export async function POST(request: Request) {
   }
   if (!isOriginAllowed(project, parsed.data.hostOrigin)) {
     return createApiErrorResponse(403, 'origin_not_allowed', 'Origin is not allowed for this project.');
+  }
+  if (!areFeedbackAttachmentsAllowed(parsed.data, project.capturePolicy)) {
+    return createApiErrorResponse(403, 'capture_not_allowed', 'Captured context is not allowed for this project.');
   }
 
   try {
