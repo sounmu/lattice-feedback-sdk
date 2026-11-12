@@ -160,6 +160,17 @@ describe('startElementDrag', () => {
     handle.cancel();
   });
 
+  it.each(['pointerup', 'mouseup', 'touchend'])('stops overlay %s before reaching host ancestors', (type) => {
+    const handle = startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
+    const { root, ghost } = getOverlay();
+    const event = createEvent(type, { target: ghost });
+    root.dispatch(event);
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    handle.cancel();
+    expect(root.listenerCount).toBe(0);
+  });
+
   it.each([
     ['Escape key', () => fakeDocument.dispatch(createEvent('keydown', { key: 'Escape' }))],
     ['cancel button', () => getOverlay().cancelButton.dispatch(createEvent('click'))],
