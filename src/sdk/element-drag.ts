@@ -27,7 +27,7 @@ const EDIT_OVERLAY_ATTRIBUTE = 'data-lattice-overlay';
 const EDIT_OVERLAY_VALUE = 'edit';
 const CONFIRM_LABEL = '변경 첨부';
 const CANCEL_LABEL = '취소';
-const GUARDED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'keydown', 'keyup'] as const;
+const GUARDED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'beforeinput', 'keydown', 'keyup'] as const;
 const INTERACTION_CAPTURE: AddEventListenerOptions = { capture: true, passive: false };
 
 const OVERLAY_ROOT_STYLE = `position: fixed; inset: 0; z-index: ${SDK_Z_INDEX}; pointer-events: none; margin: 0; padding: 0;`;
@@ -164,11 +164,11 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     ghost.style.cursor = 'grab';
   }
 
-  // Clicks that would reach the original element (e.g. once the ghost has moved
-  // off it) are swallowed for the whole edit session so host actions never fire.
+  // Keep activation and field edits away from the original while preserving
+  // Escape cancellation and Tab navigation to the overlay controls.
   function handleDocumentAction(event: Event): void {
     if ((event.type === 'keydown' || event.type === 'keyup') &&
-      !('key' in event && (event.key === 'Enter' || event.key === ' '))) return;
+      'key' in event && (event.key === 'Escape' || event.key === 'Tab')) return;
     const target = event.target;
     if (target instanceof Node && !root.contains(target) &&
       target.nodeName !== 'LATTICE-FEEDBACK-ROOT' && selection.element.contains(target)) {
