@@ -19,11 +19,11 @@ export function createFeedbackBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// Same-origin by default, as sent by the widget iframe.
+// Same-origin by default: the browser marks requests from the widget iframe this way.
 export function createJsonRequest(url: string, method: string, body: unknown, headers: Record<string, string> = {}) {
   return new Request(url, {
     method,
-    headers: { 'content-type': 'application/json', origin: new URL(url).origin, ...headers },
+    headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', ...headers },
     body: JSON.stringify(body),
   });
 }

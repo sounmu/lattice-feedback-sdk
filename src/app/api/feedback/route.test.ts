@@ -47,6 +47,7 @@ describe('POST /api/feedback', () => {
 
   it('returns 403 cross_origin_request when another site posts an allowed hostOrigin', async () => {
     const request = createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), {
+      'sec-fetch-site': 'cross-site',
       origin: 'https://evil.example.com',
     });
     const response = await POST(request);
@@ -58,6 +59,7 @@ describe('POST /api/feedback', () => {
 
   it('returns 403 cross_origin_request when the allowed host page itself posts directly', async () => {
     const request = createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody(), {
+      'sec-fetch-site': 'same-site',
       origin: 'http://localhost:4000',
     });
     const response = await POST(request);
