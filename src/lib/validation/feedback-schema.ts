@@ -1,12 +1,12 @@
 import { z } from 'zod';
-import { MAX_PAGE_TITLE_LENGTH, MAX_USER_AGENT_LENGTH, truncateText } from '@/lib/feedback-limits';
+import {
+  MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS,
+  MAX_PAGE_TITLE_LENGTH, MAX_USER_AGENT_LENGTH, truncateText,
+} from '@/lib/feedback-limits';
 import type { CreateFeedbackInput, UpdateFeedbackInput } from '@/types/feedback';
 
 export const MAX_MESSAGE_LENGTH = 5000;
-export const MAX_COMMENT_LENGTH = 1000;
-export const MAX_COMMENTS = 20;
-export const MAX_EDITS = 10;
-export const MAX_FLOW_EVENTS = 200;
+export { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS } from '@/lib/feedback-limits';
 export const MAX_SELECTOR_LENGTH = 500;
 export const MAX_REPLY_LENGTH = 5000;
 
@@ -81,6 +81,7 @@ const editAttachmentSchema = z.object({
 
 const flowEventSchema = z.object({
   type: z.enum(FLOW_EVENT_TYPES),
+  navigationType: z.enum(['spa', 'document', 'reload']).optional(),
   offsetMs: z.number().int().nonnegative(),
   path: z.string().max(MAX_URL_LENGTH).refine(isPathOnly, { message: 'path must be a pathname without query or hash' }),
   targetLabel: shortTextSchema.nullable(),
@@ -90,6 +91,8 @@ const flowAttachmentSchema = z.object({
   startedAt: z.iso.datetime(),
   endedAt: z.iso.datetime(),
   events: z.array(flowEventSchema).max(MAX_FLOW_EVENTS),
+  truncated: z.boolean().optional(),
+  interrupted: z.boolean().optional(),
 });
 
 const attachmentsSchema = z

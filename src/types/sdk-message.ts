@@ -15,7 +15,7 @@
  *   - the guard from '@/lib/sdk-protocol' passes (isWidgetToHostMessage / isHostToWidgetMessage).
  * Anything else is ignored silently.
  */
-import type { FeedbackReporter, PageContext } from '@/types/feedback';
+import type { ElementTarget, FeedbackAttachments, FeedbackReporter, PageContext } from '@/types/feedback';
 
 export const MESSAGE_SOURCE = 'lattice-feedback' as const;
 export const PROTOCOL_VERSION = 1 as const;
@@ -36,11 +36,31 @@ export type InitMessage = ProtocolMessage<
 export type ReporterUpdateMessage = ProtocolMessage<'reporter:update', { reporter: FeedbackReporter | null }>;
 export type PageUpdateMessage = ProtocolMessage<'page:update', { page: PageContext }>;
 
+export type CaptureMode = 'comment' | 'edit' | 'flow';
+export type AttachmentKind = 'comments' | 'edits' | 'flow';
+export interface CaptureState {
+  enabled: boolean;
+  activeMode: CaptureMode | null;
+  selection: ElementTarget | null;
+  attachments: FeedbackAttachments;
+  flowEventCount: number;
+  errorMessage: string | null;
+}
+export type CaptureUpdateMessage = ProtocolMessage<'capture:update', CaptureState>;
+
 export type HostToWidgetMessage = InitMessage | ReporterUpdateMessage | PageUpdateMessage;
 
 export type ReadyMessage = ProtocolMessage<'ready', EmptyPayload>;
 export type CloseMessage = ProtocolMessage<'close', EmptyPayload>;
 export type SubmittedMessage = ProtocolMessage<'submitted', { feedbackId: string }>;
+export type CaptureStartMessage = ProtocolMessage<'capture:start', { mode: CaptureMode }>;
+export type CaptureCancelMessage = ProtocolMessage<'capture:cancel', EmptyPayload>;
+export type FlowStopMessage = ProtocolMessage<'flow:stop', EmptyPayload>;
+export type CommentAddMessage = ProtocolMessage<'comment:add', { comment: string }>;
+export type AttachmentRemoveMessage = ProtocolMessage<'attachment:remove', { kind: AttachmentKind; index: number }>;
+export type DraftResetMessage = ProtocolMessage<'draft:reset', EmptyPayload>;
+export type CaptureCommand = CaptureStartMessage | CaptureCancelMessage | FlowStopMessage |
+  CommentAddMessage | AttachmentRemoveMessage | DraftResetMessage;
 
 export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage;
 
