@@ -214,6 +214,7 @@ export function createFlowRecorder(options: FlowRecorderOptions): FlowRecorder {
   function dispose(): void {
     disposed = true;
     syncListeners();
+    listeners.dispose();
     if (activeRecorderDisposers.get(storageKey) === dispose) {
       activeRecorderDisposers.delete(storageKey);
     }

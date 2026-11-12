@@ -16,14 +16,19 @@ export function createFlowListeners(callbacks: {
   const onPageShow = (event: Event) => {
     if ('persisted' in event && event.persisted === true) callbacks.onRestore();
   };
+  function setActive(next: boolean) {
+    if (active === next) return;
+    active = next;
+    const method = next ? window.addEventListener : window.removeEventListener;
+    method.call(window, 'click', onClick, options);
+    method.call(window, 'input', onInput, options);
+  }
+  window.addEventListener('pageshow', onPageShow, options);
   return {
-    setActive(next: boolean) {
-      if (active === next) return;
-      active = next;
-      const method = next ? window.addEventListener : window.removeEventListener;
-      method.call(window, 'click', onClick, options);
-      method.call(window, 'input', onInput, options);
-      method.call(window, 'pageshow', onPageShow, options);
+    setActive,
+    dispose() {
+      setActive(false);
+      window.removeEventListener('pageshow', onPageShow, options);
     },
   };
 }
