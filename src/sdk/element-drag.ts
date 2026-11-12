@@ -234,7 +234,10 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     window.removeEventListener('pointercancel', handlePointerEnd, true);
     window.removeEventListener('resize', handleViewportChange);
     document.removeEventListener('scroll', handleViewportChange, true);
-    for (const type of GUARDED_EVENTS) document.removeEventListener(type, handleDocumentAction, INTERACTION_CAPTURE);
+    for (const type of GUARDED_EVENTS) {
+      document.removeEventListener(type, handleDocumentAction, INTERACTION_CAPTURE);
+      root.removeEventListener(type, stopPropagation);
+    }
     document.removeEventListener('keydown', handleKeyDown, true);
     root.remove();
   }
@@ -275,7 +278,10 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   window.addEventListener('pointercancel', handlePointerEnd, true);
   window.addEventListener('resize', handleViewportChange);
   document.addEventListener('scroll', handleViewportChange, true);
-  for (const type of GUARDED_EVENTS) document.addEventListener(type, handleDocumentAction, INTERACTION_CAPTURE);
+  for (const type of GUARDED_EVENTS) {
+    document.addEventListener(type, handleDocumentAction, INTERACTION_CAPTURE);
+    root.addEventListener(type, stopPropagation);
+  }
   document.addEventListener('keydown', handleKeyDown, true);
   document.body.appendChild(root);
 
