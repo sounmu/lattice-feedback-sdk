@@ -3,121 +3,7 @@ import type { CaptureTarget } from '@/sdk/capture-policy';
 import { startElementDrag } from '@/sdk/element-drag';
 import type { EditAttachment } from '@/types/feedback';
 
-type Listener = (event: FakeEvent) => void;
-
-interface FakeEvent {
-  type: string;
-  target: unknown;
-  button: number;
-  pointerId: number;
-  clientX: number;
-  clientY: number;
-  key: string;
-  preventDefault: ReturnType<typeof vi.fn>;
-  stopPropagation: ReturnType<typeof vi.fn>;
-  stopImmediatePropagation: ReturnType<typeof vi.fn>;
-}
-
-function isCapture(options: unknown): boolean {
-  if (typeof options === 'boolean') {
-    return options;
-  }
-  return typeof options === 'object' && options !== null && 'capture' in options && options.capture === true;
-}
-
-class FakeEventTarget {
-  private readonly listeners: { type: string; listener: Listener; capture: boolean }[] = [];
-
-  addEventListener(type: string, listener: Listener, options?: unknown): void {
-    this.listeners.push({ type, listener, capture: isCapture(options) });
-  }
-
-  removeEventListener(type: string, listener: Listener, options?: unknown): void {
-    const index = this.listeners.findIndex(
-      (entry) => entry.type === type && entry.listener === listener && entry.capture === isCapture(options),
-    );
-    if (index >= 0) {
-      this.listeners.splice(index, 1);
-    }
-  }
-
-  dispatch(event: FakeEvent): void {
-    for (const entry of this.listeners.filter((candidate) => candidate.type === event.type)) {
-      entry.listener(event);
-    }
-  }
-
-  get listenerCount(): number {
-    return this.listeners.length;
-  }
-}
-
-class FakeElement extends FakeEventTarget {
-  readonly attributes = new Map<string, string>();
-  readonly style: Record<string, string> = {};
-  readonly children: FakeElement[] = [];
-  parent: FakeElement | null = null;
-  textContent = '';
-  bounds = { left: 0, top: 0, width: 0, height: 0 };
-  setPointerCapture = vi.fn();
-
-  constructor(readonly tagName: string) {
-    super();
-  }
-
-  setAttribute(name: string, value: string): void {
-    this.attributes.set(name, value);
-  }
-
-  getAttribute(name: string): string | null {
-    return this.attributes.get(name) ?? null;
-  }
-
-  appendChild(child: FakeElement): void {
-    child.parent = this;
-    this.children.push(child);
-  }
-
-  remove(): void {
-    if (this.parent) {
-      this.parent.children.splice(this.parent.children.indexOf(this), 1);
-      this.parent = null;
-    }
-  }
-
-  contains(node: FakeElement): boolean {
-    for (let current: FakeElement | null = node; current; current = current.parent) {
-      if (current === this) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  getBoundingClientRect() {
-    return { ...this.bounds, x: this.bounds.left, y: this.bounds.top };
-  }
-
-  get allText(): string {
-    return [this.textContent, ...this.children.map((child) => child.allText)].join(' ');
-  }
-}
-
-function createEvent(type: string, overrides: Partial<FakeEvent> = {}): FakeEvent {
-  return {
-    type,
-    target: null,
-    button: 0,
-    pointerId: 1,
-    clientX: 0,
-    clientY: 0,
-    key: '',
-    preventDefault: vi.fn(),
-    stopPropagation: vi.fn(),
-    stopImmediatePropagation: vi.fn(),
-    ...overrides,
-  };
-}
+import { FakeElement, FakeEventTarget, createEvent } from '@/sdk/element-drag-test-fixtures';
 
 let fakeWindow: FakeEventTarget & { scrollX: number; scrollY: number; innerWidth: number; innerHeight: number };
 let fakeDocument: FakeEventTarget & { body: FakeElement; createElement: (tagName: string) => FakeElement };
@@ -231,7 +117,7 @@ describe('startElementDrag', () => {
     handle.cancel();
   });
 
-  it.each(['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'touchstart', 'touchend', 'keydown', 'keyup'])('blocks original %s actions only while editing', (type) => {
+  it.each(['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'keydown', 'keyup'])('blocks original %s actions only while editing', (type) => {
     const handle = startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
     const hostClick = createEvent(type, { target: hostElement, key: 'Enter' });
     const unrelatedClick = createEvent(type, { target: new FakeElement('A'), key: 'Enter' });
@@ -245,6 +131,24 @@ describe('startElementDrag', () => {
 
     handle.cancel();
     expect(fakeDocument.listenerCount).toBe(0);
+  });
+
+  it('keeps the overlay controls usable when the selected element is body', () => {
+    fakeDocument.body.bounds = { left: 0, top: 0, width: 1000, height: 800 };
+    const onComplete = vi.fn();
+    const handle = startElementDrag({ ...selection, element: document.body }, { onComplete, onCancel: vi.fn() });
+    const { ghost, confirmButton } = getOverlay();
+    const pointer = createEvent('pointerdown', { target: ghost });
+    const click = createEvent('click', { target: confirmButton });
+
+    fakeDocument.dispatch(pointer);
+    fakeDocument.dispatch(click);
+
+    expect(pointer.stopImmediatePropagation).not.toHaveBeenCalled();
+    expect(click.stopImmediatePropagation).not.toHaveBeenCalled();
+    confirmButton.dispatch(click);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    handle.cancel();
   });
 
   it.each([
