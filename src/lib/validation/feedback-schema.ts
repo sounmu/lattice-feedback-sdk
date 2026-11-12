@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_PAGE_TITLE_LENGTH, MAX_USER_AGENT_LENGTH, truncateText } from '@/lib/feedback-limits';
 import type { CreateFeedbackInput, UpdateFeedbackInput } from '@/types/feedback';
 
 export const MAX_MESSAGE_LENGTH = 5000;
@@ -11,7 +12,6 @@ export const MAX_REPLY_LENGTH = 5000;
 
 const MAX_SHORT_TEXT_LENGTH = 200;
 const MAX_URL_LENGTH = 2048;
-const MAX_USER_AGENT_LENGTH = 512;
 
 const FEEDBACK_TYPES = ['bug', 'improvement', 'question', 'other'] as const;
 const FEEDBACK_STATUSES = ['open', 'in_progress', 'resolved'] as const;
@@ -115,10 +115,11 @@ export const createFeedbackInputSchema = z.object({
   }),
   page: z.object({
     url: pageUrlSchema,
-    title: z.string().max(MAX_SHORT_TEXT_LENGTH),
+    // Metadata the reporter cannot edit is truncated, never a reason to reject feedback.
+    title: z.string().transform((value) => truncateText(value, MAX_PAGE_TITLE_LENGTH)),
     viewportWidth: viewportSizeSchema,
     viewportHeight: viewportSizeSchema,
-    userAgent: z.string().max(MAX_USER_AGENT_LENGTH),
+    userAgent: z.string().transform((value) => truncateText(value, MAX_USER_AGENT_LENGTH)),
   }),
   attachments: attachmentsSchema,
 });

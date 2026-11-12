@@ -99,6 +99,18 @@ describe('POST /api/feedback', () => {
     expect(otherClient.status).toBe(201);
   });
 
+  it('accepts a page title longer than 200 characters and stores it truncated', async () => {
+    const body = createFeedbackBody();
+    const longTitle = 't'.repeat(201);
+    const response = await POST(
+      createJsonRequest(COLLECTION_URL, 'POST', { ...body, page: { ...body.page, title: longTitle } }),
+    );
+    const created = (await response.json()) as CreateFeedbackResponse;
+
+    expect(response.status).toBe(201);
+    expect(created.feedback.page.title).toBe('t'.repeat(200));
+  });
+
   it('returns 404 project_not_found for an unknown project', async () => {
     const response = await POST(createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody({ projectKey: 'nope' })));
     const body = (await response.json()) as ApiErrorResponse;
