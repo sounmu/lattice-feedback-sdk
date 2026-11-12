@@ -3,17 +3,10 @@
 import { useState } from 'react';
 
 import { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS } from '@/lib/feedback-limits';
-import type { EditAttachment, ElementTarget, FeedbackAttachments, FlowEventType } from '@/types/feedback';
+import type { EditAttachment, ElementTarget, FlowEventType } from '@/types/feedback';
+import type { AttachmentKind, CaptureMode, CaptureState } from '@/types/sdk-message';
 
-type CaptureMode = 'comment' | 'edit' | 'flow';
-
-type AttachmentKind = 'comments' | 'edits' | 'flow';
-
-interface CaptureControlsProps {
-  attachments: FeedbackAttachments;
-  activeMode: CaptureMode | null;
-  selection: ElementTarget | null;
-  enabled: boolean;
+interface CaptureControlsProps extends Pick<CaptureState, 'attachments' | 'activeMode' | 'selection' | 'enabled'> {
   disabled: boolean;
   onStart: (mode: CaptureMode) => void;
   onCancel: () => void;
