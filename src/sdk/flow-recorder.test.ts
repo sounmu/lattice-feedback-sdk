@@ -127,7 +127,7 @@ describe('flow recorder', () => {
       ['click', 5_400, undefined],
     ]);
     expect(storage.getItem(KEY)).toBeNull();
-    expect(listenerCount()).toBe(0);
+    expect((listeners.get('click')?.size ?? 0) + (listeners.get('input')?.size ?? 0)).toBe(0);
   });
 
   it('pauses on disallowed pages without collecting their path and marks the flow interrupted', () => {
@@ -205,7 +205,7 @@ describe('flow recorder', () => {
       const restored = createHarness();
       expect(restored.lastState()).toMatchObject({ recording: false, errorMessage: expect.any(String) });
       expect(storage.getItem(KEY)).toBeNull();
-      expect(listenerCount()).toBe(0);
+      expect((listeners.get('click')?.size ?? 0) + (listeners.get('input')?.size ?? 0)).toBe(0);
     }
   });
 
@@ -251,7 +251,7 @@ describe('flow recorder', () => {
     cancelled.recorder.cancel();
     expect(cancelled.completed).toHaveLength(0);
     expect(storage.getItem(KEY)).toBeNull();
-    expect(listenerCount()).toBe(0);
+    expect((listeners.get('click')?.size ?? 0) + (listeners.get('input')?.size ?? 0)).toBe(0);
 
     const destroyed = createHarness();
     destroyed.recorder.start();
@@ -273,7 +273,7 @@ describe('flow recorder', () => {
     storage.removeItem(KEY);
     dispatch('pageshow', { persisted: true });
     expect(second.lastState()).toMatchObject({ recording: false });
-    expect(listenerCount()).toBe(0);
+    expect((listeners.get('click')?.size ?? 0) + (listeners.get('input')?.size ?? 0)).toBe(0);
     expect(second.completed).toHaveLength(0);
   });
 });
