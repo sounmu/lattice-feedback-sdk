@@ -147,7 +147,7 @@ describe('element selection', () => {
   it('swallows host pointer actions, including on disallowed targets', () => {
     const { onSelect } = createHarness();
     const other = new FakeElement();
-    for (const type of ['pointerdown', 'mousedown', 'click']) {
+    for (const type of ['pointerdown', 'mousedown', 'click', 'touchstart', 'touchend']) {
       const event = dispatch(type, other);
       expect(event.defaultPrevented).toBe(true);
       expect(event.propagationStopped).toBe(true);
@@ -186,6 +186,17 @@ describe('element selection', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith(selection);
+  });
+
+  it('selects on touchend without allowing the host touch action', () => {
+    const { allowed, selection, onSelect } = createHarness();
+    const event = dispatch('touchend', allowed);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(event.propagationStopped).toBe(true);
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(selection);
+    expect(listenerCount()).toBe(0);
+    expect(overlay.removed).toBe(true);
   });
 
   it('cancels on Escape with cleanup and a single onCancel', () => {

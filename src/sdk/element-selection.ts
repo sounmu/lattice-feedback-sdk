@@ -13,10 +13,10 @@ export interface ElementSelection {
 
 const SDK_ELEMENTS = 'lattice-feedback-root, [data-lattice-overlay]';
 // Host handlers may react to any of these, so all of them are swallowed while selecting.
-const GUARDED_POINTER_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick'] as const;
+const GUARDED_POINTER_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend'] as const;
 const GUARDED_KEY_EVENTS = ['keydown', 'keyup'] as const;
 const ACTIVATION_KEYS = new Set(['Enter', ' ', 'Spacebar']);
-const CAPTURE: AddEventListenerOptions = { capture: true };
+const CAPTURE: AddEventListenerOptions = { capture: true, passive: false };
 const PASSIVE_CAPTURE: AddEventListenerOptions = { capture: true, passive: true };
 const OVERLAY_STYLE = [
   'position: fixed',
@@ -78,12 +78,12 @@ export function startElementSelection(options: ElementSelectionOptions): Element
     }
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (event.type === 'pointerdown') {
+    if (event.type === 'pointerdown' || event.type === 'touchstart') {
       // Touch has no hover, so show the outline as soon as the finger lands.
       highlight(event.target);
       return;
     }
-    if (event.type !== 'click') {
+    if (event.type !== 'click' && event.type !== 'touchend') {
       return;
     }
     const selection = options.findTarget(event.target);
