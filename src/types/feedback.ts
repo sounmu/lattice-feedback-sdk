@@ -56,6 +56,7 @@ export type FlowEventType = 'click' | 'navigation' | 'input';
 
 export interface FlowEvent {
   type: FlowEventType;
+  navigationType?: 'spa' | 'document' | 'reload';
   /** Milliseconds since FlowAttachment.startedAt. */
   offsetMs: number;
   /** location.pathname only, never query or hash. */
@@ -70,6 +71,8 @@ export interface FlowAttachment {
   /** ISO timestamp. */
   endedAt: string;
   events: FlowEvent[];
+  truncated?: boolean;
+  interrupted?: boolean;
 }
 
 export interface FeedbackAttachments {
