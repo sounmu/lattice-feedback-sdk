@@ -27,7 +27,7 @@ const EDIT_OVERLAY_ATTRIBUTE = 'data-lattice-overlay';
 const EDIT_OVERLAY_VALUE = 'edit';
 const CONFIRM_LABEL = '변경 첨부';
 const CANCEL_LABEL = '취소';
-const GUARDED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'touchstart', 'touchend', 'keydown', 'keyup'] as const;
+const GUARDED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'keydown', 'keyup'] as const;
 const INTERACTION_CAPTURE: AddEventListenerOptions = { capture: true, passive: false };
 
 const OVERLAY_ROOT_STYLE = `position: fixed; inset: 0; z-index: ${SDK_Z_INDEX}; pointer-events: none; margin: 0; padding: 0;`;
@@ -170,7 +170,8 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     if ((event.type === 'keydown' || event.type === 'keyup') &&
       !('key' in event && (event.key === 'Enter' || event.key === ' '))) return;
     const target = event.target;
-    if (target instanceof Node && selection.element.contains(target)) {
+    if (target instanceof Node && !root.contains(target) &&
+      target.nodeName !== 'LATTICE-FEEDBACK-ROOT' && selection.element.contains(target)) {
       event.preventDefault();
       event.stopImmediatePropagation();
     }
