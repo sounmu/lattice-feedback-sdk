@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
+import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
 import { BodyTooLargeError, readBodyTextWithLimit } from '@/lib/http/read-body';
@@ -76,6 +77,9 @@ export async function POST(request: Request) {
     if (error instanceof FeedbackStorageFullError) {
       return createApiErrorResponse(503, 'storage_full', 'Feedback storage is full.');
     }
+    if (error instanceof FeedbackStorageUnavailableError) {
+      return createApiErrorResponse(503, 'storage_unavailable', error.message);
+    }
     throw error;
   }
 }
@@ -90,7 +94,14 @@ export async function GET(request: Request) {
     return createApiErrorResponse(401, 'unauthorized', 'Admin authorization is required.');
   }
 
-  const items = await getFeedbackRepository().findMany(project.projectKey);
-  const body: FeedbackListResponse = { items };
-  return NextResponse.json(body);
+  try {
+    const items = await getFeedbackRepository().findMany(project.projectKey);
+    const body: FeedbackListResponse = { items };
+    return NextResponse.json(body);
+  } catch (error) {
+    if (error instanceof FeedbackStorageUnavailableError) {
+      return createApiErrorResponse(503, 'storage_unavailable', error.message);
+    }
+    throw error;
+  }
 }
