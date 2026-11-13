@@ -6,7 +6,12 @@ import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
 import { addMarkedScreen, type MarkedScreens } from '@/lib/marked-screens';
 import { isCaptureCurrent, type CaptureSource } from '@/lib/screen-capture-generation';
 import { findCommentPins, findEditMoves, isReplayTruncated, reconcileScreenMarks, type LiveMarkKeys } from '@/lib/screen-snapshot';
-import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
+import {
+  MAX_SCREEN_SNAPSHOT_BYTES,
+  MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES,
+  MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK,
+} from '@/lib/feedback-limits';
+import { GZIP_MEDIA_TYPE, gzipBytes, isGzipSupported } from '@/lib/gzip';
 import type {
   CreateScreenSnapshotInput,
   CreateScreenSnapshotResponse,
@@ -129,13 +134,19 @@ function getUploadErrorMessage(status: number): string {
 
 async function createSnapshot(owner: UploadOwner, screen: CapturedScreen, assetHashes: string[]): Promise<ScreenSnapshotSummary> {
   const input: CreateScreenSnapshotInput = { ...owner, ...screen, assetHashes };
-  const body = new TextEncoder().encode(JSON.stringify(input));
+  const plainBody = new TextEncoder().encode(JSON.stringify(input));
+  if (plainBody.length > MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES) {
+    throw new UploadFailedError(PAYLOAD_TOO_LARGE_STATUS);
+  }
+  // Sent compressed where the browser can, so a long Flow replay fits the upload limit.
+  const isCompressed = isGzipSupported();
+  const body = isCompressed ? await gzipBytes(plainBody) : plainBody;
   if (body.length > MAX_SCREEN_SNAPSHOT_BYTES) {
     throw new UploadFailedError(PAYLOAD_TOO_LARGE_STATUS);
   }
   const response = await sendOrThrow('/api/snapshots', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': isCompressed ? GZIP_MEDIA_TYPE : 'application/json' },
     body,
   });
   return ((await response.json()) as CreateScreenSnapshotResponse).snapshot;

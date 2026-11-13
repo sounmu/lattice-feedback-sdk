@@ -14,6 +14,7 @@ import {
   type PinBox,
 } from '@/components/admin/ScreenMarkOverlay';
 import { MAX_REPLAY_DURATION_MS } from '@/lib/feedback-limits';
+import { GZIP_MEDIA_TYPE, isGzipBody, isGzipSupported } from '@/lib/gzip';
 import { findCommentPins, findEditMoves, hasReplayEvents, isReplayTruncated } from '@/lib/screen-snapshot';
 import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
 import type {
@@ -410,6 +411,15 @@ interface ScreenReplayProps {
   token: string;
 }
 
+// A long Flow replay arrives as a gzip file, because the platform limits how large a response may be.
+async function readSnapshotResponse(response: Response): Promise<ScreenSnapshotDetailResponse> {
+  if (!response.body || !isGzipBody(response.headers)) {
+    return (await response.json()) as ScreenSnapshotDetailResponse;
+  }
+  const unpacked = response.body.pipeThrough(new DecompressionStream('gzip'));
+  return (await new Response(unpacked).json()) as ScreenSnapshotDetailResponse;
+}
+
 // Asset files need the admin token, so they are fetched here and handed to the replay as blob: URLs.
 async function fetchAssetUrl(hash: string, projectKey: string, token: string): Promise<string | null> {
   try {
@@ -727,14 +737,14 @@ export function ScreenSnapshotViewer() {
     async function load() {
       try {
         const response = await fetch(`/api/snapshots/${encodeURIComponent(id)}?projectKey=${encodeURIComponent(projectKey)}`, {
-          headers: { authorization: `Bearer ${token}` },
+          headers: { authorization: `Bearer ${token}`, accept: isGzipSupported() ? GZIP_MEDIA_TYPE : 'application/json' },
           signal: controller.signal,
         });
         if (!response.ok) {
           setResult({ key: requestKey, status: response.status });
           return;
         }
-        const body = (await response.json()) as ScreenSnapshotDetailResponse;
+        const body = await readSnapshotResponse(response);
         setResult({ key: requestKey, snapshot: body.snapshot });
       } catch {
         if (!controller.signal.aborted) {

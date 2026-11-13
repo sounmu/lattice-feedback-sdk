@@ -31,7 +31,7 @@ vi.mock('@/sdk/screen-capture', () => ({
 }));
 
 const { startReplayRecording } = await import('@/sdk/flow-replay-recorder');
-const { MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS } = await import('@/lib/feedback-limits');
+const { MAX_PLAIN_REPLAY_BYTES, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS } = await import('@/lib/feedback-limits');
 
 const START = 1_000_000;
 
@@ -121,6 +121,26 @@ it('stops before page changes outgrow an upload, keeping the first snapshot and 
   const result = recording.stop();
 
   expect(recorder.stops).toBe(1);
+  expect(result?.events.map((event) => event.type)).toEqual([4, 2, 3, 3, 3]);
+  expect(result?.truncated).toBe(true);
+});
+
+it('stops within a plain upload when the browser cannot compress', async () => {
+  vi.stubGlobal('CompressionStream', undefined);
+  page.images = [];
+  recorder.stops = 0;
+  // Three of these fit a plain upload; with compression all five would fit.
+  const text = 'x'.repeat(Math.floor(MAX_PLAIN_REPLAY_BYTES / 3.5));
+  const recording = startReplayRecording('lattice-feedback-root');
+  recorder.emit({ type: 4, timestamp: START, data: {} });
+  recorder.emit({ type: 2, timestamp: START, data: {} });
+  for (let index = 0; index < 5; index += 1) {
+    recorder.emit({ type: 3, timestamp: START + 1, data: { source: 0, texts: [{ id: 1, value: text }] } });
+  }
+  await Promise.resolve();
+
+  const result = recording.stop();
+
   expect(result?.events.map((event) => event.type)).toEqual([4, 2, 3, 3, 3]);
   expect(result?.truncated).toBe(true);
 });

@@ -4,11 +4,13 @@ import { record } from '@rrweb/record';
 
 import {
   MAX_PAGE_TITLE_LENGTH,
+  MAX_PLAIN_REPLAY_BYTES,
   MAX_REPLAY_BYTES,
   MAX_REPLAY_DURATION_MS,
   MAX_REPLAY_EVENTS,
   truncateText,
 } from '@/lib/feedback-limits';
+import { isGzipSupported } from '@/lib/gzip';
 import { RRWEB_INCREMENTAL_EVENT_TYPE } from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
 import { findLiveImageSource } from '@/sdk/live-image-source';
@@ -66,6 +68,7 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
   const liveImageSources = new Map<number, string>();
   const encoder = new TextEncoder();
   let recordedBytes = 0;
+  const maxReplayBytes = isGzipSupported() ? MAX_REPLAY_BYTES : MAX_PLAIN_REPLAY_BYTES;
 
   // The first file seen for an image is kept, so the replay starts with what the reporter saw.
   function keepLiveImage(id: number, element: unknown): void {
@@ -103,7 +106,7 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
       const bytes = encoder.encode(JSON.stringify(recorded)).length;
       // The first snapshot is always kept; page changes stop once the screen would no longer fit an upload,
       // so a long recording is saved cut short instead of being rejected whole.
-      const isOverBytes = isChange && recordedBytes + bytes > MAX_REPLAY_BYTES;
+      const isOverBytes = isChange && recordedBytes + bytes > maxReplayBytes;
       if (events.length >= MAX_REPLAY_EVENTS || recorded.timestamp - startedAtMs > MAX_REPLAY_DURATION_MS || isOverBytes) {
         // Nothing more can be saved, so rrweb stops observing the page; the events so far are kept.
         // Stopped after this callback returns, since rrweb may still be inside its own emit loop.
