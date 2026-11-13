@@ -2,7 +2,7 @@
 // rrweb-snapshot serializes the DOM and applied CSS without patching or mutating the host page.
 // Never collected (AGENTS.md section 5): password values, anything marked data-lattice-block or
 // data-lattice-mask, script contents, and the SDK's own UI.
-import { snapshot } from 'rrweb-snapshot';
+import { createMirror, snapshot } from 'rrweb-snapshot';
 
 import {
   MAX_PAGE_TITLE_LENGTH,
@@ -14,6 +14,8 @@ import {
 import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_META_EVENT_TYPE, SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
 import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError } from '@/sdk/snapshot-assets';
+import { findLiveImageSource } from '@/sdk/live-image-source';
+import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
 
@@ -91,7 +93,9 @@ function findUsedCssImageUrls(excludedSelector: string): Set<string> {
 export async function captureScreen(sdkSelector: string): Promise<ScreenCapture> {
   const capturedAt = Date.now();
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
+  const mirror = createMirror();
   const node = snapshot(document, {
+    mirror,
     blockSelector: excludedSelector,
     maskTextSelector: MASKED_SELECTOR,
     // Every input value passes through maskInputFn, which hides only the ones that must not be stored.
@@ -107,6 +111,7 @@ export async function captureScreen(sdkSelector: string): Promise<ScreenCapture>
     throw new Error('The page could not be serialized.');
   }
   removeInlineScripts(node);
+  removeHiddenValues(node);
 
   // Read together with the DOM, before any await: the reporter may scroll or navigate while files download.
   const url = getPageUrl(window.location.href);
@@ -131,6 +136,13 @@ export async function captureScreen(sdkSelector: string): Promise<ScreenCapture>
     usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
     fetchAsset: fetchSameOriginAsset,
     maxDurationMs: ASSET_COLLECTION_DURATION_MS,
+    matchesMedia: (query) => window.matchMedia(query).matches,
+    findLiveImage: (serialized) => {
+      if (serialized.id === undefined) {
+        return null;
+      }
+      return findLiveImageSource(mirror.getNode(serialized.id), excludedSelector);
+    },
     maxAssetBytes: MAX_SNAPSHOT_ASSET_BYTES,
     maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
     maxAssetCount: MAX_SNAPSHOT_ASSETS,

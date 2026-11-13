@@ -157,3 +157,143 @@ it('stops downloading at the deadline and reports the rest as timed out', async 
   ]);
   expect(fetchAsset).toHaveBeenCalledTimes(2);
 });
+
+it('saves the responsive image the browser picked with its own descriptor, and drops other candidates', async () => {
+  const dense: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 1,
+    attributes: { src: `${ORIGIN}/small.png`, srcset: `${ORIGIN}/small.png 1x, ${ORIGIN}/large.png 2x` },
+    childNodes: [],
+  };
+  const widthBased: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 3,
+    attributes: { src: `${ORIGIN}/small.png`, srcset: `${ORIGIN}/small.png 400w, ${ORIGIN}/large.png 800w`, sizes: '50vw' },
+    childNodes: [],
+  };
+  const source: SnapshotNode = {
+    type: 2,
+    tagName: 'source',
+    attributes: { srcset: `${ORIGIN}/wide.webp 1600w`, sizes: '100vw', media: '(min-width: 800px)' },
+    childNodes: [],
+  };
+  const fallback: SnapshotNode = { type: 2, tagName: 'img', id: 2, attributes: { src: `${ORIGIN}/fallback.png` }, childNodes: [] };
+  const picture: SnapshotNode = { type: 2, tagName: 'picture', attributes: {}, childNodes: [source, fallback] };
+  const blocked: SnapshotNode = { type: 2, tagName: 'img', id: 4, attributes: { rr_width: '100px', rr_height: '50px' }, childNodes: [] };
+  const live: Record<number, string> = { 1: `${ORIGIN}/large.png`, 2: `${ORIGIN}/wide.webp`, 3: `${ORIGIN}/large.png` };
+  const options = createOptions({
+    fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })),
+    findLiveImage: (node) => (node.id === undefined ? null : (live[node.id] ?? null)),
+  });
+
+  await extractSnapshotAssets(createDocument(dense, widthBased, picture, blocked), options);
+
+  const large = createAssetReference(0);
+  const wide = createAssetReference(1);
+  expect(options.fetchAsset).toHaveBeenCalledTimes(2);
+  expect(options.fetchAsset).not.toHaveBeenCalledWith(`${ORIGIN}/small.png`, expect.any(Number), expect.any(Number));
+  expect(dense.attributes).toEqual({ srcset: `${large} 2x` });
+  expect(widthBased.attributes).toEqual({ srcset: `${large} 800w`, sizes: '50vw' });
+  expect(fallback.attributes).toEqual({ srcset: `${wide} 1600w`, sizes: '100vw' });
+  expect(source.attributes).toEqual({ sizes: '100vw', media: '(min-width: 800px)' });
+  expect(blocked.attributes).toEqual({ rr_width: '100px', rr_height: '50px' });
+});
+
+it('keeps the default sizes of a picture source that has none instead of borrowing the img sizes', async () => {
+  const source: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/wide.png 800w` }, childNodes: [] };
+  const fallback: SnapshotNode = { type: 2, tagName: 'img', id: 1, attributes: { src: `${ORIGIN}/fallback.png`, sizes: '50vw' }, childNodes: [] };
+  const options = createOptions({
+    fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })),
+    findLiveImage: () => `${ORIGIN}/wide.png`,
+  });
+
+  await extractSnapshotAssets(
+    createDocument({ type: 2, tagName: 'picture', attributes: {}, childNodes: [source, fallback] }),
+    options,
+  );
+
+  expect(fallback.attributes).toEqual({ srcset: `${createAssetReference(0)} 800w` });
+});
+
+it('takes the descriptor from the picture source the browser activated, even when the fallback lists the same file', async () => {
+  const narrow: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/shared.png 400w`, sizes: '30vw', media: '(max-width: 600px)' }, childNodes: [] };
+  const wide: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/shared.png 800w`, sizes: '100vw', media: '(min-width: 800px)' }, childNodes: [] };
+  const fallback: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 1,
+    attributes: { src: `${ORIGIN}/fallback.png`, srcset: `${ORIGIN}/shared.png 800w`, sizes: '50vw' },
+    childNodes: [],
+  };
+  const picture: SnapshotNode = { type: 2, tagName: 'picture', attributes: {}, childNodes: [narrow, wide, fallback] };
+
+  await extractSnapshotAssets(
+    createDocument(picture),
+    createOptions({
+      fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })),
+      findLiveImage: () => `${ORIGIN}/shared.png`,
+      matchesMedia: (query) => query === '(min-width: 800px)',
+    }),
+  );
+
+  expect(fallback.attributes).toEqual({ srcset: `${createAssetReference(0)} 800w`, sizes: '100vw' });
+});
+
+it('skips a source that does not list the shown file and keeps the active source dimensions', async () => {
+  const unsupported: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/photo.avif 2x`, type: 'image/avif' }, childNodes: [] };
+  const square: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/square.png 1x`, width: '100', height: '100' }, childNodes: [] };
+  const fallback: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 1,
+    attributes: { src: `${ORIGIN}/wide.png`, srcset: `${ORIGIN}/large.jpg 2x`, width: '300', height: '150' },
+    childNodes: [],
+  };
+  const options = (shown: string) =>
+    createOptions({ fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })), findLiveImage: () => shown });
+
+  const first = structuredClone(fallback);
+  await extractSnapshotAssets(createDocument({ type: 2, tagName: 'picture', attributes: {}, childNodes: [structuredClone(unsupported), first] }), options(`${ORIGIN}/large.jpg`));
+  expect(first.attributes).toEqual({ srcset: `${createAssetReference(0)} 2x`, width: '300', height: '150' });
+
+  const second = structuredClone(fallback);
+  await extractSnapshotAssets(createDocument({ type: 2, tagName: 'picture', attributes: {}, childNodes: [square, second] }), options(`${ORIGIN}/square.png`));
+  expect(second.attributes).toEqual({ srcset: `${createAssetReference(0)} 1x`, width: '100', height: '100' });
+});
+
+it('matches a srcset candidate whose URL contains commas', async () => {
+  const shown = `${ORIGIN}/resize/width=200,quality=80/image.png`;
+  const image: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 1,
+    attributes: { src: `${ORIGIN}/small.png`, srcset: `${ORIGIN}/small.png 1x, ${shown} 2x` },
+    childNodes: [],
+  };
+
+  await extractSnapshotAssets(
+    createDocument(image),
+    createOptions({ fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })), findLiveImage: () => shown }),
+  );
+
+  expect(image.attributes).toEqual({ srcset: `${createAssetReference(0)} 2x` });
+});
+
+it('decides the active picture source before downloading, so a later viewport change does not matter', async () => {
+  let isWide = true;
+  const wide: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/wide.png 2x`, media: '(min-width: 800px)' }, childNodes: [] };
+  const fallback: SnapshotNode = { type: 2, tagName: 'img', id: 1, attributes: { src: `${ORIGIN}/fallback.png` }, childNodes: [] };
+  const fetchAsset = vi.fn(async () => {
+    isWide = false;
+    return new Blob(['img'], { type: 'image/png' });
+  });
+
+  await extractSnapshotAssets(
+    createDocument({ type: 2, tagName: 'picture', attributes: {}, childNodes: [wide, fallback] }),
+    createOptions({ fetchAsset, findLiveImage: () => `${ORIGIN}/wide.png`, matchesMedia: () => isWide }),
+  );
+
+  expect(fallback.attributes).toEqual({ srcset: `${createAssetReference(0)} 2x` });
+});

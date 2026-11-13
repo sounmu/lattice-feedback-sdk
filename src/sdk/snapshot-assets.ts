@@ -12,6 +12,7 @@ type SnapshotAttributes = Record<string, string | number | boolean | null>;
 /** The part of an rrweb serialized node this module reads and rewrites. */
 export interface SnapshotNode {
   type: number;
+  id?: number;
   tagName?: string;
   attributes?: SnapshotAttributes;
   childNodes?: SnapshotNode[];
@@ -31,6 +32,10 @@ export interface ExtractSnapshotAssetsOptions {
   /** Downloads stop at this deadline so the capture answers the widget in time; the rest are reported as timed out. */
   maxDurationMs: number;
   now?: () => number;
+  /** The image the browser actually shows for an <img>, picked from srcset or <picture>. Null for excluded images. */
+  findLiveImage?: (node: SnapshotNode) => string | null;
+  /** Evaluates a <source media> query the way the page does. Without it every source counts as matching. */
+  matchesMedia?: (query: string) => boolean;
   maxAssetBytes: number;
   maxTotalBytes: number;
   maxAssetCount: number;
@@ -53,6 +58,37 @@ const FONT_FACE_PATTERN = /@font-face\s*\{[^}]*\}/g;
 const FONT_FAMILY_PATTERN = /font-family\s*:\s*([^;}]+)/i;
 const CSS_URL_PATTERN = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/g;
 
+// The descriptor ("2x", "800w") of the srcset candidate for url, '' for a candidate without one, null when absent.
+// Follows the HTML srcset parser: a URL is a run of non-whitespace and may contain commas; only a comma
+// after the URL (or trailing it) separates candidates.
+function findSrcsetDescriptor(srcset: unknown, url: string): string | null {
+  if (typeof srcset !== 'string') {
+    return null;
+  }
+  let position = 0;
+  while (position < srcset.length) {
+    position += /^[\s,]*/.exec(srcset.slice(position))?.[0].length ?? 0;
+    let candidateUrl = /^\S*/.exec(srcset.slice(position))?.[0] ?? '';
+    if (candidateUrl === '') {
+      break;
+    }
+    position += candidateUrl.length;
+    let descriptor = '';
+    if (candidateUrl.endsWith(',')) {
+      candidateUrl = candidateUrl.replace(/,+$/, '');
+    } else {
+      const commaIndex = srcset.indexOf(',', position);
+      const end = commaIndex === -1 ? srcset.length : commaIndex;
+      descriptor = srcset.slice(position, end).trim();
+      position = end + 1;
+    }
+    if (candidateUrl === url) {
+      return descriptor;
+    }
+  }
+  return null;
+}
+
 export function normalizeFontFamily(value: string): string {
   return value.trim().replace(/^["']|["']$/g, '').toLowerCase();
 }
@@ -73,7 +109,12 @@ export async function extractSnapshotAssets(
   const isSameOrigin = (url: string): boolean => url.startsWith(`${options.pageOrigin}/`);
   // Each entry is an attribute holding CSS text: a serialized stylesheet (_cssText) or an inline style.
   const cssAttributes: { attributes: SnapshotAttributes; name: string }[] = [];
-  const imageAttributes: SnapshotAttributes[] = [];
+  const images: {
+    attributes: SnapshotAttributes;
+    source: string;
+    sources: SnapshotNode[];
+    activeSource: SnapshotNode | undefined;
+  }[] = [];
   const urls = new Set<string>();
 
   function collectCssImages(attributes: SnapshotAttributes, name: string, cssText: string): void {
@@ -85,7 +126,7 @@ export async function extractSnapshotAssets(
     }
   }
 
-  function visit(node: SnapshotNode): void {
+  function visit(node: SnapshotNode, parent: SnapshotNode | null): void {
     const attributes = node.attributes;
     if (attributes) {
       if (typeof attributes.style === 'string') {
@@ -106,15 +147,28 @@ export async function extractSnapshotAssets(
           }
         }
       }
-      const source = attributes.src;
-      if (node.tagName === 'img' && typeof source === 'string' && isSameOrigin(source)) {
-        imageAttributes.push(attributes);
-        urls.add(source);
+      if (node.tagName === 'img') {
+        const source = options.findLiveImage?.(node) ?? attributes.src;
+        if (typeof source === 'string' && isSameOrigin(source)) {
+          const sources = parent?.tagName === 'picture'
+            ? (parent.childNodes ?? []).filter((candidate) => candidate.tagName === 'source')
+            : [];
+          // Resolved now, before any download, so a later resize or rotation cannot change which source was shown.
+          // Like the browser, the first media-matching <source> is active; one whose type the browser skipped never
+          // lists the shown file, so only a matching source that lists it counts. Otherwise the <img> applies.
+          const activeSource = sources.find(({ attributes: sourceAttributes }) => {
+            const media = sourceAttributes?.media;
+            const matchesMedia = typeof media !== 'string' || !options.matchesMedia || options.matchesMedia(media);
+            return matchesMedia && findSrcsetDescriptor(sourceAttributes?.srcset, source) !== null;
+          });
+          images.push({ attributes, source, sources, activeSource });
+          urls.add(source);
+        }
       }
     }
-    node.childNodes?.forEach(visit);
+    node.childNodes?.forEach((child) => visit(child, node));
   }
-  visit(root);
+  visit(root, null);
 
   // One download at a time, each capped by the remaining budget, so the live page never buffers more than the budget.
   const assetFiles: Blob[] = [];
@@ -167,11 +221,43 @@ export async function extractSnapshotAssets(
         },
       );
     }
-    for (const attributes of imageAttributes) {
-      const reference = references.get(String(attributes.src));
-      if (reference) {
+    // The saved file is the one the browser showed. It keeps its own srcset descriptor (2x, 800w), so the
+    // browser applies the same density and the page's CSS sizes it exactly as before; other candidates are dropped.
+    for (const { attributes, source, sources, activeSource } of images) {
+      const reference = references.get(source);
+      if (!reference) {
+        continue;
+      }
+      const candidateAttributes = activeSource?.attributes ?? attributes;
+      const descriptor = findSrcsetDescriptor(candidateAttributes.srcset, source);
+      const chosen = descriptor === null ? undefined : { candidateAttributes, descriptor };
+      // Dimension attributes on the active source override the img's; they stop applying once its srcset is gone.
+      for (const dimension of ['width', 'height']) {
+        const value = activeSource?.attributes?.[dimension];
+        if (value !== undefined) {
+          attributes[dimension] = value;
+        }
+      }
+      for (const candidate of sources) {
+        if (candidate.attributes) {
+          delete candidate.attributes.srcset;
+        }
+      }
+      if (chosen?.descriptor) {
+        // src would count as an extra 1x candidate and win on a 1x viewer, so the single candidate stands alone.
+        delete attributes.src;
+        attributes.srcset = `${reference} ${chosen.descriptor}`;
+        // A candidate's sizes never comes from another element: without its own, the default is 100vw.
+        const sizes = chosen.candidateAttributes.sizes;
+        if (typeof sizes === 'string') {
+          attributes.sizes = sizes;
+        } else {
+          delete attributes.sizes;
+        }
+      } else {
         attributes.src = reference;
         delete attributes.srcset;
+        delete attributes.sizes;
       }
     }
   }
