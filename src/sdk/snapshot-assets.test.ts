@@ -216,3 +216,27 @@ it('keeps the default sizes of a picture source that has none instead of borrowi
 
   expect(fallback.attributes).toEqual({ srcset: `${createAssetReference(0)} 800w` });
 });
+
+it('takes the descriptor from the picture source the browser activated, even when the fallback lists the same file', async () => {
+  const narrow: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/shared.png 400w`, sizes: '30vw', media: '(max-width: 600px)' }, childNodes: [] };
+  const wide: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/shared.png 800w`, sizes: '100vw', media: '(min-width: 800px)' }, childNodes: [] };
+  const fallback: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 1,
+    attributes: { src: `${ORIGIN}/fallback.png`, srcset: `${ORIGIN}/shared.png 800w`, sizes: '50vw' },
+    childNodes: [],
+  };
+  const picture: SnapshotNode = { type: 2, tagName: 'picture', attributes: {}, childNodes: [narrow, wide, fallback] };
+
+  await extractSnapshotAssets(
+    createDocument(picture),
+    createOptions({
+      fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })),
+      findLiveImage: () => `${ORIGIN}/shared.png`,
+      matchesMedia: (query) => query === '(min-width: 800px)',
+    }),
+  );
+
+  expect(fallback.attributes).toEqual({ srcset: `${createAssetReference(0)} 800w`, sizes: '100vw' });
+});

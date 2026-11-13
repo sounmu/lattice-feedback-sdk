@@ -34,6 +34,8 @@ export interface ExtractSnapshotAssetsOptions {
   now?: () => number;
   /** The image the browser actually shows for an <img>, picked from srcset or <picture>. Null for excluded images. */
   findLiveImage?: (node: SnapshotNode) => string | null;
+  /** Evaluates a <source media> query the way the page does. Without it every source counts as matching. */
+  matchesMedia?: (query: string) => boolean;
   maxAssetBytes: number;
   maxTotalBytes: number;
   maxAssetCount: number;
@@ -198,9 +200,14 @@ export async function extractSnapshotAssets(
         continue;
       }
       const sources = (picture?.childNodes ?? []).filter((candidate) => candidate.tagName === 'source');
-      const chosen = [attributes, ...sources.map((candidate) => candidate.attributes ?? {})]
-        .map((candidateAttributes) => ({ candidateAttributes, descriptor: findSrcsetDescriptor(candidateAttributes.srcset, source) }))
-        .find(({ descriptor }) => descriptor !== null);
+      // Like the browser: the first <source> whose media matches is the active one; the <img> only applies when none does.
+      const activeSource = sources.find(({ attributes: sourceAttributes }) => {
+        const media = sourceAttributes?.media;
+        return typeof media !== 'string' || !options.matchesMedia || options.matchesMedia(media);
+      });
+      const candidateAttributes = activeSource?.attributes ?? attributes;
+      const descriptor = findSrcsetDescriptor(candidateAttributes.srcset, source);
+      const chosen = descriptor === null ? undefined : { candidateAttributes, descriptor };
       for (const candidate of sources) {
         if (candidate.attributes) {
           delete candidate.attributes.srcset;

@@ -136,6 +136,7 @@ export async function captureScreen(sdkSelector: string): Promise<ScreenCapture>
     usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
     fetchAsset: fetchSameOriginAsset,
     maxDurationMs: ASSET_COLLECTION_DURATION_MS,
+    matchesMedia: (query) => window.matchMedia(query).matches,
     findLiveImage: (serialized) => {
       if (serialized.id === undefined) {
         return null;
