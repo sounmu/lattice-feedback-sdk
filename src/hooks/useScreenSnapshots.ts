@@ -4,15 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
 import { addMarkedScreen, type MarkedScreens } from '@/lib/marked-screens';
-import { findCommentPins, findEditMoves } from '@/lib/screen-snapshot';
+import { findCommentPins, findEditMoves, reconcileScreenMarks, type LiveMarkKeys } from '@/lib/screen-snapshot';
 import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
 import type {
   CreateScreenSnapshotInput,
   CreateScreenSnapshotResponse,
   FindMissingScreenSnapshotAssetsInput,
   FindMissingScreenSnapshotAssetsResponse,
+  CapturedScreen,
   ScreenCapture,
   ScreenCaptureFailureReason,
+  ScreenSnapshotEvent,
+  ScreenSnapshotSummary,
 } from '@/types/screen-snapshot';
 
 export type ScreenSaveStatus = 'idle' | 'capturing' | 'uploading';
@@ -20,7 +23,7 @@ export type ScreenSaveStatus = 'idle' | 'capturing' | 'uploading';
 interface UseScreenSnapshotsOptions {
   config: Pick<CreateScreenSnapshotInput, 'projectKey' | 'hostOrigin'> | null;
   subscribeToScreenCapture: (listener: (result: ScreenCaptureResult) => void) => () => void;
-  requestScreenCapture: () => void;
+  requestScreenCapture: (requestId: string) => void;
 }
 
 // An SDK build without screen saving never answers, so the request must not wait forever.
@@ -31,6 +34,21 @@ const PAYLOAD_TOO_LARGE_STATUS = 413;
 const MARKED_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 코멘트·편집 위치를 화면에 표시하지 못했습니다.';
 
 type CaptureSource = 'manual' | 'marks';
+
+function findMarkKeys(events: readonly ScreenSnapshotEvent[]): string[] {
+  return [...findCommentPins(events).map((pin) => pin.key), ...findEditMoves(events).map((move) => move.key)];
+}
+
+// Captures are taken the moment they are asked for; uploads, and mark updates after a comment or edit is deleted, run one at a time.
+type UploadJob = { type: 'capture'; capture: ScreenCapture; source: CaptureSource } | { type: 'reconcile' };
+
+/** What a marked screen was saved from, kept so its marks can be updated when a comment or edit is deleted. */
+interface SavedMarkedScreen {
+  screen: CapturedScreen;
+  assetHashes: string[];
+}
+
+type UploadOwner = Pick<CreateScreenSnapshotInput, 'projectKey' | 'hostOrigin'>;
 
 const CAPTURE_FAILURE_MESSAGES: Record<ScreenCaptureFailureReason, string> = {
   page_not_allowed: PAGE_NOT_ALLOWED_MESSAGE,
@@ -100,112 +118,201 @@ function getUploadErrorMessage(status: number): string {
   }
 }
 
+async function createSnapshot(owner: UploadOwner, screen: CapturedScreen, assetHashes: string[]): Promise<ScreenSnapshotSummary> {
+  const input: CreateScreenSnapshotInput = { ...owner, ...screen, assetHashes };
+  const body = new TextEncoder().encode(JSON.stringify(input));
+  if (body.length > MAX_SCREEN_SNAPSHOT_BYTES) {
+    throw new UploadFailedError(PAYLOAD_TOO_LARGE_STATUS);
+  }
+  const response = await sendOrThrow('/api/snapshots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+  return ((await response.json()) as CreateScreenSnapshotResponse).snapshot;
+}
+
+function getJobErrorMessage(error: unknown): string {
+  return error instanceof UploadFailedError ? getUploadErrorMessage(error.status) : SAVE_FAILED_MESSAGE;
+}
+
 export function useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture }: UseScreenSnapshotsOptions) {
   const [screens, setScreens] = useState<MarkedScreens>({ snapshots: [], marksByScreen: new Map() });
   const { snapshots, marksByScreen } = screens;
   const markedScreenIds = useMemo(() => new Set(marksByScreen.keys()), [marksByScreen]);
-  // Uploads finish asynchronously, so the limit check reads the latest screens from here.
+  // Uploads finish asynchronously, so they read and write the latest screens through this ref.
   const screensRef = useRef(screens);
-  const [status, setStatus] = useState<ScreenSaveStatus>('idle');
+  const [pendingCount, setPendingCount] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const captureTimer = useRef<number | null>(null);
-  const pendingSource = useRef<CaptureSource>('manual');
-  // A comment or edit added while another screen is being saved gets its own save afterwards.
-  const isMarksCaptureQueued = useRef(false);
-  const startCaptureRef = useRef<(source: CaptureSource) => void>(() => undefined);
+  const pendingRequests = useRef(new Map<string, { source: CaptureSource; timer: number }>());
+  const jobs = useRef<UploadJob[]>([]);
+  const isDraining = useRef(false);
+  const savedMarkedScreens = useRef(new Map<string, SavedMarkedScreen>());
+  const liveMarkKeys = useRef<LiveMarkKeys>({ comments: [], edits: [] });
+  // Bumped by reset so that work started for a discarded draft does not touch the new one.
+  const generation = useRef(0);
+  const configRef = useRef(config);
+  const drainRef = useRef<() => void>(() => undefined);
+
+  let status: ScreenSaveStatus = 'idle';
+  if (isUploading) {
+    status = 'uploading';
+  } else if (pendingCount > 0) {
+    status = 'capturing';
+  }
+
+  function commitScreens(next: MarkedScreens) {
+    screensRef.current = next;
+    setScreens(next);
+    for (const id of savedMarkedScreens.current.keys()) {
+      if (!next.marksByScreen.has(id)) {
+        savedMarkedScreens.current.delete(id);
+      }
+    }
+  }
+
+  async function runCapture(owner: UploadOwner, { screen, assetFiles }: ScreenCapture, source: CaptureSource, jobGeneration: number) {
+    // A comment or edit deleted while its screen was being captured must not be saved with it.
+    const events = source === 'marks' ? reconcileScreenMarks(screen.events, liveMarkKeys.current) : screen.events;
+    if (!events) {
+      return;
+    }
+    const pinnedScreen: CapturedScreen = { ...screen, events: [...events] };
+    const assetHashes = await uploadAssetFiles({ ...owner, pageUrl: screen.page.url }, assetFiles);
+    const created = await createSnapshot(owner, pinnedScreen, assetHashes);
+    if (jobGeneration !== generation.current) {
+      return;
+    }
+    const next = source === 'marks'
+      ? addMarkedScreen(screensRef.current, created, findMarkKeys(pinnedScreen.events), MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
+      : { ...screensRef.current, snapshots: [...screensRef.current.snapshots, created] };
+    if (!next) {
+      setErrorMessage(MARKED_SCREEN_FULL_MESSAGE);
+      return;
+    }
+    if (source === 'marks') {
+      savedMarkedScreens.current.set(created.id, { screen: pinnedScreen, assetHashes });
+    }
+    commitScreens(next);
+  }
+
+  // A deleted comment or edit must not reach the admin through a screen saved earlier: each marked screen
+  // is saved again without its mark and with the remaining marks renumbered, keeping its original moment.
+  async function runReconcile(owner: UploadOwner, jobGeneration: number) {
+    for (const [id, saved] of [...savedMarkedScreens.current]) {
+      const events = reconcileScreenMarks(saved.screen.events, liveMarkKeys.current);
+      if (events === saved.screen.events) {
+        continue;
+      }
+      const current = screensRef.current;
+      if (!events) {
+        commitScreens({
+          snapshots: current.snapshots.filter((snapshot) => snapshot.id !== id),
+          marksByScreen: new Map([...current.marksByScreen].filter(([screenId]) => screenId !== id)),
+        });
+        continue;
+      }
+      const screen: CapturedScreen = { ...saved.screen, events: [...events] };
+      const created = await createSnapshot(owner, screen, saved.assetHashes);
+      if (jobGeneration !== generation.current) {
+        return;
+      }
+      const latest = screensRef.current;
+      if (!latest.marksByScreen.has(id)) {
+        continue;
+      }
+      const marks = new Map([...latest.marksByScreen].filter(([screenId]) => screenId !== id));
+      marks.set(created.id, findMarkKeys(screen.events));
+      savedMarkedScreens.current.set(created.id, { screen, assetHashes: saved.assetHashes });
+      commitScreens({
+        snapshots: latest.snapshots.map((snapshot) => (snapshot.id === id ? created : snapshot)),
+        marksByScreen: marks,
+      });
+    }
+  }
+
+  async function drain() {
+    const owner = configRef.current;
+    if (isDraining.current || !owner) {
+      return;
+    }
+    isDraining.current = true;
+    setIsUploading(true);
+    const { projectKey, hostOrigin } = owner;
+    while (jobs.current.length > 0) {
+      const job = jobs.current.shift() as UploadJob;
+      const jobGeneration = generation.current;
+      try {
+        if (job.type === 'capture') {
+          await runCapture({ projectKey, hostOrigin }, job.capture, job.source, jobGeneration);
+        } else {
+          await runReconcile({ projectKey, hostOrigin }, jobGeneration);
+        }
+      } catch (error) {
+        if (jobGeneration === generation.current) {
+          setErrorMessage(getJobErrorMessage(error));
+        }
+      }
+    }
+    isDraining.current = false;
+    setIsUploading(false);
+  }
+
+  useEffect(() => {
+    configRef.current = config;
+    drainRef.current = () => {
+      void drain();
+    };
+  });
 
   useEffect(() => {
     if (!config) {
       return;
     }
-    const { projectKey, hostOrigin } = config;
-
-    async function upload({ screen, assetFiles }: ScreenCapture, source: CaptureSource) {
-      setStatus('uploading');
-      try {
-        const assetHashes = await uploadAssetFiles({ projectKey, hostOrigin, pageUrl: screen.page.url }, assetFiles);
-        const input: CreateScreenSnapshotInput = { projectKey, hostOrigin, ...screen, assetHashes };
-        const body = new TextEncoder().encode(JSON.stringify(input));
-        if (body.length > MAX_SCREEN_SNAPSHOT_BYTES) {
-          setErrorMessage(getUploadErrorMessage(PAYLOAD_TOO_LARGE_STATUS));
-          return;
-        }
-        const response = await sendOrThrow('/api/snapshots', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-        });
-        const created = (await response.json()) as CreateScreenSnapshotResponse;
-        const markKeys = [
-          ...findCommentPins(screen.events).map((pin) => pin.key),
-          ...findEditMoves(screen.events).map((move) => move.key),
-        ];
-        const next = source === 'marks'
-          ? addMarkedScreen(screensRef.current, created.snapshot, markKeys, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
-          : { ...screensRef.current, snapshots: [...screensRef.current.snapshots, created.snapshot] };
-        if (!next) {
-          setErrorMessage(MARKED_SCREEN_FULL_MESSAGE);
-          return;
-        }
-        screensRef.current = next;
-        setScreens(next);
-      } catch (error) {
-        if (error instanceof UploadFailedError) {
-          setErrorMessage(getUploadErrorMessage(error.status));
-        } else {
-          setErrorMessage(SAVE_FAILED_MESSAGE);
-        }
-      } finally {
-        setStatus('idle');
-        runQueuedMarksCapture();
-      }
-    }
-
-    function runQueuedMarksCapture() {
-      if (isMarksCaptureQueued.current) {
-        isMarksCaptureQueued.current = false;
-        startCaptureRef.current('marks');
-      }
-    }
-
+    const requests = pendingRequests.current;
     const unsubscribe = subscribeToScreenCapture((result) => {
+      const { requestId } = result.payload;
+      const request = requests.get(requestId);
       // Only an answer to a pending request is accepted.
-      if (captureTimer.current === null) {
+      if (!request) {
         return;
       }
-      window.clearTimeout(captureTimer.current);
-      captureTimer.current = null;
+      window.clearTimeout(request.timer);
+      requests.delete(requestId);
+      setPendingCount(requests.size);
       if (result.type === 'screen:capture-failed') {
-        setStatus('idle');
         setErrorMessage(CAPTURE_FAILURE_MESSAGES[result.payload.reason]);
-        runQueuedMarksCapture();
         return;
       }
-      void upload(result.payload, pendingSource.current);
+      const { screen, assetFiles } = result.payload;
+      jobs.current.push({ type: 'capture', capture: { screen, assetFiles }, source: request.source });
+      drainRef.current();
     });
     return () => {
       unsubscribe();
-      if (captureTimer.current !== null) {
-        window.clearTimeout(captureTimer.current);
-        captureTimer.current = null;
-      }
+      requests.forEach((request) => window.clearTimeout(request.timer));
+      requests.clear();
+      setPendingCount(0);
     };
   }, [config, subscribeToScreenCapture]);
 
   const canCapture = status === 'idle' && snapshots.length < MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK;
   // A marked screen may replace an earlier one; whether it fits is checked once it is uploaded.
-  const canCaptureMarks = canCapture || (status === 'idle' && marksByScreen.size > 0);
+  const canCaptureMarks = snapshots.length < MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK || marksByScreen.size > 0;
 
   const startCapture = useCallback((source: CaptureSource) => {
-    pendingSource.current = source;
+    const requestId = crypto.randomUUID();
+    const requests = pendingRequests.current;
     setErrorMessage(null);
-    setStatus('capturing');
-    captureTimer.current = window.setTimeout(() => {
-      captureTimer.current = null;
-      setStatus('idle');
+    const timer = window.setTimeout(() => {
+      requests.delete(requestId);
+      setPendingCount(requests.size);
       setErrorMessage(SAVE_FAILED_MESSAGE);
     }, CAPTURE_TIMEOUT_MS);
-    requestScreenCapture();
+    requests.set(requestId, { source, timer });
+    setPendingCount(requests.size);
+    requestScreenCapture(requestId);
   }, [requestScreenCapture]);
 
   const capture = useCallback(() => {
@@ -214,53 +321,43 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     }
   }, [canCapture, startCapture]);
 
+  // Asked right away, even while another screen is saving, so the UI state of the comment or drop is what gets saved.
   const captureForMarks = useCallback(() => {
-    if (status !== 'idle') {
-      isMarksCaptureQueued.current = true;
-      return;
-    }
     if (!canCaptureMarks) {
       setErrorMessage(MARKED_SCREEN_FULL_MESSAGE);
       return;
     }
     startCapture('marks');
-  }, [status, canCaptureMarks, startCapture]);
+  }, [canCaptureMarks, startCapture]);
 
-  useEffect(() => {
-    startCaptureRef.current = startCapture;
-  }, [startCapture]);
-
-  const remove = useCallback((id: string) => {
-    const next = {
-      snapshots: screensRef.current.snapshots.filter((snapshot) => snapshot.id !== id),
-      marksByScreen: new Map([...screensRef.current.marksByScreen].filter(([screenId]) => screenId !== id)),
-    };
-    screensRef.current = next;
-    setScreens(next);
+  /** Follows the comments and edits in the draft; when one is deleted, the saved screens drop its mark. */
+  const syncMarkKeys = useCallback((keys: LiveMarkKeys) => {
+    const previous = liveMarkKeys.current;
+    const isDeleted = previous.comments.some((key) => !keys.comments.includes(key)) ||
+      previous.edits.some((key) => !keys.edits.includes(key));
+    liveMarkKeys.current = keys;
+    if (isDeleted && savedMarkedScreens.current.size > 0) {
+      jobs.current.push({ type: 'reconcile' });
+      drainRef.current();
+    }
   }, []);
 
-  // A deleted comment or edit must not reach the admin through a screen saved earlier, so those screens are dropped.
-  const removeScreensWithMark = useCallback((key: string): boolean => {
-    const dropped = new Set([...screensRef.current.marksByScreen].filter(([, keys]) => keys.includes(key)).map(([id]) => id));
-    if (dropped.size === 0) {
-      return false;
-    }
-    const next = {
-      snapshots: screensRef.current.snapshots.filter((snapshot) => !dropped.has(snapshot.id)),
-      marksByScreen: new Map([...screensRef.current.marksByScreen].filter(([id]) => !dropped.has(id))),
-    };
-    screensRef.current = next;
-    setScreens(next);
-    return true;
+  const remove = useCallback((id: string) => {
+    commitScreens({
+      snapshots: screensRef.current.snapshots.filter((snapshot) => snapshot.id !== id),
+      marksByScreen: new Map([...screensRef.current.marksByScreen].filter(([screenId]) => screenId !== id)),
+    });
   }, []);
 
   const reset = useCallback(() => {
-    const empty: MarkedScreens = { snapshots: [], marksByScreen: new Map() };
-    screensRef.current = empty;
-    setScreens(empty);
-    isMarksCaptureQueued.current = false;
+    generation.current += 1;
+    jobs.current = [];
+    pendingRequests.current.forEach((request) => window.clearTimeout(request.timer));
+    pendingRequests.current.clear();
+    setPendingCount(0);
+    commitScreens({ snapshots: [], marksByScreen: new Map() });
     setErrorMessage(null);
   }, []);
 
-  return { snapshots, markedScreenIds, removeScreensWithMark, status, errorMessage, canCapture, capture, captureForMarks, remove, reset };
+  return { snapshots, markedScreenIds, status, errorMessage, canCapture, capture, captureForMarks, syncMarkKeys, remove, reset };
 }

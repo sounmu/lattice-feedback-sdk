@@ -144,8 +144,8 @@ export function useHostBridge() {
     };
   }, []);
 
-  const requestScreenCapture = useCallback(() => {
-    postToHost(createWidgetToHostMessage('screen:capture', {}));
+  const requestScreenCapture = useCallback((requestId: string) => {
+    postToHost(createWidgetToHostMessage('screen:capture', { requestId }));
   }, [postToHost]);
 
   const errorMessage = config ? null : 'projectKey 또는 hostOrigin이 올바르지 않습니다.';

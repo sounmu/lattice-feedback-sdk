@@ -9,19 +9,17 @@ export interface PinBox {
   y: number;
   width: number;
   height: number;
+  /** The clicked point lies outside a scroll container or other clipping ancestor of its element. */
+  isClipped: boolean;
 }
 
-// Badge radius and bubble width in screen px, before the inverse scale is applied.
-const BADGE_RADIUS = 14;
+// Bubble width in screen px, before the inverse scale is applied.
 const BUBBLE_WIDTH = 256;
 
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
-}
 
 interface CommentPinOverlayProps {
   boxes: PinBox[];
-  /** Size of the rebuilt page's viewport, so badges and bubbles stay inside it. */
+  /** Size of the rebuilt page's viewport; pins scrolled out of it are not drawn. */
   width: number;
   height: number;
   scale: number;
@@ -33,13 +31,17 @@ interface CommentPinOverlayProps {
 // stay readable when the screen is shrunk to fit.
 export function CommentPinOverlay({ boxes, width: viewWidth, height: viewHeight, scale, selectedNumber, onSelect }: CommentPinOverlayProps) {
   const inverseScale = 1 / scale;
-  const badgeRadius = BADGE_RADIUS * inverseScale;
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {boxes.map(({ pin, x, y, width, height }) => {
+      {boxes.map(({ pin, x, y, width, height, isClipped }) => {
         const isSelected = pin.number === selectedNumber;
-        const badgeX = clamp(x + pin.offset.x * width, badgeRadius, viewWidth - badgeRadius);
-        const badgeY = clamp(y + pin.offset.y * height, badgeRadius, viewHeight - badgeRadius);
+        // The badge stays on the clicked point; a point scrolled out of view hides the badge rather
+        // than moving it over unrelated content.
+        const badgeX = x + pin.offset.x * width;
+        const badgeY = y + pin.offset.y * height;
+        if (isClipped || badgeX < 0 || badgeY < 0 || badgeX > viewWidth || badgeY > viewHeight) {
+          return null;
+        }
         const opensLeft = badgeX + BUBBLE_WIDTH * inverseScale > viewWidth;
         return (
           <div key={pin.number}>
