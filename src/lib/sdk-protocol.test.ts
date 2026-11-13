@@ -37,9 +37,9 @@ const SCREEN: CapturedScreen = {
 describe('isHostToWidgetMessage', () => {
   it('accepts built messages of every type', () => {
     expect(isHostToWidgetMessage(INIT_MESSAGE)).toBe(true);
-    expect(isHostToWidgetMessage(createHostToWidgetMessage('screen:captured', { screen: SCREEN, assetFiles: [] }))).toBe(true);
+    expect(isHostToWidgetMessage(createHostToWidgetMessage('screen:captured', { requestId: 'request-1', screen: SCREEN, assetFiles: [] }))).toBe(true);
     expect(
-      isHostToWidgetMessage(createHostToWidgetMessage('screen:capture-failed', { reason: 'page_not_allowed' })),
+      isHostToWidgetMessage(createHostToWidgetMessage('screen:capture-failed', { requestId: 'request-1', reason: 'page_not_allowed' })),
     ).toBe(true);
     expect(isHostToWidgetMessage(createHostToWidgetMessage('reporter:update', { reporter: null }))).toBe(true);
     expect(isHostToWidgetMessage(createHostToWidgetMessage('page:update', { page: PAGE }))).toBe(true);
@@ -72,17 +72,18 @@ describe('isHostToWidgetMessage', () => {
   });
 
   it('rejects a saved screen that is not one Meta event followed by one FullSnapshot event', () => {
-    const captured = createHostToWidgetMessage('screen:captured', { screen: SCREEN, assetFiles: [] });
-    const withScreen = (screen: unknown) => ({ ...captured, payload: { screen, assetFiles: [] } });
+    const captured = createHostToWidgetMessage('screen:captured', { requestId: 'request-1', screen: SCREEN, assetFiles: [] });
+    const withScreen = (screen: unknown) => ({ ...captured, payload: { requestId: 'request-1', screen, assetFiles: [] } });
 
     expect(isHostToWidgetMessage(withScreen({ ...SCREEN, events: [...SCREEN.events].reverse() }))).toBe(false);
     expect(isHostToWidgetMessage(withScreen({ ...SCREEN, events: [SCREEN.events[1]] }))).toBe(false);
     expect(isHostToWidgetMessage(withScreen({ ...SCREEN, format: 'html' }))).toBe(false);
     expect(isHostToWidgetMessage({ ...captured, payload: { screen: SCREEN, assetFiles: ['font-bytes'] } })).toBe(false);
     expect(isHostToWidgetMessage({ ...captured, payload: { screen: SCREEN } })).toBe(false);
+    expect(isHostToWidgetMessage({ ...captured, payload: { screen: SCREEN, assetFiles: [] } })).toBe(false);
     expect(isHostToWidgetMessage(withScreen({ ...SCREEN, page: { ...SCREEN.page, scrollY: '40' } }))).toBe(false);
     expect(
-      isHostToWidgetMessage({ ...captured, type: 'screen:capture-failed', payload: { reason: 'out_of_memory' } }),
+      isHostToWidgetMessage({ ...captured, type: 'screen:capture-failed', payload: { requestId: 'request-1', reason: 'out_of_memory' } }),
     ).toBe(false);
   });
 
@@ -99,7 +100,7 @@ describe('isWidgetToHostMessage', () => {
   it('accepts built messages of every type', () => {
     expect(isWidgetToHostMessage(createWidgetToHostMessage('ready', {}))).toBe(true);
     expect(isWidgetToHostMessage(createWidgetToHostMessage('close', {}))).toBe(true);
-    expect(isWidgetToHostMessage(createWidgetToHostMessage('screen:capture', {}))).toBe(true);
+    expect(isWidgetToHostMessage(createWidgetToHostMessage('screen:capture', { requestId: 'request-1' }))).toBe(true);
     expect(isWidgetToHostMessage(SUBMITTED_MESSAGE)).toBe(true);
   });
 

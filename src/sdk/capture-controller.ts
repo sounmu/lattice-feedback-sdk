@@ -1,9 +1,10 @@
 import { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, truncateText } from '@/lib/feedback-limits';
 import type { CapturePolicy } from '@/lib/capture-policy';
+import type { CommentPinSource } from '@/sdk/comment-pins';
 import { findCaptureTarget, isCapturePageAllowed, type CaptureTarget } from '@/sdk/capture-policy';
 import { createCaptureStatus } from '@/sdk/capture-status';
 import { startElementDrag } from '@/sdk/element-drag';
-import { startElementSelection } from '@/sdk/element-selection';
+import { startElementSelection, type SelectionPoint } from '@/sdk/element-selection';
 import { createFlowRecorder, type FlowRecorder, type FlowRecorderState } from '@/sdk/flow-recorder';
 import { clearFlowSession, findSessionStorage, getFlowSessionKey } from '@/sdk/flow-session';
 import type { AttachmentKind, CaptureCommand, CaptureMode, CaptureState } from '@/types/sdk-message';
@@ -35,6 +36,14 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let attachments = createEmptyAttachments();
   let activeMode: CaptureMode | null = null;
   let selection: ElementTarget | null = null;
+  let selectionElement: HTMLElement | null = null;
+  let selectionPoint: SelectionPoint = { x: 0.5, y: 0.5 };
+  // The live element of each comment, in the same order as attachments.comments, so saved screens can pin them.
+  let commentElements: HTMLElement[] = [];
+  // A key per comment that never changes, unlike its number, so saved screens can tell comments apart.
+  let commentKeys: string[] = [];
+  let commentPoints: SelectionPoint[] = [];
+  let nextCommentKey = 1;
   let isDragging = false;
   let transientHandle: { cancel(): void } | null = null;
   // Bumped whenever a transient run ends, so callbacks fired by our own cancel() (drag calls onCancel synchronously) are ignored.
@@ -51,6 +60,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     return {
       enabled: isCapturePageAllowed(policy), activeMode, selection, flowEventCount,
       attachments: { comments: [...attachments.comments], edits: [...attachments.edits], flow: attachments.flow },
+      commentKeys: [...commentKeys],
       errorMessage: controllerErrorMessage ?? flowErrorMessage,
     };
   }
@@ -82,6 +92,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     transientHandle = null;
     handle?.cancel();
     selection = null;
+    selectionElement = null;
     isDragging = false;
     if (activeMode === 'comment' || activeMode === 'edit') activeMode = null;
   }
@@ -93,11 +104,13 @@ export function createCaptureController(options: CaptureControllerOptions) {
     showWidget();
   }
 
-  function handleSelect(target: CaptureTarget, token: number): void {
+  function handleSelect(target: CaptureTarget, token: number, point: SelectionPoint): void {
     if (token !== transientToken || isDestroyed) return;
     transientHandle = null;
     if (activeMode === 'comment') {
       selection = target.target;
+      selectionElement = target.element;
+      selectionPoint = point;
       emit();
       showWidget();
       return;
@@ -138,7 +151,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     emit();
     const handle = startElementSelection({
       findTarget: (eventTarget) => findCaptureTarget(eventTarget, policy),
-      onSelect: (target) => handleSelect(target, token),
+      onSelect: (target, point) => handleSelect(target, token, point),
       onCancel: () => finishTransientRun(token),
     });
     if (token === transientToken) transientHandle = handle;
@@ -146,10 +159,16 @@ export function createCaptureController(options: CaptureControllerOptions) {
 
   function addComment(comment: string): void {
     const trimmedComment = truncateText(comment.trim(), MAX_COMMENT_LENGTH);
-    if (activeMode !== 'comment' || !selection) {
+    if (activeMode !== 'comment' || !selection || !selectionElement) {
       controllerErrorMessage = COMMENT_TARGET_MISSING_MESSAGE;
     } else if (trimmedComment) {
-      if (attachments.comments.length < MAX_COMMENTS) attachments.comments.push({ target: selection, comment: trimmedComment });
+      if (attachments.comments.length < MAX_COMMENTS) {
+        attachments.comments.push({ target: selection, comment: trimmedComment });
+        commentElements.push(selectionElement);
+        commentKeys.push(`comment-${nextCommentKey}`);
+        commentPoints.push(selectionPoint);
+        nextCommentKey += 1;
+      }
       controllerErrorMessage = null;
       endTransientMode();
     }
@@ -159,6 +178,11 @@ export function createCaptureController(options: CaptureControllerOptions) {
   function removeAttachment(kind: AttachmentKind, index: number): void {
     if (kind === 'flow') attachments.flow = null;
     else attachments[kind].splice(index, 1);
+    if (kind === 'comments') {
+      commentElements.splice(index, 1);
+      commentKeys.splice(index, 1);
+      commentPoints.splice(index, 1);
+    }
     emit();
   }
 
@@ -178,6 +202,9 @@ export function createCaptureController(options: CaptureControllerOptions) {
     endTransientMode();
     if (activeMode === 'flow') flowRecorder?.cancel();
     attachments = createEmptyAttachments();
+    commentElements = [];
+    commentKeys = [];
+    commentPoints = [];
     controllerErrorMessage = null;
     emit();
   }
@@ -252,7 +279,20 @@ export function createCaptureController(options: CaptureControllerOptions) {
     return (...args) => { if (!isDestroyed) action(...args); };
   }
 
+  // Only comments written on the current page are pinned: a persistent header element is still
+  // connected after an SPA navigation, but its comment belongs to the earlier page.
+  function getCommentPinSources(): CommentPinSource[] {
+    return attachments.comments.flatMap(({ target, comment }, index) => {
+      if (target.pagePath !== undefined && target.pagePath !== window.location.pathname) {
+        return [];
+      }
+      const label = target.feedbackId ?? target.tagName.toLowerCase();
+      return [{ number: index + 1, key: commentKeys[index], label, comment, offset: commentPoints[index], element: commentElements[index] }];
+    });
+  }
+
   return {
+    getCommentPinSources,
     handleCommand: unlessDestroyed(handleCommand),
     sync: emit,
     setPanelVisible: unlessDestroyed((visible: boolean) => {

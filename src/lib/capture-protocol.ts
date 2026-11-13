@@ -52,6 +52,8 @@ export function isCaptureState(value: unknown): value is CaptureState {
   const attachments = value.attachments;
   if (!isRecord(attachments) || !Array.isArray(attachments.comments) || !Array.isArray(attachments.edits) ||
     attachments.comments.length > MAX_COMMENTS || attachments.edits.length > MAX_EDITS) return false;
+  if (!Array.isArray(value.commentKeys) || value.commentKeys.length !== attachments.comments.length ||
+    !value.commentKeys.every((key: unknown) => isText(key, 40))) return false;
   return attachments.comments.every((comment: unknown) => isRecord(comment) &&
       isTarget(comment.target) && isText(comment.comment, MAX_COMMENT_LENGTH)) &&
     attachments.edits.every((edit: unknown) => isRecord(edit) && isTarget(edit.target) &&

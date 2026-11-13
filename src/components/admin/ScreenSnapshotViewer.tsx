@@ -1,13 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
 
+import { CommentPinList, CommentPinOverlay, type PinBox } from '@/components/admin/CommentPinOverlay';
+import { findCommentPins } from '@/lib/screen-snapshot';
 import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
 import type {
   MissingSnapshotAssetReason,
+  ScreenCommentPin,
   ScreenSnapshot,
   ScreenSnapshotDetailResponse,
 } from '@/types/screen-snapshot';
@@ -89,6 +92,49 @@ function scrollSavedScreen(frame: HTMLIFrameElement, event: WheelEvent): void {
   (target ?? frameDocument.scrollingElement)?.scrollBy(event.deltaX, event.deltaY);
 }
 
+// Finds the pinned element in the rebuilt page. When it was not serialized, the saved document
+// coordinates are shifted by the rebuilt page's scroll instead.
+// A point outside any ancestor that clips its content (a scrolled list, for example) is not visible,
+// even when it is still inside the page's viewport.
+function isPointClipped(element: Element, x: number, y: number): boolean {
+  const view = element.ownerDocument.defaultView;
+  for (let ancestor = element.parentElement; ancestor && view; ancestor = ancestor.parentElement) {
+    const { overflowX, overflowY } = view.getComputedStyle(ancestor);
+    if (overflowX === 'visible' && overflowY === 'visible') {
+      continue;
+    }
+    const clip = ancestor.getBoundingClientRect();
+    if (x < clip.left || x > clip.right || y < clip.top || y > clip.bottom) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function measurePin(replayer: Replayer, pin: ScreenCommentPin): PinBox {
+  const node = pin.nodeId === null ? null : replayer.getMirror().getNode(pin.nodeId);
+  if (node && 'getBoundingClientRect' in node) {
+    const bounds = (node as Element).getBoundingClientRect();
+    if (bounds.width > 0 || bounds.height > 0) {
+      const isClipped = isPointClipped(
+        node as Element,
+        bounds.left + pin.offset.x * bounds.width,
+        bounds.top + pin.offset.y * bounds.height,
+      );
+      return { pin, x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height, isClipped };
+    }
+  }
+  const view = replayer.iframe.contentWindow;
+  return {
+    pin,
+    x: pin.rect.x - (view?.scrollX ?? 0),
+    y: pin.rect.y - (view?.scrollY ?? 0),
+    width: pin.rect.width,
+    height: pin.rect.height,
+    isClipped: false,
+  };
+}
+
 function AdminTokenForm() {
   const [value, setValue] = useState('');
 
@@ -147,6 +193,9 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
   const { viewportWidth, viewportHeight } = snapshot.page;
+  const pins = useMemo(() => findCommentPins(snapshot.events), [snapshot]);
+  const [pinBoxes, setPinBoxes] = useState<PinBox[]>([]);
+  const [selectedPin, setSelectedPin] = useState<number | null>(null);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -166,6 +215,25 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
     let replayer: Replayer | null = null;
     let isCancelled = false;
     let assetUrls: (string | null)[] = [];
+    let frameDocument: Document | null = null;
+
+    function measurePins() {
+      if (replayer && !isCancelled) {
+        const current = replayer;
+        setPinBoxes(pins.map((pin) => measurePin(current, pin)));
+      }
+    }
+
+    // Pins follow the rebuilt page as it (or a scroll container inside it) is scrolled and once its
+    // fonts have changed the layout.
+    // A rebuild reopens the same document object, which drops its listeners, so they are added again.
+    function followPins() {
+      frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
+      frameDocument = replayer?.iframe.contentDocument ?? null;
+      frameDocument?.addEventListener('scroll', measurePins, { capture: true, passive: true });
+      void frameDocument?.fonts.ready.then(measurePins);
+      measurePins();
+    }
 
     function handleWheel(event: WheelEvent) {
       event.preventDefault();
@@ -196,7 +264,14 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
         showWarning: false,
         triggerFocus: false,
       });
+      if (pins.length > 0) {
+        // Rebuilding the page replaces its document, so the scroll watch is attached after each rebuild.
+        replayer.on('fullsnapshot-rebuilded', followPins);
+      }
       replayer.pause(0);
+      if (pins.length > 0) {
+        followPins();
+      }
     }
 
     void mount(stage);
@@ -204,11 +279,12 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
     return () => {
       isCancelled = true;
       stage.removeEventListener('wheel', handleWheel);
+      frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
       replayer?.destroy();
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [snapshot, projectKey, token]);
+  }, [snapshot, projectKey, token, pins]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -240,14 +316,25 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       <div ref={frameRef} className="w-full overflow-auto rounded border bg-white">
         <div className="overflow-hidden" style={{ width: viewportWidth * scale, height: viewportHeight * scale }}>
           <div
-            ref={stageRef}
-            role="img"
-            aria-label="저장된 화면"
-            className="[&_.replayer-mouse]:hidden [&_.replayer-mouse-tail]:hidden"
+            className="relative"
             style={{ width: viewportWidth, height: viewportHeight, transform: `scale(${scale})`, transformOrigin: 'top left' }}
-          />
+          >
+            <div
+              ref={stageRef}
+              role="img"
+              aria-label="저장된 화면"
+              className="[&_.replayer-mouse]:hidden [&_.replayer-mouse-tail]:hidden"
+              style={{ width: viewportWidth, height: viewportHeight }}
+            />
+            <CommentPinOverlay
+              boxes={pinBoxes}
+              width={viewportWidth}
+              height={viewportHeight}
+              scale={scale} selectedNumber={selectedPin} onSelect={setSelectedPin} />
+          </div>
         </div>
       </div>
+      {pins.length > 0 && <CommentPinList pins={pins} selectedNumber={selectedPin} onSelect={setSelectedPin} />}
     </div>
   );
 }

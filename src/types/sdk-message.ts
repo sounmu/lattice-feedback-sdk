@@ -44,14 +44,20 @@ export interface CaptureState {
   activeMode: CaptureMode | null;
   selection: ElementTarget | null;
   attachments: FeedbackAttachments;
+  /** Stable key of each comment, in the same order as attachments.comments. */
+  commentKeys: string[];
   flowEventCount: number;
   errorMessage: string | null;
 }
 export type CaptureUpdateMessage = ProtocolMessage<'capture:update', CaptureState>;
 
 // Saved screens: the widget asks with 'screen:capture', the SDK serializes the host page and answers once.
-export type ScreenCapturedMessage = ProtocolMessage<'screen:captured', ScreenCapture>;
-export type ScreenCaptureFailedMessage = ProtocolMessage<'screen:capture-failed', { reason: ScreenCaptureFailureReason }>;
+// Several saves can run at once, so each answer carries the id of the request it answers.
+export interface ScreenCaptureRequest {
+  requestId: string;
+}
+export type ScreenCapturedMessage = ProtocolMessage<'screen:captured', ScreenCapture & ScreenCaptureRequest>;
+export type ScreenCaptureFailedMessage = ProtocolMessage<'screen:capture-failed', ScreenCaptureRequest & { reason: ScreenCaptureFailureReason }>;
 
 export type HostToWidgetMessage =
   | InitMessage
@@ -72,7 +78,7 @@ export type DraftResetMessage = ProtocolMessage<'draft:reset', EmptyPayload>;
 export type CaptureCommand = CaptureStartMessage | CaptureCancelMessage | FlowStopMessage |
   CommentAddMessage | AttachmentRemoveMessage | DraftResetMessage;
 
-export type ScreenCaptureMessage = ProtocolMessage<'screen:capture', EmptyPayload>;
+export type ScreenCaptureMessage = ProtocolMessage<'screen:capture', ScreenCaptureRequest>;
 
 export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage | ScreenCaptureMessage;
 

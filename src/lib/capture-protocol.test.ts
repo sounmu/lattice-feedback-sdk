@@ -5,6 +5,7 @@ import type { CaptureState } from '@/types/sdk-message';
 const STATE: CaptureState = {
   enabled: true, activeMode: null, selection: null,
   attachments: { comments: [], edits: [], flow: null },
+  commentKeys: [],
   flowEventCount: 0, errorMessage: null,
 };
 

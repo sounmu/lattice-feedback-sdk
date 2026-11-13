@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 import { useHostBridge } from '@/hooks/useHostBridge';
 import { useScreenSnapshots } from '@/hooks/useScreenSnapshots';
@@ -27,6 +27,12 @@ export function FeedbackWidget() {
     captureState, sendCaptureCommand, subscribeToScreenCapture, requestScreenCapture,
   } = useHostBridge();
   const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture });
+  const { syncCommentKeys } = screens;
+  const commentKeys = captureState?.commentKeys;
+
+  useEffect(() => {
+    syncCommentKeys(commentKeys ?? []);
+  }, [commentKeys, syncCommentKeys]);
   const { submit, reset, status, errorMessage } = useSubmitFeedback();
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
@@ -101,6 +107,7 @@ export function FeedbackWidget() {
         {isInitialized && (
           <ScreenSnapshotControls
             snapshots={screens.snapshots}
+            commentScreenIds={screens.commentScreenIds}
             status={screens.status}
             errorMessage={screens.errorMessage}
             canCapture={screens.canCapture}
@@ -119,7 +126,11 @@ export function FeedbackWidget() {
             onStart={(mode) => sendCaptureCommand(createCaptureCommand({ type: 'capture:start', payload: { mode } }))}
             onCancel={() => sendCaptureCommand(createCaptureCommand({ type: 'capture:cancel', payload: {} }))}
             onStopFlow={() => sendCaptureCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }))}
-            onAddComment={(comment) => sendCaptureCommand(createCaptureCommand({ type: 'comment:add', payload: { comment } }))}
+            onAddComment={(comment) => {
+              sendCaptureCommand(createCaptureCommand({ type: 'comment:add', payload: { comment } }));
+              // Saved right away so the admin sees the comment pinned on the screen it was written on.
+              screens.captureForComment();
+            }}
             onRemove={(kind, index) => sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }))}
           />
         )}

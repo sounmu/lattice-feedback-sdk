@@ -14,6 +14,7 @@ import type { CaptureUpdateMessage, HostToWidgetMessage } from '@/types/sdk-mess
 const LOG_PREFIX = '[LatticeFeedback]';
 const HOST_ELEMENT_TAG_NAME = 'lattice-feedback-root';
 const IFRAME_TITLE = 'Feedback';
+const MAX_CONCURRENT_SCREEN_CAPTURES = 3;
 
 export class FeedbackSdk {
   private readonly appOrigin: string;
@@ -30,7 +31,8 @@ export class FeedbackSdk {
   private capturePolicy: CapturePolicy | null = null;
   private captureController: ReturnType<typeof createCaptureController> | null = null;
   private pendingResizeFrame: number | null = null;
-  private isCapturingScreen = false;
+  // Each save serializes the page as soon as it is asked, so a save asked during another keeps its own moment.
+  private activeScreenCaptures = 0;
 
   constructor(appOrigin: string) {
     this.appOrigin = appOrigin;
@@ -246,23 +248,24 @@ export class FeedbackSdk {
   }
 
   // Saving is allowed on any page with the SDK unless the customer's policy restricts the paths.
-  private async saveScreen(): Promise<void> {
-    if (this.isCapturingScreen) {
+  private async saveScreen(requestId: string): Promise<void> {
+    if (this.activeScreenCaptures >= MAX_CONCURRENT_SCREEN_CAPTURES) {
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
       return;
     }
     if (this.capturePolicy && !this.capturePolicy.allowedPaths.includes(window.location.pathname)) {
-      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'page_not_allowed' }));
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'page_not_allowed' }));
       return;
     }
-    this.isCapturingScreen = true;
+    this.activeScreenCaptures += 1;
     try {
-      const capture = await captureScreen(HOST_ELEMENT_TAG_NAME);
-      this.postToWidget(createHostToWidgetMessage('screen:captured', capture));
+      const capture = await captureScreen(HOST_ELEMENT_TAG_NAME, this.captureController?.getCommentPinSources() ?? []);
+      this.postToWidget(createHostToWidgetMessage('screen:captured', { ...capture, requestId }));
     } catch (error) {
       console.warn(`${LOG_PREFIX} Saving the screen failed.`, error);
-      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'capture_failed' }));
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
     } finally {
-      this.isCapturingScreen = false;
+      this.activeScreenCaptures -= 1;
     }
   }
 
@@ -293,7 +296,7 @@ export class FeedbackSdk {
         this.captureController?.reset();
         break;
       case 'screen:capture':
-        void this.saveScreen();
+        void this.saveScreen(message.payload.requestId);
         break;
       default: {
         const unhandledMessage: never = message;

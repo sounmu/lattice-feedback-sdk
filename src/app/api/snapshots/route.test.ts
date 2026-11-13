@@ -72,6 +72,17 @@ beforeEach(() => {
 });
 
 describe('POST /api/snapshots', () => {
+  it('stores comment pins with the screen and rejects malformed ones', async () => {
+    const pin = { number: 1, key: 'comment-1', nodeId: 7, rect: { x: 10, y: 20, width: 80, height: 30 }, offset: { x: 0.25, y: 0.5 }, label: 'save', comment: '버튼이 안 보여요' };
+    const events = [...(createScreenSnapshotBody().events as unknown[]), { type: 5, timestamp: 1, data: { tag: 'lattice-comment-pin', payload: pin } }];
+
+    const saved = await postSnapshot({ events });
+    const malformed = await postSnapshot({ events: [...events.slice(0, 2), { type: 5, timestamp: 1, data: { tag: 'lattice-comment-pin', payload: { ...pin, comment: '' } } }] });
+
+    expect(saved.status).toBe(201);
+    expect(malformed.status).toBe(400);
+  });
+
   it('stores a screen from an allowed origin and answers without the event payload', async () => {
     const response = await postSnapshot();
     const body = (await response.json()) as CreateScreenSnapshotResponse;
