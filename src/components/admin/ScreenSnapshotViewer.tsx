@@ -263,14 +263,17 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
   const frameDocument = replayer.iframe.contentDocument;
   const view = replayer.iframe.contentWindow;
   frameDocument?.querySelectorAll(`[${MOVE_CLONE_ATTRIBUTE}]`).forEach((clone) => clone.remove());
-  for (const move of moves) {
-    const element = findMarkedElement(replayer, move.nodeId);
-    if (!element || !frameDocument || !view) {
-      continue;
-    }
-    element.style.removeProperty('visibility');
-    if (!isShown) {
-      continue;
+  const elements = moves.map((move) => findMarkedElement(replayer, move.nodeId));
+  elements.forEach((element) => element?.style.removeProperty('visibility'));
+  if (!isShown || !frameDocument || !view) {
+    return;
+  }
+  // Every clone is built before any original is hidden: an edited element inside another edited one
+  // would otherwise inherit the temporary hiding into its copied styles.
+  moves.forEach((move, index) => {
+    const element = elements[index];
+    if (!element) {
+      return;
     }
     const bounds = element.getBoundingClientRect();
     const clone = element.cloneNode(true) as HTMLElement;
@@ -291,8 +294,8 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
     });
     frameDocument.documentElement.appendChild(clone);
     copyScrollOffsets(element, clone, { remaining: MAX_STYLED_CLONE_ELEMENTS });
-    element.style.setProperty('visibility', 'hidden');
-  }
+  });
+  elements.forEach((element) => element?.style.setProperty('visibility', 'hidden'));
   positionProposedClones(replayer, moves);
 }
 
