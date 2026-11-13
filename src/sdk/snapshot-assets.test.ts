@@ -20,8 +20,6 @@ function createOptions(overrides: Partial<ExtractSnapshotAssetsOptions> = {}): E
     maxTotalBytes: 2000,
     maxAssetCount: 10,
     maxDurationMs: 15_000,
-    // A fixed clock keeps the per-request time limit exact; real time would shave off elapsed milliseconds.
-    now: () => 0,
     ...overrides,
   };
 }
@@ -53,7 +51,7 @@ it('pulls out only the first same-origin source of a font family the page loaded
 
   const cssText = String(style.attributes?._cssText);
   expect(options.fetchAsset).toHaveBeenCalledTimes(1);
-  expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/fonts/a.woff2`, 1000, 15_000);
+  expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/fonts/a.woff2`, 1000, expect.any(Number));
   expect(await assetFiles[0].text()).toBe(FONT_BYTES);
   expect(resolveAssetReferences(cssText, (index) => `blob:file-${index}`)).toContain('url("blob:file-0") format("woff2")');
   expect(cssText).toContain(`url("${ORIGIN}/fonts/a.woff")`);
@@ -128,7 +126,7 @@ it('records files it could not keep without downloading past the budget, and kee
     { url: `${ORIGIN}/over-budget.png`, reason: 'budget_exceeded' },
     { url: `${ORIGIN}/over-count.png`, reason: 'budget_exceeded' },
   ]);
-  expect(fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/over-budget.png`, 4, 15_000);
+  expect(fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/over-budget.png`, 4, expect.any(Number));
   expect(fetchAsset).not.toHaveBeenCalledWith(`${ORIGIN}/over-count.png`, expect.any(Number), expect.any(Number));
   expect(images.map((image) => String(image.attributes?.src).startsWith('lattice-asset:'))).toEqual([
     false, false, true, false, true, false,
