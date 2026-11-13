@@ -20,6 +20,7 @@ DB에는 RLS를 켜고 `anon`과 `authenticated` 역할의 테이블 권한을 �
 2. SQL Editor에서 `supabase/migrations/`의 파일을 이름 순서대로 한 번씩 실행한다.
    - `20261112000000-create-feedback.sql`: 피드백 테이블
    - `20261113000000-create-screen-snapshots.sql`: 저장된 화면 테이블. 없으면 피드백 상세 조회와 화면 저장이 503이다.
+   - `20261113010000-create-screen-snapshot-assets.sql`: 화면의 글꼴·이미지 파일 테이블(프로젝트·SHA-256당 한 번 저장).
    기존 테이블을 덮어쓰거나 삭제하지 않는다. 이미 테이블이 있다면 실행 전에 스키마를 비교한다.
 3. Project URL과 `sb_secret_...` 형식의 Secret key를 확인한다.
    공개용 `sb_publishable_...` 키나 기존 JWT 형태의 service_role 키는 이 구현의 설정 대상이 아니다.

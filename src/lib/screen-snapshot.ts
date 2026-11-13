@@ -1,6 +1,6 @@
 // Dependency-free runtime for saved screens. The SDK bundle imports this file,
 // so it must not pull in zod or any other package.
-import { MAX_MISSING_SNAPSHOT_ASSETS } from '@/lib/feedback-limits';
+import { MAX_MISSING_SNAPSHOT_ASSETS, MAX_SNAPSHOT_ASSETS } from '@/lib/feedback-limits';
 import type {
   CapturedScreen,
   MissingSnapshotAssetReason,
@@ -40,6 +40,10 @@ function isMissingAsset(value: unknown): boolean {
     typeof value.url === 'string' &&
     MISSING_SNAPSHOT_ASSET_REASONS.some((reason) => reason === value.reason)
   );
+}
+
+export function isAssetFileList(value: unknown): value is Blob[] {
+  return Array.isArray(value) && value.length <= MAX_SNAPSHOT_ASSETS && value.every((file) => file instanceof Blob);
 }
 
 export function isScreenCaptureFailureReason(value: unknown): value is ScreenCaptureFailureReason {

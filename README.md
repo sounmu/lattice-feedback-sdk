@@ -161,7 +161,12 @@ http://localhost:3000/admin/snapshots/{화면 ID}?projectKey=demo
 
 | 메서드 | 경로 | 기능 |
 | --- | --- | --- |
-| POST | `/api/snapshots` | 위젯이 저장한 화면 업로드(최대 12 MB) |
+| POST | `/api/snapshots` | 위젯이 저장한 화면 업로드(최대 4 MB, 글꼴·이미지 제외) |
+| POST | `/api/snapshots/assets` | 프로젝트에 아직 없는 글꼴·이미지 해시 확인 |
+| PUT | `/api/snapshots/assets/{sha256}` | 글꼴·이미지 파일 업로드(파일당 최대 3 MB) |
+| GET | `/api/snapshots/assets/{sha256}?projectKey=demo` | 저장된 파일 조회(관리자 토큰 필요) |
+
+같은 사이트의 글꼴·이미지는 화면과 따로 프로젝트당 한 번만 저장되므로, 두 번째 화면부터는 DOM·CSS만 전송합니다.
 | GET | `/api/snapshots/{id}?projectKey=demo` | 저장된 화면 전체 조회(관리자 토큰 필요) |
 
 저장된 화면은 피드백과 같은 저장소(`FEEDBACK_STORAGE`)에 보관됩니다.
@@ -173,7 +178,7 @@ http://localhost:3000/admin/snapshots/{화면 ID}?projectKey=demo
 
 1. Supabase 개발 프로젝트에서 `supabase/migrations/`의 SQL 파일을 이름 순서대로 적용합니다.
    기존 테이블이 있다면 먼저 스키마를 비교합니다.
-   화면 저장 테이블(`20261113000000-create-screen-snapshots.sql`)이 없으면
+   화면 저장 테이블(`20261113000000-create-screen-snapshots.sql`, `20261113010000-create-screen-snapshot-assets.sql`)이 없으면
    피드백 상세 조회와 화면 저장이 503을 반환합니다.
 2. `.env.local`의 저장소 설정을 다음과 같이 바꿉니다.
 3. Next.js 서버를 다시 시작하고 피드백 전송·목록 조회를 확인합니다.

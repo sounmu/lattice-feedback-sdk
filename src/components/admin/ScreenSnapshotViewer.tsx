@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import type { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
 
+import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
 import type {
   MissingSnapshotAssetReason,
   ScreenSnapshot,
@@ -117,8 +118,30 @@ function AdminTokenForm() {
   );
 }
 
-function ScreenReplay({ snapshot }: { snapshot: ScreenSnapshot }) {
+interface ScreenReplayProps {
+  snapshot: ScreenSnapshot;
+  projectKey: string;
+  token: string;
+}
+
+// Asset files need the admin token, so they are fetched here and handed to the replay as blob: URLs.
+async function fetchAssetUrl(hash: string, projectKey: string, token: string): Promise<string | null> {
+  try {
+    const response = await fetch(`/api/snapshots/assets/${hash}?projectKey=${encodeURIComponent(projectKey)}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      return null;
+    }
+    return URL.createObjectURL(await response.blob());
+  } catch {
+    return null;
+  }
+}
+
+function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
   const frameRef = useRef<HTMLDivElement>(null);
+  const [unloadedAssetCount, setUnloadedAssetCount] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
@@ -141,6 +164,7 @@ function ScreenReplay({ snapshot }: { snapshot: ScreenSnapshot }) {
     }
     let replayer: Replayer | null = null;
     let isCancelled = false;
+    let assetUrls: (string | null)[] = [];
 
     function handleWheel(event: WheelEvent) {
       event.preventDefault();
@@ -151,12 +175,21 @@ function ScreenReplay({ snapshot }: { snapshot: ScreenSnapshot }) {
 
     async function mount(root: HTMLDivElement) {
       // Loaded in the browser only: rrweb expects a DOM when its module is evaluated.
-      const { Replayer: ReplayerClass } = await import('@rrweb/replay');
+      const [{ Replayer: ReplayerClass }, urls] = await Promise.all([
+        import('@rrweb/replay'),
+        Promise.all(snapshot.assetHashes.map((hash) => fetchAssetUrl(hash, projectKey, token))),
+      ]);
+      assetUrls = urls;
       if (isCancelled) {
+        urls.forEach((url) => url && URL.revokeObjectURL(url));
         return;
       }
+      setUnloadedAssetCount(urls.filter((url) => url === null).length);
+      const events = JSON.parse(
+        resolveAssetReferences(JSON.stringify(snapshot.events), (index) => urls[index] ?? null),
+      ) as ReplayerEvents;
       // rrweb strips scripts and rebuilds into an iframe sandboxed without allow-scripts.
-      replayer = new ReplayerClass(snapshot.events as ReplayerEvents, {
+      replayer = new ReplayerClass(events, {
         root,
         mouseTail: false,
         showWarning: false,
@@ -172,8 +205,9 @@ function ScreenReplay({ snapshot }: { snapshot: ScreenSnapshot }) {
       stage.removeEventListener('wheel', handleWheel);
       replayer?.destroy();
       stage.replaceChildren();
+      assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [snapshot]);
+  }, [snapshot, projectKey, token]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -196,6 +230,11 @@ function ScreenReplay({ snapshot }: { snapshot: ScreenSnapshot }) {
           실제 크기
         </button>
         <span className="text-xs text-gray-600">{Math.round(scale * 100)}% · 마우스 휠로 저장된 화면을 스크롤할 수 있습니다.</span>
+        {unloadedAssetCount > 0 && (
+          <span role="alert" className="text-xs text-amber-700">
+            저장된 글꼴·이미지 {unloadedAssetCount}개를 불러오지 못했습니다.
+          </span>
+        )}
       </div>
       <div ref={frameRef} className="w-full overflow-auto rounded border bg-white">
         <div className="overflow-hidden" style={{ width: viewportWidth * scale, height: viewportHeight * scale }}>
@@ -293,7 +332,7 @@ export function ScreenSnapshotViewer() {
     return (
       <>
         <ScreenSnapshotDetails snapshot={result.snapshot} />
-        <ScreenReplay snapshot={result.snapshot} />
+        <ScreenReplay snapshot={result.snapshot} projectKey={projectKey} token={token} />
       </>
     );
   }

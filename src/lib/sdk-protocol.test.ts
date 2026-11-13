@@ -37,7 +37,7 @@ const SCREEN: CapturedScreen = {
 describe('isHostToWidgetMessage', () => {
   it('accepts built messages of every type', () => {
     expect(isHostToWidgetMessage(INIT_MESSAGE)).toBe(true);
-    expect(isHostToWidgetMessage(createHostToWidgetMessage('screen:captured', { screen: SCREEN }))).toBe(true);
+    expect(isHostToWidgetMessage(createHostToWidgetMessage('screen:captured', { screen: SCREEN, assetFiles: [] }))).toBe(true);
     expect(
       isHostToWidgetMessage(createHostToWidgetMessage('screen:capture-failed', { reason: 'page_not_allowed' })),
     ).toBe(true);
@@ -72,12 +72,14 @@ describe('isHostToWidgetMessage', () => {
   });
 
   it('rejects a saved screen that is not one Meta event followed by one FullSnapshot event', () => {
-    const captured = createHostToWidgetMessage('screen:captured', { screen: SCREEN });
-    const withScreen = (screen: unknown) => ({ ...captured, payload: { screen } });
+    const captured = createHostToWidgetMessage('screen:captured', { screen: SCREEN, assetFiles: [] });
+    const withScreen = (screen: unknown) => ({ ...captured, payload: { screen, assetFiles: [] } });
 
     expect(isHostToWidgetMessage(withScreen({ ...SCREEN, events: [...SCREEN.events].reverse() }))).toBe(false);
     expect(isHostToWidgetMessage(withScreen({ ...SCREEN, events: [SCREEN.events[1]] }))).toBe(false);
     expect(isHostToWidgetMessage(withScreen({ ...SCREEN, format: 'html' }))).toBe(false);
+    expect(isHostToWidgetMessage({ ...captured, payload: { screen: SCREEN, assetFiles: ['font-bytes'] } })).toBe(false);
+    expect(isHostToWidgetMessage({ ...captured, payload: { screen: SCREEN } })).toBe(false);
     expect(isHostToWidgetMessage(withScreen({ ...SCREEN, page: { ...SCREEN.page, scrollY: '40' } }))).toBe(false);
     expect(
       isHostToWidgetMessage({ ...captured, type: 'screen:capture-failed', payload: { reason: 'out_of_memory' } }),

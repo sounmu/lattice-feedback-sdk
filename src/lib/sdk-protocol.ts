@@ -1,6 +1,6 @@
 // Dependency-free runtime for the postMessage protocol. The SDK bundle imports this file,
 // so it must not pull in zod or any other package.
-import { isCapturedScreen, isScreenCaptureFailureReason } from '@/lib/screen-snapshot';
+import { isAssetFileList, isCapturedScreen, isScreenCaptureFailureReason } from '@/lib/screen-snapshot';
 import type { FeedbackReporter, PageContext } from '@/types/feedback';
 import {
   MESSAGE_SOURCE,
@@ -68,7 +68,7 @@ export function isHostToWidgetMessage(value: unknown): value is HostToWidgetMess
     case 'page:update':
       return isPageContext(payload.page);
     case 'screen:captured':
-      return isCapturedScreen(payload.screen);
+      return isCapturedScreen(payload.screen) && isAssetFileList(payload.assetFiles);
     case 'screen:capture-failed':
       return isScreenCaptureFailureReason(payload.reason);
     default:

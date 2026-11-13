@@ -1,12 +1,14 @@
 import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import type { ScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
-import type { ScreenSnapshot, ScreenSnapshotSummary } from '@/types/screen-snapshot';
+import type { ScreenSnapshot, ScreenSnapshotAssetFile, ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
 export const MAX_SCREEN_SNAPSHOTS_PER_PROJECT = 50;
+export const MAX_SCREEN_SNAPSHOT_ASSET_BYTES_PER_PROJECT = 64 * 1024 * 1024;
 
 // Kept on globalThis so the store survives dev hot reload. Each list is oldest first.
 const globalForScreenSnapshotStore = globalThis as typeof globalThis & {
   memoryScreenSnapshotStore?: Map<string, ScreenSnapshot[]>;
+  memoryScreenSnapshotAssetStore?: Map<string, Map<string, ScreenSnapshotAssetFile>>;
 };
 
 function getStore(): Map<string, ScreenSnapshot[]> {
@@ -16,8 +18,22 @@ function getStore(): Map<string, ScreenSnapshot[]> {
   return globalForScreenSnapshotStore.memoryScreenSnapshotStore;
 }
 
+function getAssetStore(projectKey: string): Map<string, ScreenSnapshotAssetFile> {
+  if (!globalForScreenSnapshotStore.memoryScreenSnapshotAssetStore) {
+    globalForScreenSnapshotStore.memoryScreenSnapshotAssetStore = new Map();
+  }
+  const stores = globalForScreenSnapshotStore.memoryScreenSnapshotAssetStore;
+  let store = stores.get(projectKey);
+  if (!store) {
+    store = new Map();
+    stores.set(projectKey, store);
+  }
+  return store;
+}
+
 export function resetMemoryScreenSnapshotStore(): void {
   getStore().clear();
+  globalForScreenSnapshotStore.memoryScreenSnapshotAssetStore?.clear();
 }
 
 function toSummary(snapshot: ScreenSnapshot): ScreenSnapshotSummary {
@@ -26,6 +42,7 @@ function toSummary(snapshot: ScreenSnapshot): ScreenSnapshotSummary {
     projectKey: snapshot.projectKey,
     feedbackId: snapshot.feedbackId,
     createdAt: snapshot.createdAt,
+    assetHashes: [...snapshot.assetHashes],
     format: snapshot.format,
     capturedAt: snapshot.capturedAt,
     page: { ...snapshot.page },
@@ -51,6 +68,7 @@ export function createMemoryScreenSnapshotRepository(): ScreenSnapshotRepository
         projectKey: input.projectKey,
         feedbackId: null,
         createdAt: new Date().toISOString(),
+        assetHashes: input.assetHashes,
         format: input.format,
         capturedAt: input.capturedAt,
         page: input.page,
@@ -89,6 +107,30 @@ export function createMemoryScreenSnapshotRepository(): ScreenSnapshotRepository
           item.feedbackId = feedbackId;
         }
       }
+    },
+
+    async findMissingAssetHashes(projectKey, hashes) {
+      const store = getAssetStore(projectKey);
+      return [...new Set(hashes)].filter((hash) => !store.has(hash));
+    },
+
+    async saveAsset({ projectKey, hash, contentType, data }) {
+      const store = getAssetStore(projectKey);
+      if (store.has(hash)) {
+        return;
+      }
+      let storedBytes = 0;
+      store.forEach((asset) => {
+        storedBytes += asset.data.byteLength;
+      });
+      if (storedBytes + data.byteLength > MAX_SCREEN_SNAPSHOT_ASSET_BYTES_PER_PROJECT) {
+        throw new FeedbackStorageFullError();
+      }
+      store.set(hash, { contentType, data });
+    },
+
+    async findAsset(projectKey, hash) {
+      return getAssetStore(projectKey).get(hash) ?? null;
     },
   };
 }

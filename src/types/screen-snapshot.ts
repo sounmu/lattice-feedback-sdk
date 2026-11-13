@@ -42,6 +42,8 @@ export type ScreenCaptureFailureReason = 'page_not_allowed' | 'capture_failed';
 
 export interface ScreenSnapshot extends CapturedScreen {
   id: string;
+  /** SHA-256 of each embedded font or image; the events refer to them by position. */
+  assetHashes: string[];
   projectKey: string;
   /** Set once the reporter submits the feedback this screen was saved for. */
   feedbackId: string | null;
@@ -51,7 +53,26 @@ export interface ScreenSnapshot extends CapturedScreen {
 
 export type ScreenSnapshotSummary = Omit<ScreenSnapshot, 'events'>;
 
-export type CreateScreenSnapshotInput = CapturedScreen & Pick<ScreenSnapshot, 'projectKey'> & { hostOrigin: string };
+export type CreateScreenSnapshotInput = CapturedScreen & Pick<ScreenSnapshot, 'projectKey' | 'assetHashes'> & { hostOrigin: string };
+
+/** What the SDK hands to the widget: the screen plus the files its asset references point to, in order. */
+export interface ScreenCapture {
+  screen: CapturedScreen;
+  assetFiles: Blob[];
+}
+
+export interface ScreenSnapshotAssetFile {
+  contentType: string;
+  data: Uint8Array;
+}
+
+export interface FindMissingScreenSnapshotAssetsInput extends Pick<CreateScreenSnapshotInput, 'projectKey' | 'hostOrigin'> {
+  hashes: string[];
+}
+
+export interface FindMissingScreenSnapshotAssetsResponse {
+  missingHashes: string[];
+}
 
 export interface CreateScreenSnapshotResponse {
   snapshot: ScreenSnapshotSummary;

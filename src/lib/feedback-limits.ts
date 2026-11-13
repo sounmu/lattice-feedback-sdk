@@ -8,10 +8,12 @@ export const MAX_FLOW_EVENTS = 200;
 export const MAX_FEEDBACK_BYTES = 65536;
 
 // Saved screens carry the page's DOM, CSS, and same-origin fonts/images, so they have their own budgets.
-export const MAX_SCREEN_SNAPSHOT_BYTES = 12 * 1024 * 1024;
+// Fonts and images are uploaded separately, so the screen itself stays under Vercel's 4.5 MB request limit.
+export const MAX_SCREEN_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 export const MAX_SNAPSHOT_ASSET_BYTES = 3 * 1024 * 1024;
 export const MAX_SNAPSHOT_ASSETS_TOTAL_BYTES = 6 * 1024 * 1024;
 export const MAX_MISSING_SNAPSHOT_ASSETS = 50;
+export const MAX_SNAPSHOT_ASSETS = 40;
 export const MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK = 5;
 
 export function truncateText(value: string, maxLength: number): string {

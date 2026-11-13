@@ -54,7 +54,11 @@ export function getClientAddress(request: Request): string {
   return value;
 }
 
-export function consumeRateLimit(key: string, now: number = Date.now()): boolean {
+export function consumeRateLimit(
+  key: string,
+  now: number = Date.now(),
+  maxRequests: number = MAX_REQUESTS_PER_WINDOW,
+): boolean {
   const buckets = getBuckets();
   const bucket = buckets.get(key);
   // Map keeps insertion order: deleting and re-inserting moves the key to the newest end,
@@ -71,7 +75,7 @@ export function consumeRateLimit(key: string, now: number = Date.now()): boolean
     return true;
   }
   buckets.set(key, bucket);
-  if (bucket.count >= MAX_REQUESTS_PER_WINDOW) {
+  if (bucket.count >= maxRequests) {
     return false;
   }
   bucket.count += 1;

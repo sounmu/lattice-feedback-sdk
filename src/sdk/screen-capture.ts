@@ -7,14 +7,15 @@ import { snapshot } from 'rrweb-snapshot';
 import {
   MAX_PAGE_TITLE_LENGTH,
   MAX_SNAPSHOT_ASSET_BYTES,
+  MAX_SNAPSHOT_ASSETS,
   MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
   truncateText,
 } from '@/lib/feedback-limits';
 import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_META_EVENT_TYPE, SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
-import { inlineSnapshotAssets, normalizeFontFamily } from '@/sdk/snapshot-assets';
+import { extractSnapshotAssets, normalizeFontFamily } from '@/sdk/snapshot-assets';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
-import type { CapturedScreen } from '@/types/screen-snapshot';
+import type { ScreenCapture } from '@/types/screen-snapshot';
 
 const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
 const MASKED_SELECTOR = '[data-lattice-mask]';
@@ -42,7 +43,7 @@ async function fetchSameOriginAsset(url: string): Promise<Blob> {
   }
 }
 
-export async function captureScreen(sdkSelector: string): Promise<CapturedScreen> {
+export async function captureScreen(sdkSelector: string): Promise<ScreenCapture> {
   const capturedAt = Date.now();
   const node = snapshot(document, {
     blockSelector: `${sdkSelector}, ${BLOCKED_SELECTOR}`,
@@ -67,16 +68,17 @@ export async function captureScreen(sdkSelector: string): Promise<CapturedScreen
       loadedFontFamilies.add(normalizeFontFamily(fontFace.family));
     }
   });
-  const missingAssets = await inlineSnapshotAssets(node, {
+  const { assetFiles, missingAssets } = await extractSnapshotAssets(node, {
     pageOrigin: window.location.origin,
     loadedFontFamilies,
     fetchAsset: fetchSameOriginAsset,
     maxAssetBytes: MAX_SNAPSHOT_ASSET_BYTES,
     maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
+    maxAssetCount: MAX_SNAPSHOT_ASSETS,
   });
 
   const url = getPageUrl(window.location.href);
-  return {
+  const screen = {
     format: SCREEN_SNAPSHOT_FORMAT,
     capturedAt: new Date(capturedAt).toISOString(),
     page: {
@@ -101,4 +103,5 @@ export async function captureScreen(sdkSelector: string): Promise<CapturedScreen
     ],
     missingAssets,
   };
+  return { screen, assetFiles };
 }
