@@ -44,6 +44,10 @@ export interface CaptureState {
   activeMode: CaptureMode | null;
   selection: ElementTarget | null;
   attachments: FeedbackAttachments;
+  /** Stable key of each comment, in the same order as attachments.comments. */
+  commentKeys: string[];
+  /** Stable key of each edit, in the same order as attachments.edits. */
+  editKeys: string[];
   flowEventCount: number;
   errorMessage: string | null;
 }

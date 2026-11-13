@@ -38,8 +38,8 @@ export function CommentPinOverlay({ boxes, width: viewWidth, height: viewHeight,
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       {boxes.map(({ pin, x, y, width, height }) => {
         const isSelected = pin.number === selectedNumber;
-        const badgeX = clamp(x, badgeRadius, viewWidth - badgeRadius);
-        const badgeY = clamp(y, badgeRadius, viewHeight - badgeRadius);
+        const badgeX = clamp(x + pin.offset.x * width, badgeRadius, viewWidth - badgeRadius);
+        const badgeY = clamp(y + pin.offset.y * height, badgeRadius, viewHeight - badgeRadius);
         const opensLeft = badgeX + BUBBLE_WIDTH * inverseScale > viewWidth;
         return (
           <div key={pin.number}>

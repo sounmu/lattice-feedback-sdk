@@ -9,8 +9,21 @@ import { CaptureControls } from '@/components/widget/CaptureControls';
 import { ScreenSnapshotControls } from '@/components/widget/ScreenSnapshotControls';
 import { createCaptureCommand } from '@/lib/capture-protocol';
 import type { FeedbackReporter, FeedbackType } from '@/types/feedback';
+import type { AttachmentKind, CaptureState } from '@/types/sdk-message';
 
 const MAX_MESSAGE_LENGTH = 5000;
+
+/** The key saved screens use for a comment or edit; a Flow has none. */
+function findMarkKey(state: CaptureState, kind: AttachmentKind, index: number): string | undefined {
+  switch (kind) {
+    case 'comments':
+      return state.commentKeys[index];
+    case 'edits':
+      return state.editKeys[index];
+    case 'flow':
+      return undefined;
+  }
+}
 
 const ANONYMOUS_REPORTER: FeedbackReporter = { id: 'anonymous', name: 'Anonymous' };
 
@@ -137,7 +150,15 @@ export function FeedbackWidget() {
               // Saved right away so the admin sees the comment pinned on the screen it was written on.
               screens.captureForMarks();
             }}
-            onRemove={(kind, index) => sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }))}
+            onRemove={(kind, index) => {
+              const markKey = findMarkKey(captureState, kind, index);
+              sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }));
+              // Screens that showed the deleted mark are dropped; the remaining marks are saved again.
+              const remainingMarks = captureState.attachments.comments.length + captureState.attachments.edits.length - 1;
+              if (markKey && screens.removeScreensWithMark(markKey) && remainingMarks > 0) {
+                screens.captureForMarks();
+              }
+            }}
           />
         )}
         {captureState?.errorMessage && <p role="alert" className="text-sm text-red-600">{captureState.errorMessage}</p>}

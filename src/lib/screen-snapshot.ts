@@ -78,13 +78,18 @@ export function isScreenEditMove(value: unknown): value is ScreenEditMove {
   return isRecord(value) && isMarkBase(value, MAX_EDITS) && isMarkRect(value.originalRect) && isMarkRect(value.proposedRect);
 }
 
+function isFraction(value: unknown): boolean {
+  return isFiniteNumber(value) && value >= 0 && value <= 1;
+}
+
 export function isScreenCommentPin(value: unknown): value is ScreenCommentPin {
   if (!isRecord(value)) {
     return false;
   }
-  const { comment } = value;
+  const { comment, offset } = value;
   return (
     isMarkBase(value, MAX_COMMENTS) && isMarkRect(value.rect) &&
+    isRecord(offset) && isFraction(offset.x) && isFraction(offset.y) &&
     typeof comment === 'string' && comment.length > 0 && comment.length <= MAX_COMMENT_LENGTH
   );
 }
