@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 import { useHostBridge } from '@/hooks/useHostBridge';
 import { useScreenSnapshots } from '@/hooks/useScreenSnapshots';
@@ -27,6 +27,12 @@ export function FeedbackWidget() {
     captureState, sendCaptureCommand, subscribeToScreenCapture, requestScreenCapture,
   } = useHostBridge();
   const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture });
+  const { syncCommentKeys } = screens;
+  const commentKeys = captureState?.commentKeys;
+
+  useEffect(() => {
+    syncCommentKeys(commentKeys ?? []);
+  }, [commentKeys, syncCommentKeys]);
   const { submit, reset, status, errorMessage } = useSubmitFeedback();
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
@@ -125,14 +131,7 @@ export function FeedbackWidget() {
               // Saved right away so the admin sees the comment pinned on the screen it was written on.
               screens.captureForComment();
             }}
-            onRemove={(kind, index) => {
-              const commentKey = kind === 'comments' ? captureState.commentKeys[index] : undefined;
-              sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }));
-              // Screens that pinned the deleted comment are dropped; the remaining comments are pinned again.
-              if (commentKey && screens.removeScreensWithComment(commentKey) && captureState.attachments.comments.length > 1) {
-                screens.captureForComment();
-              }
-            }}
+            onRemove={(kind, index) => sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }))}
           />
         )}
         {captureState?.errorMessage && <p role="alert" className="text-sm text-red-600">{captureState.errorMessage}</p>}

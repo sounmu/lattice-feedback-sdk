@@ -86,6 +86,39 @@ export function createCommentPinEvent(pin: ScreenCommentPin, timestamp: number):
   return { type: RRWEB_CUSTOM_EVENT_TYPE, timestamp, data: { tag: COMMENT_PIN_EVENT_TAG, payload: pin } };
 }
 
+/**
+ * The events of a saved screen with only the pins of comments that still exist, numbered by their
+ * place among them. Returns the same array when nothing changes, and null when no pin is left.
+ */
+export function reconcileCommentPins(
+  events: readonly ScreenSnapshotEvent[],
+  liveKeys: readonly string[],
+): readonly ScreenSnapshotEvent[] | null {
+  let isChanged = false;
+  let pinCount = 0;
+  const next = events.flatMap((event) => {
+    if (!isCommentPinEvent(event)) {
+      return [event];
+    }
+    const pin = (event.data as { payload: ScreenCommentPin }).payload;
+    const number = liveKeys.indexOf(pin.key) + 1;
+    if (number === 0) {
+      isChanged = true;
+      return [];
+    }
+    pinCount += 1;
+    if (number === pin.number) {
+      return [event];
+    }
+    isChanged = true;
+    return [createCommentPinEvent({ ...pin, number }, event.timestamp)];
+  });
+  if (pinCount === 0) {
+    return null;
+  }
+  return isChanged ? next : events;
+}
+
 /** The comment pins of a saved screen, in event order. Malformed events are skipped. */
 export function findCommentPins(events: readonly ScreenSnapshotEvent[]): ScreenCommentPin[] {
   return events.filter(isCommentPinEvent).map((event) => (event.data as { payload: ScreenCommentPin }).payload);

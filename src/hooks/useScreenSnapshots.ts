@@ -4,15 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
 import { addCommentScreen, type CommentScreens } from '@/lib/comment-screens';
-import { findCommentPins } from '@/lib/screen-snapshot';
+import { findCommentPins, reconcileCommentPins } from '@/lib/screen-snapshot';
 import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
 import type {
   CreateScreenSnapshotInput,
   CreateScreenSnapshotResponse,
   FindMissingScreenSnapshotAssetsInput,
   FindMissingScreenSnapshotAssetsResponse,
+  CapturedScreen,
   ScreenCapture,
   ScreenCaptureFailureReason,
+  ScreenSnapshotSummary,
 } from '@/types/screen-snapshot';
 
 export type ScreenSaveStatus = 'idle' | 'capturing' | 'uploading';
@@ -20,7 +22,7 @@ export type ScreenSaveStatus = 'idle' | 'capturing' | 'uploading';
 interface UseScreenSnapshotsOptions {
   config: Pick<CreateScreenSnapshotInput, 'projectKey' | 'hostOrigin'> | null;
   subscribeToScreenCapture: (listener: (result: ScreenCaptureResult) => void) => () => void;
-  requestScreenCapture: () => void;
+  requestScreenCapture: (requestId: string) => void;
 }
 
 // An SDK build without screen saving never answers, so the request must not wait forever.
@@ -31,6 +33,17 @@ const PAYLOAD_TOO_LARGE_STATUS = 413;
 const COMMENT_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 코멘트 위치를 화면에 표시하지 못했습니다.';
 
 type CaptureSource = 'manual' | 'comment';
+
+// Captures are taken the moment they are asked for; uploads, and pin updates after a comment is deleted, run one at a time.
+type UploadJob = { type: 'capture'; capture: ScreenCapture; source: CaptureSource } | { type: 'reconcile' };
+
+/** What a comment screen was saved from, kept so its pins can be updated when a comment is deleted. */
+interface SavedCommentScreen {
+  screen: CapturedScreen;
+  assetHashes: string[];
+}
+
+type UploadOwner = Pick<CreateScreenSnapshotInput, 'projectKey' | 'hostOrigin'>;
 
 const CAPTURE_FAILURE_MESSAGES: Record<ScreenCaptureFailureReason, string> = {
   page_not_allowed: PAGE_NOT_ALLOWED_MESSAGE,
@@ -100,109 +113,202 @@ function getUploadErrorMessage(status: number): string {
   }
 }
 
+async function createSnapshot(owner: UploadOwner, screen: CapturedScreen, assetHashes: string[]): Promise<ScreenSnapshotSummary> {
+  const input: CreateScreenSnapshotInput = { ...owner, ...screen, assetHashes };
+  const body = new TextEncoder().encode(JSON.stringify(input));
+  if (body.length > MAX_SCREEN_SNAPSHOT_BYTES) {
+    throw new UploadFailedError(PAYLOAD_TOO_LARGE_STATUS);
+  }
+  const response = await sendOrThrow('/api/snapshots', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+  return ((await response.json()) as CreateScreenSnapshotResponse).snapshot;
+}
+
+function getJobErrorMessage(error: unknown): string {
+  return error instanceof UploadFailedError ? getUploadErrorMessage(error.status) : SAVE_FAILED_MESSAGE;
+}
+
 export function useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture }: UseScreenSnapshotsOptions) {
   const [screens, setScreens] = useState<CommentScreens>({ snapshots: [], commentPinsByScreen: new Map() });
   const { snapshots, commentPinsByScreen } = screens;
   const commentScreenIds = useMemo(() => new Set(commentPinsByScreen.keys()), [commentPinsByScreen]);
-  // Uploads finish asynchronously, so the limit check reads the latest screens from here.
+  // Uploads finish asynchronously, so they read and write the latest screens through this ref.
   const screensRef = useRef(screens);
-  const [status, setStatus] = useState<ScreenSaveStatus>('idle');
+  const [pendingCount, setPendingCount] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const captureTimer = useRef<number | null>(null);
-  const pendingSource = useRef<CaptureSource>('manual');
-  // A comment attached while another screen is being saved gets its own save afterwards.
-  const isCommentCaptureQueued = useRef(false);
-  const startCaptureRef = useRef<(source: CaptureSource) => void>(() => undefined);
+  const pendingRequests = useRef(new Map<string, { source: CaptureSource; timer: number }>());
+  const jobs = useRef<UploadJob[]>([]);
+  const isDraining = useRef(false);
+  const savedCommentScreens = useRef(new Map<string, SavedCommentScreen>());
+  const liveCommentKeys = useRef<readonly string[]>([]);
+  // Bumped by reset so that work started for a discarded draft does not touch the new one.
+  const generation = useRef(0);
+  const configRef = useRef(config);
+  const drainRef = useRef<() => void>(() => undefined);
+
+  let status: ScreenSaveStatus = 'idle';
+  if (isUploading) {
+    status = 'uploading';
+  } else if (pendingCount > 0) {
+    status = 'capturing';
+  }
+
+  function commitScreens(next: CommentScreens) {
+    screensRef.current = next;
+    setScreens(next);
+    for (const id of savedCommentScreens.current.keys()) {
+      if (!next.commentPinsByScreen.has(id)) {
+        savedCommentScreens.current.delete(id);
+      }
+    }
+  }
+
+  async function runCapture(owner: UploadOwner, { screen, assetFiles }: ScreenCapture, source: CaptureSource, jobGeneration: number) {
+    // A comment deleted while its screen was being captured must not be saved with it.
+    const events = source === 'comment' ? reconcileCommentPins(screen.events, liveCommentKeys.current) : screen.events;
+    if (!events) {
+      return;
+    }
+    const pinnedScreen: CapturedScreen = { ...screen, events: [...events] };
+    const assetHashes = await uploadAssetFiles({ ...owner, pageUrl: screen.page.url }, assetFiles);
+    const created = await createSnapshot(owner, pinnedScreen, assetHashes);
+    if (jobGeneration !== generation.current) {
+      return;
+    }
+    const pinKeys = findCommentPins(pinnedScreen.events).map((pin) => pin.key);
+    const next = source === 'comment'
+      ? addCommentScreen(screensRef.current, created, pinKeys, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
+      : { ...screensRef.current, snapshots: [...screensRef.current.snapshots, created] };
+    if (!next) {
+      setErrorMessage(COMMENT_SCREEN_FULL_MESSAGE);
+      return;
+    }
+    if (source === 'comment') {
+      savedCommentScreens.current.set(created.id, { screen: pinnedScreen, assetHashes });
+    }
+    commitScreens(next);
+  }
+
+  // A deleted comment must not reach the admin through a screen saved earlier: each comment screen is
+  // saved again without its pin and with the remaining comments renumbered, keeping its original moment.
+  async function runReconcile(owner: UploadOwner, jobGeneration: number) {
+    for (const [id, saved] of [...savedCommentScreens.current]) {
+      const events = reconcileCommentPins(saved.screen.events, liveCommentKeys.current);
+      if (events === saved.screen.events) {
+        continue;
+      }
+      const current = screensRef.current;
+      if (!events) {
+        commitScreens({
+          snapshots: current.snapshots.filter((snapshot) => snapshot.id !== id),
+          commentPinsByScreen: new Map([...current.commentPinsByScreen].filter(([screenId]) => screenId !== id)),
+        });
+        continue;
+      }
+      const screen: CapturedScreen = { ...saved.screen, events: [...events] };
+      const created = await createSnapshot(owner, screen, saved.assetHashes);
+      if (jobGeneration !== generation.current) {
+        return;
+      }
+      const latest = screensRef.current;
+      if (!latest.commentPinsByScreen.has(id)) {
+        continue;
+      }
+      const commentPins = new Map([...latest.commentPinsByScreen].filter(([screenId]) => screenId !== id));
+      commentPins.set(created.id, findCommentPins(screen.events).map((pin) => pin.key));
+      savedCommentScreens.current.set(created.id, { screen, assetHashes: saved.assetHashes });
+      commitScreens({
+        snapshots: latest.snapshots.map((snapshot) => (snapshot.id === id ? created : snapshot)),
+        commentPinsByScreen: commentPins,
+      });
+    }
+  }
+
+  async function drain() {
+    const owner = configRef.current;
+    if (isDraining.current || !owner) {
+      return;
+    }
+    isDraining.current = true;
+    setIsUploading(true);
+    const { projectKey, hostOrigin } = owner;
+    while (jobs.current.length > 0) {
+      const job = jobs.current.shift() as UploadJob;
+      const jobGeneration = generation.current;
+      try {
+        if (job.type === 'capture') {
+          await runCapture({ projectKey, hostOrigin }, job.capture, job.source, jobGeneration);
+        } else {
+          await runReconcile({ projectKey, hostOrigin }, jobGeneration);
+        }
+      } catch (error) {
+        if (jobGeneration === generation.current) {
+          setErrorMessage(getJobErrorMessage(error));
+        }
+      }
+    }
+    isDraining.current = false;
+    setIsUploading(false);
+  }
+
+  useEffect(() => {
+    configRef.current = config;
+    drainRef.current = () => {
+      void drain();
+    };
+  });
 
   useEffect(() => {
     if (!config) {
       return;
     }
-    const { projectKey, hostOrigin } = config;
-
-    async function upload({ screen, assetFiles }: ScreenCapture, source: CaptureSource) {
-      setStatus('uploading');
-      try {
-        const assetHashes = await uploadAssetFiles({ projectKey, hostOrigin, pageUrl: screen.page.url }, assetFiles);
-        const input: CreateScreenSnapshotInput = { projectKey, hostOrigin, ...screen, assetHashes };
-        const body = new TextEncoder().encode(JSON.stringify(input));
-        if (body.length > MAX_SCREEN_SNAPSHOT_BYTES) {
-          setErrorMessage(getUploadErrorMessage(PAYLOAD_TOO_LARGE_STATUS));
-          return;
-        }
-        const response = await sendOrThrow('/api/snapshots', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-        });
-        const created = (await response.json()) as CreateScreenSnapshotResponse;
-        const pinKeys = findCommentPins(screen.events).map((pin) => pin.key);
-        const next = source === 'comment'
-          ? addCommentScreen(screensRef.current, created.snapshot, pinKeys, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
-          : { ...screensRef.current, snapshots: [...screensRef.current.snapshots, created.snapshot] };
-        if (!next) {
-          setErrorMessage(COMMENT_SCREEN_FULL_MESSAGE);
-          return;
-        }
-        screensRef.current = next;
-        setScreens(next);
-      } catch (error) {
-        if (error instanceof UploadFailedError) {
-          setErrorMessage(getUploadErrorMessage(error.status));
-        } else {
-          setErrorMessage(SAVE_FAILED_MESSAGE);
-        }
-      } finally {
-        setStatus('idle');
-        runQueuedCommentCapture();
-      }
-    }
-
-    function runQueuedCommentCapture() {
-      if (isCommentCaptureQueued.current) {
-        isCommentCaptureQueued.current = false;
-        startCaptureRef.current('comment');
-      }
-    }
-
+    const requests = pendingRequests.current;
     const unsubscribe = subscribeToScreenCapture((result) => {
+      const { requestId } = result.payload;
+      const request = requests.get(requestId);
       // Only an answer to a pending request is accepted.
-      if (captureTimer.current === null) {
+      if (!request) {
         return;
       }
-      window.clearTimeout(captureTimer.current);
-      captureTimer.current = null;
+      window.clearTimeout(request.timer);
+      requests.delete(requestId);
+      setPendingCount(requests.size);
       if (result.type === 'screen:capture-failed') {
-        setStatus('idle');
         setErrorMessage(CAPTURE_FAILURE_MESSAGES[result.payload.reason]);
-        runQueuedCommentCapture();
         return;
       }
-      void upload(result.payload, pendingSource.current);
+      const { screen, assetFiles } = result.payload;
+      jobs.current.push({ type: 'capture', capture: { screen, assetFiles }, source: request.source });
+      drainRef.current();
     });
     return () => {
       unsubscribe();
-      if (captureTimer.current !== null) {
-        window.clearTimeout(captureTimer.current);
-        captureTimer.current = null;
-      }
+      requests.forEach((request) => window.clearTimeout(request.timer));
+      requests.clear();
+      setPendingCount(0);
     };
   }, [config, subscribeToScreenCapture]);
 
   const canCapture = status === 'idle' && snapshots.length < MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK;
   // A comment screen may replace an earlier one; whether it fits is checked once it is uploaded.
-  const canCaptureComment = canCapture || (status === 'idle' && commentPinsByScreen.size > 0);
+  const canCaptureComment = snapshots.length < MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK || commentPinsByScreen.size > 0;
 
   const startCapture = useCallback((source: CaptureSource) => {
-    pendingSource.current = source;
+    const requestId = crypto.randomUUID();
+    const requests = pendingRequests.current;
     setErrorMessage(null);
-    setStatus('capturing');
-    captureTimer.current = window.setTimeout(() => {
-      captureTimer.current = null;
-      setStatus('idle');
+    const timer = window.setTimeout(() => {
+      requests.delete(requestId);
+      setPendingCount(requests.size);
       setErrorMessage(SAVE_FAILED_MESSAGE);
     }, CAPTURE_TIMEOUT_MS);
-    requestScreenCapture();
+    requests.set(requestId, { source, timer });
+    setPendingCount(requests.size);
+    requestScreenCapture(requestId);
   }, [requestScreenCapture]);
 
   const capture = useCallback(() => {
@@ -211,53 +317,41 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     }
   }, [canCapture, startCapture]);
 
+  // Asked right away, even while another screen is saving, so the comment's UI state is what gets saved.
   const captureForComment = useCallback(() => {
-    if (status !== 'idle') {
-      isCommentCaptureQueued.current = true;
-      return;
-    }
     if (!canCaptureComment) {
       setErrorMessage(COMMENT_SCREEN_FULL_MESSAGE);
       return;
     }
     startCapture('comment');
-  }, [status, canCaptureComment, startCapture]);
+  }, [canCaptureComment, startCapture]);
 
-  useEffect(() => {
-    startCaptureRef.current = startCapture;
-  }, [startCapture]);
-
-  const remove = useCallback((id: string) => {
-    const next = {
-      snapshots: screensRef.current.snapshots.filter((snapshot) => snapshot.id !== id),
-      commentPinsByScreen: new Map([...screensRef.current.commentPinsByScreen].filter(([screenId]) => screenId !== id)),
-    };
-    screensRef.current = next;
-    setScreens(next);
+  /** Follows the comments in the draft; when one is deleted, the saved screens drop its pin. */
+  const syncCommentKeys = useCallback((keys: readonly string[]) => {
+    const isDeleted = liveCommentKeys.current.some((key) => !keys.includes(key));
+    liveCommentKeys.current = keys;
+    if (isDeleted && savedCommentScreens.current.size > 0) {
+      jobs.current.push({ type: 'reconcile' });
+      drainRef.current();
+    }
   }, []);
 
-  // A deleted comment must not reach the admin through a screen saved earlier, so those screens are dropped.
-  const removeScreensWithComment = useCallback((key: string): boolean => {
-    const dropped = new Set([...screensRef.current.commentPinsByScreen].filter(([, keys]) => keys.includes(key)).map(([id]) => id));
-    if (dropped.size === 0) {
-      return false;
-    }
-    const next = {
-      snapshots: screensRef.current.snapshots.filter((snapshot) => !dropped.has(snapshot.id)),
-      commentPinsByScreen: new Map([...screensRef.current.commentPinsByScreen].filter(([id]) => !dropped.has(id))),
-    };
-    screensRef.current = next;
-    setScreens(next);
-    return true;
+  const remove = useCallback((id: string) => {
+    commitScreens({
+      snapshots: screensRef.current.snapshots.filter((snapshot) => snapshot.id !== id),
+      commentPinsByScreen: new Map([...screensRef.current.commentPinsByScreen].filter(([screenId]) => screenId !== id)),
+    });
   }, []);
 
   const reset = useCallback(() => {
-    const empty: CommentScreens = { snapshots: [], commentPinsByScreen: new Map() };
-    screensRef.current = empty;
-    setScreens(empty);
-    isCommentCaptureQueued.current = false;
+    generation.current += 1;
+    jobs.current = [];
+    pendingRequests.current.forEach((request) => window.clearTimeout(request.timer));
+    pendingRequests.current.clear();
+    setPendingCount(0);
+    commitScreens({ snapshots: [], commentPinsByScreen: new Map() });
     setErrorMessage(null);
   }, []);
 
-  return { snapshots, commentScreenIds, removeScreensWithComment, status, errorMessage, canCapture, capture, captureForComment, remove, reset };
+  return { snapshots, commentScreenIds, status, errorMessage, canCapture, capture, captureForComment, syncCommentKeys, remove, reset };
 }
