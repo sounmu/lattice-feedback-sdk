@@ -28,6 +28,7 @@ export const COMMENT_PIN_EVENT_TAG = 'lattice-comment-pin';
 export const EDIT_MOVE_EVENT_TAG = 'lattice-edit-move';
 export const MAX_SCREEN_MARK_EVENTS = MAX_COMMENTS + MAX_EDITS;
 export const MAX_LABEL_LENGTH = 200;
+const MAX_MARK_KEY_LENGTH = 40;
 const MAX_RECT_COORDINATE = 10_000_000;
 
 const MISSING_SNAPSHOT_ASSET_REASONS: readonly MissingSnapshotAssetReason[] = [
@@ -64,8 +65,9 @@ function isMarkRect(value: unknown): boolean {
 }
 
 function isMarkBase(value: Record<string, unknown>, maxNumber: number): boolean {
-  const { number, nodeId, label } = value;
+  const { number, key, nodeId, label } = value;
   return (
+    typeof key === 'string' && key.length > 0 && key.length <= MAX_MARK_KEY_LENGTH &&
     Number.isInteger(number) && Number(number) >= 1 && Number(number) <= maxNumber &&
     (nodeId === null || (Number.isInteger(nodeId) && Number(nodeId) >= 0)) &&
     typeof label === 'string' && label.length <= MAX_LABEL_LENGTH

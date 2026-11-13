@@ -3,7 +3,7 @@ import { createScreenSnapshotBody } from '@/app/api/snapshots/screen-snapshot-te
 import { createCommentPinEvent, createEditMoveEvent, findCommentPins, findEditMoves, isCapturedScreen } from '@/lib/screen-snapshot';
 import type { ScreenCommentPin, ScreenEditMove, ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
-const PIN: ScreenCommentPin = { number: 1, nodeId: 7, rect: { x: 10, y: 20, width: 80, height: 30 }, label: 'save', comment: '버튼이 안 보여요' };
+const PIN: ScreenCommentPin = { number: 1, key: 'comment-1', nodeId: 7, rect: { x: 10, y: 20, width: 80, height: 30 }, label: 'save', comment: '버튼이 안 보여요' };
 
 function createScreen(extraEvents: unknown[]) {
   const screen = createScreenSnapshotBody();
@@ -35,6 +35,7 @@ it('rejects malformed pins and other trailing events', () => {
 it('accepts proposed moves next to comment pins and reads each kind separately', () => {
   const move: ScreenEditMove = {
     number: 1,
+    key: 'edit-2',
     nodeId: 9,
     originalRect: { x: 10, y: 20, width: 80, height: 30 },
     proposedRect: { x: 110, y: -20, width: 80, height: 30 },

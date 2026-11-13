@@ -137,8 +137,8 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
         });
         const created = (await response.json()) as CreateScreenSnapshotResponse;
         const markKeys = [
-          ...findCommentPins(screen.events).map((pin) => `comment:${pin.number}`),
-          ...findEditMoves(screen.events).map((move) => `edit:${move.number}`),
+          ...findCommentPins(screen.events).map((pin) => pin.key),
+          ...findEditMoves(screen.events).map((move) => move.key),
         ];
         const next = source === 'marks'
           ? addMarkedScreen(screensRef.current, created.snapshot, markKeys, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)

@@ -2,7 +2,7 @@ import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
 export interface MarkedScreens {
   snapshots: ScreenSnapshotSummary[];
-  /** Comments and edits marked on each screen saved for them (keys like "comment:1"), by screen id. */
+  /** Comments and edits marked on each screen saved for them (keys like "comment-1"), by screen id. */
   marksByScreen: ReadonlyMap<string, readonly string[]>;
 }
 

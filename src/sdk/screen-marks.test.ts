@@ -10,16 +10,16 @@ it('pins connected elements in document coordinates and keeps their rrweb node i
   const unserialized = createElement(true, 0, 0);
   const pins = createCommentPins(
     [
-      { number: 1, label: 'save', comment: 'first', element: kept },
-      { number: 2, label: 'gone', comment: 'removed', element: createElement(false) },
-      { number: 3, label: 'div', comment: 'third', element: unserialized },
+      { number: 1, key: 'comment-1', label: 'save', comment: 'first', element: kept },
+      { number: 2, key: 'comment-2', label: 'gone', comment: 'removed', element: createElement(false) },
+      { number: 3, key: 'comment-3', label: 'div', comment: 'third', element: unserialized },
     ],
     { findNodeId: (element) => (element === kept ? 7 : -1), scrollX: 5, scrollY: 100 },
   );
 
   expect(pins).toEqual([
-    { number: 1, nodeId: 7, rect: { x: 15, y: 120, width: 80, height: 30 }, label: 'save', comment: 'first' },
-    { number: 3, nodeId: null, rect: { x: 5, y: 100, width: 80, height: 30 }, label: 'div', comment: 'third' },
+    { number: 1, key: 'comment-1', nodeId: 7, rect: { x: 15, y: 120, width: 80, height: 30 }, label: 'save', comment: 'first' },
+    { number: 3, key: 'comment-3', nodeId: null, rect: { x: 5, y: 100, width: 80, height: 30 }, label: 'div', comment: 'third' },
   ]);
 });
 
@@ -28,11 +28,11 @@ it('keeps the recorded rects of a move and adds the node id of the dragged eleme
   const rects = { originalRect: { x: 1, y: 2, width: 3, height: 4 }, proposedRect: { x: 51, y: 2, width: 3, height: 4 } };
   const moves = createEditMoves(
     [
-      { number: 1, label: 'save', element: dragged, ...rects },
-      { number: 2, label: 'gone', element: createElement(false), ...rects },
+      { number: 1, key: 'edit-1', label: 'save', element: dragged, ...rects },
+      { number: 2, key: 'edit-2', label: 'gone', element: createElement(false), ...rects },
     ],
     (element) => (element === dragged ? 4 : -1),
   );
 
-  expect(moves).toEqual([{ number: 1, nodeId: 4, label: 'save', ...rects }]);
+  expect(moves).toEqual([{ number: 1, key: 'edit-1', nodeId: 4, label: 'save', ...rects }]);
 });
