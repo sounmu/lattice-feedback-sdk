@@ -5,11 +5,19 @@ export class BodyTooLargeError extends Error {
   }
 }
 
+export function isDeclaredBodyTooLarge(request: Request, maxBytes: number): boolean {
+  const contentLength = request.headers.get('content-length');
+  if (contentLength === null) {
+    return false;
+  }
+  return Number(contentLength) > maxBytes;
+}
+
 // Reads at most maxBytes and cancels the stream as soon as the limit is crossed,
 // so an oversized body (with or without content-length) is never fully buffered.
-export async function readBodyTextWithLimit(request: Request, maxBytes: number): Promise<string> {
+export async function readBodyBytesWithLimit(request: Request, maxBytes: number): Promise<Uint8Array> {
   if (!request.body) {
-    return '';
+    return new Uint8Array();
   }
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -32,5 +40,9 @@ export async function readBodyTextWithLimit(request: Request, maxBytes: number):
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder().decode(body);
+  return body;
+}
+
+export async function readBodyTextWithLimit(request: Request, maxBytes: number): Promise<string> {
+  return new TextDecoder().decode(await readBodyBytesWithLimit(request, maxBytes));
 }

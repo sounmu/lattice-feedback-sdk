@@ -1,11 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { createWidgetToHostMessage, isHostToWidgetMessage } from '@/lib/sdk-protocol';
-import type { WidgetToHostMessage } from '@/types/sdk-message';
+import { isCaptureUpdate } from '@/lib/capture-protocol';
+import type {
+  CaptureCommand,
+  CaptureState,
+  ScreenCapturedMessage,
+  ScreenCaptureFailedMessage,
+  WidgetToHostMessage,
+} from '@/types/sdk-message';
 import type { FeedbackReporter, PageContext } from '@/types/feedback';
+
+export type ScreenCaptureResult = ScreenCapturedMessage | ScreenCaptureFailedMessage;
+type ScreenCaptureListener = (result: ScreenCaptureResult) => void;
 
 interface HostBridgeConfig {
   projectKey: string;
@@ -35,6 +45,9 @@ export function useHostBridge() {
   const [reporter, setReporter] = useState<FeedbackReporter | null>(null);
   const [page, setPage] = useState<PageContext | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [captureState, setCaptureState] = useState<CaptureState | null>(null);
+  // A saved screen is several megabytes, so it is handed to its listener instead of kept in state.
+  const screenCaptureListeners = useRef(new Set<ScreenCaptureListener>());
 
   const projectKey = searchParams.get('projectKey');
   const hostOrigin = findValidHostOrigin(searchParams.get('hostOrigin'));
@@ -47,7 +60,7 @@ export function useHostBridge() {
   }, [projectKey, hostOrigin]);
 
   const postToHost = useCallback(
-    (message: WidgetToHostMessage) => {
+    (message: WidgetToHostMessage | CaptureCommand) => {
       if (!config) {
         return;
       }
@@ -66,6 +79,10 @@ export function useHostBridge() {
       if (event.origin !== expectedOrigin || event.source !== window.parent) {
         return;
       }
+      if (isCaptureUpdate(event.data)) {
+        setCaptureState(event.data.payload);
+        return;
+      }
       if (!isHostToWidgetMessage(event.data)) {
         return;
       }
@@ -81,6 +98,10 @@ export function useHostBridge() {
           break;
         case 'page:update':
           setPage(message.payload.page);
+          break;
+        case 'screen:captured':
+        case 'screen:capture-failed':
+          screenCaptureListeners.current.forEach((listener) => listener(message));
           break;
       }
     }
@@ -103,6 +124,18 @@ export function useHostBridge() {
     [postToHost],
   );
 
+  const subscribeToScreenCapture = useCallback((listener: ScreenCaptureListener) => {
+    const listeners = screenCaptureListeners.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
+  const requestScreenCapture = useCallback(() => {
+    postToHost(createWidgetToHostMessage('screen:capture', {}));
+  }, [postToHost]);
+
   const errorMessage = config ? null : 'projectKey 또는 hostOrigin이 올바르지 않습니다.';
 
   return {
@@ -111,6 +144,10 @@ export function useHostBridge() {
     reporter,
     page,
     isInitialized,
+    captureState,
+    sendCaptureCommand: postToHost,
+    subscribeToScreenCapture,
+    requestScreenCapture,
     notifyClose,
     notifySubmitted,
   };

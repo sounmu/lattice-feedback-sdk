@@ -15,7 +15,8 @@
  *   - the guard from '@/lib/sdk-protocol' passes (isWidgetToHostMessage / isHostToWidgetMessage).
  * Anything else is ignored silently.
  */
-import type { FeedbackReporter, PageContext } from '@/types/feedback';
+import type { ElementTarget, FeedbackAttachments, FeedbackReporter, PageContext } from '@/types/feedback';
+import type { ScreenCapture, ScreenCaptureFailureReason } from '@/types/screen-snapshot';
 
 export const MESSAGE_SOURCE = 'lattice-feedback' as const;
 export const PROTOCOL_VERSION = 1 as const;
@@ -36,13 +37,44 @@ export type InitMessage = ProtocolMessage<
 export type ReporterUpdateMessage = ProtocolMessage<'reporter:update', { reporter: FeedbackReporter | null }>;
 export type PageUpdateMessage = ProtocolMessage<'page:update', { page: PageContext }>;
 
-export type HostToWidgetMessage = InitMessage | ReporterUpdateMessage | PageUpdateMessage;
+export type CaptureMode = 'comment' | 'edit' | 'flow';
+export type AttachmentKind = 'comments' | 'edits' | 'flow';
+export interface CaptureState {
+  enabled: boolean;
+  activeMode: CaptureMode | null;
+  selection: ElementTarget | null;
+  attachments: FeedbackAttachments;
+  flowEventCount: number;
+  errorMessage: string | null;
+}
+export type CaptureUpdateMessage = ProtocolMessage<'capture:update', CaptureState>;
+
+// Saved screens: the widget asks with 'screen:capture', the SDK serializes the host page and answers once.
+export type ScreenCapturedMessage = ProtocolMessage<'screen:captured', ScreenCapture>;
+export type ScreenCaptureFailedMessage = ProtocolMessage<'screen:capture-failed', { reason: ScreenCaptureFailureReason }>;
+
+export type HostToWidgetMessage =
+  | InitMessage
+  | ReporterUpdateMessage
+  | PageUpdateMessage
+  | ScreenCapturedMessage
+  | ScreenCaptureFailedMessage;
 
 export type ReadyMessage = ProtocolMessage<'ready', EmptyPayload>;
 export type CloseMessage = ProtocolMessage<'close', EmptyPayload>;
 export type SubmittedMessage = ProtocolMessage<'submitted', { feedbackId: string }>;
+export type CaptureStartMessage = ProtocolMessage<'capture:start', { mode: CaptureMode }>;
+export type CaptureCancelMessage = ProtocolMessage<'capture:cancel', EmptyPayload>;
+export type FlowStopMessage = ProtocolMessage<'flow:stop', EmptyPayload>;
+export type CommentAddMessage = ProtocolMessage<'comment:add', { comment: string }>;
+export type AttachmentRemoveMessage = ProtocolMessage<'attachment:remove', { kind: AttachmentKind; index: number }>;
+export type DraftResetMessage = ProtocolMessage<'draft:reset', EmptyPayload>;
+export type CaptureCommand = CaptureStartMessage | CaptureCancelMessage | FlowStopMessage |
+  CommentAddMessage | AttachmentRemoveMessage | DraftResetMessage;
 
-export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage;
+export type ScreenCaptureMessage = ProtocolMessage<'screen:capture', EmptyPayload>;
+
+export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage | ScreenCaptureMessage;
 
 export type HostToWidgetMessageType = HostToWidgetMessage['type'];
 export type WidgetToHostMessageType = WidgetToHostMessage['type'];

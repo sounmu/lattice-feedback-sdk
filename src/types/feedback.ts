@@ -2,6 +2,8 @@
 // Data minimization (AGENTS.md section 5): nothing in these shapes may carry
 // input values, query strings, hashes, cookies, tokens, or raw DOM/CSS.
 
+import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
+
 export type FeedbackStatus = 'open' | 'in_progress' | 'resolved';
 
 export type FeedbackType = 'bug' | 'improvement' | 'question' | 'other';
@@ -32,6 +34,8 @@ export interface ElementRect {
 
 export interface ElementTarget {
   selector: string;
+  /** Pathname at capture time, even if submission happens after an SPA navigation. */
+  pagePath?: string;
   /** Value of data-feedback-id when present. */
   feedbackId: string | null;
   tagName: string;
@@ -56,6 +60,7 @@ export type FlowEventType = 'click' | 'navigation' | 'input';
 
 export interface FlowEvent {
   type: FlowEventType;
+  navigationType?: 'spa' | 'document' | 'reload';
   /** Milliseconds since FlowAttachment.startedAt. */
   offsetMs: number;
   /** location.pathname only, never query or hash. */
@@ -70,6 +75,8 @@ export interface FlowAttachment {
   /** ISO timestamp. */
   endedAt: string;
   events: FlowEvent[];
+  truncated?: boolean;
+  interrupted?: boolean;
 }
 
 export interface FeedbackAttachments {
@@ -97,6 +104,8 @@ export interface Feedback {
 export type CreateFeedbackInput = Pick<Feedback, 'projectKey' | 'message' | 'type' | 'reporter' | 'page'> & {
   hostOrigin: string;
   attachments?: Partial<FeedbackAttachments>;
+  /** Saved screens uploaded before submission. They are linked to the feedback when it is created. */
+  screenSnapshotIds?: string[];
 };
 
 export type UpdateFeedbackInput = Partial<Pick<Feedback, 'status' | 'adminReply'>>;
@@ -111,6 +120,8 @@ export interface FeedbackListResponse {
 
 export interface FeedbackDetailResponse {
   feedback: Feedback;
+  /** Screens saved with this feedback, without their event payload. */
+  screenSnapshots: ScreenSnapshotSummary[];
 }
 
 export interface ApiErrorResponse {

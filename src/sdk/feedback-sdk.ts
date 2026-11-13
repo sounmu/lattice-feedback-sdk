@@ -1,38 +1,19 @@
 import { createHostToWidgetMessage, isWidgetToHostMessage } from '@/lib/sdk-protocol';
+import { createCaptureUpdate, isCaptureCommand } from '@/lib/capture-protocol';
+import { findCapturePolicy, type CapturePolicy } from '@/lib/capture-policy';
+import { createCaptureController } from '@/sdk/capture-controller';
+import { trackHistory } from '@/sdk/history-tracking';
+import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
+import { captureScreen } from '@/sdk/screen-capture';
 import { HOST_ELEMENT_STYLE, PANEL_OPEN_CLASS_NAME, SDK_STYLES } from '@/sdk/styles';
 import type { FeedbackSdkInitOptions } from '@/sdk/types';
 import type { FeedbackReporter } from '@/types/feedback';
-import type { HostToWidgetMessage } from '@/types/sdk-message';
+import type { CaptureUpdateMessage, HostToWidgetMessage } from '@/types/sdk-message';
 
 const LOG_PREFIX = '[LatticeFeedback]';
 const HOST_ELEMENT_TAG_NAME = 'lattice-feedback-root';
 const IFRAME_TITLE = 'Feedback';
-
-type HistoryStateMethod = History['pushState'];
-
-function isFeedbackReporter(value: unknown): value is FeedbackReporter {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  if (typeof candidate.id !== 'string' || typeof candidate.name !== 'string') {
-    return false;
-  }
-  return candidate.email === undefined || typeof candidate.email === 'string';
-}
-
-function copyReporter(reporter: FeedbackReporter): FeedbackReporter {
-  if (reporter.email === undefined) {
-    return { id: reporter.id, name: reporter.name };
-  }
-  return { id: reporter.id, name: reporter.name, email: reporter.email };
-}
-
-export function buildWidgetUrl(appOrigin: string, projectKey: string, hostOrigin: string): string {
-  const parameters = new URLSearchParams({ projectKey, hostOrigin });
-  return `${appOrigin}/widget?${parameters.toString()}`;
-}
 
 export class FeedbackSdk {
   private readonly appOrigin: string;
@@ -45,11 +26,11 @@ export class FeedbackSdk {
   private isWidgetReady = false;
   private isPanelOpen = false;
   private isDestroyed = false;
-  private originalPushState: HistoryStateMethod | null = null;
-  private originalReplaceState: HistoryStateMethod | null = null;
-  private wrappedPushState: HistoryStateMethod | null = null;
-  private wrappedReplaceState: HistoryStateMethod | null = null;
+  private stopHistoryTracking: (() => void) | null = null;
+  private capturePolicy: CapturePolicy | null = null;
+  private captureController: ReturnType<typeof createCaptureController> | null = null;
   private pendingResizeFrame: number | null = null;
+  private isCapturingScreen = false;
 
   constructor(appOrigin: string) {
     this.appOrigin = appOrigin;
@@ -70,9 +51,9 @@ export class FeedbackSdk {
       return;
     }
     this.projectKey = projectKey;
+    this.capturePolicy = findCapturePolicy(options.capturePolicy);
     window.addEventListener('message', this.handleMessage);
-    window.addEventListener('popstate', this.handleNavigation);
-    this.wrapHistory();
+    this.stopHistoryTracking = trackHistory(this.handleNavigation);
     if (document.body) {
       this.mount();
       return;
@@ -104,11 +85,17 @@ export class FeedbackSdk {
     this.launcherButton.setAttribute('aria-expanded', 'true');
     this.isPanelOpen = true;
     // The viewport may have changed since the iframe was created, so refresh on every open.
-    this.handleNavigation();
+    this.updatePageContext();
+    this.captureController?.setPanelVisible(true);
     window.addEventListener('resize', this.handleResize);
   }
 
   close(): void {
+    this.captureController?.cancelTransient();
+    this.hideForCapture();
+  }
+
+  private hideForCapture(): void {
     if (!this.panelElement || !this.launcherButton) {
       return;
     }
@@ -116,15 +103,18 @@ export class FeedbackSdk {
     this.launcherButton.setAttribute('aria-expanded', 'false');
     this.isPanelOpen = false;
     this.stopResizeTracking();
+    this.captureController?.setPanelVisible(false);
   }
 
   destroy(): void {
     window.removeEventListener('message', this.handleMessage);
-    window.removeEventListener('popstate', this.handleNavigation);
     document.removeEventListener('DOMContentLoaded', this.handleDomContentLoaded);
     this.stopResizeTracking();
     this.launcherButton?.removeEventListener('click', this.handleLauncherClick);
-    this.restoreHistory();
+    this.stopHistoryTracking?.();
+    this.stopHistoryTracking = null;
+    this.captureController?.destroy();
+    this.captureController = null;
     this.hostElement?.remove();
     this.hostElement = null;
     this.launcherButton = null;
@@ -137,6 +127,8 @@ export class FeedbackSdk {
   }
 
   private mount(): void {
+    const projectKey = this.projectKey;
+    if (projectKey === null) return;
     const hostElement = document.createElement(HOST_ELEMENT_TAG_NAME);
     hostElement.setAttribute('style', HOST_ELEMENT_STYLE);
     const shadowRoot = hostElement.attachShadow({ mode: 'closed' });
@@ -159,6 +151,14 @@ export class FeedbackSdk {
 
     this.hostElement = hostElement;
     this.panelElement = panelElement;
+    this.captureController = createCaptureController({
+      projectKey, policy: this.capturePolicy, root: shadowRoot,
+      onUpdate: (state) => {
+        if (this.isWidgetReady) this.postToWidget(createCaptureUpdate(state));
+      },
+      onShowWidget: () => this.open(),
+      onHideWidget: () => this.hideForCapture(),
+    });
     this.launcherButton = launcherButton;
   }
 
@@ -170,12 +170,13 @@ export class FeedbackSdk {
     iframeElement.title = IFRAME_TITLE;
     // Keep host query strings out of the Referer header sent to the app server.
     iframeElement.referrerPolicy = 'origin';
-    iframeElement.src = buildWidgetUrl(this.appOrigin, this.projectKey, window.location.origin);
+    const parameters = new URLSearchParams({ projectKey: this.projectKey, hostOrigin: window.location.origin });
+    iframeElement.src = `${this.appOrigin}/widget?${parameters.toString()}`;
     this.panelElement.appendChild(iframeElement);
     this.iframeElement = iframeElement;
   }
 
-  private postToWidget(message: HostToWidgetMessage): void {
+  private postToWidget(message: HostToWidgetMessage | CaptureUpdateMessage): void {
     const targetWindow = this.iframeElement?.contentWindow;
     if (!targetWindow) {
       return;
@@ -194,39 +195,7 @@ export class FeedbackSdk {
         page: getPageContext(),
       }),
     );
-  }
-
-  private wrapHistory(): void {
-    const originalPushState = window.history.pushState;
-    const originalReplaceState = window.history.replaceState;
-    const wrappedPushState: HistoryStateMethod = (...parameters) => {
-      originalPushState.apply(window.history, parameters);
-      this.handleNavigation();
-    };
-    const wrappedReplaceState: HistoryStateMethod = (...parameters) => {
-      originalReplaceState.apply(window.history, parameters);
-      this.handleNavigation();
-    };
-    window.history.pushState = wrappedPushState;
-    window.history.replaceState = wrappedReplaceState;
-    this.originalPushState = originalPushState;
-    this.originalReplaceState = originalReplaceState;
-    this.wrappedPushState = wrappedPushState;
-    this.wrappedReplaceState = wrappedReplaceState;
-  }
-
-  private restoreHistory(): void {
-    // Only restore when still ours, so a wrapper installed later by the host is not clobbered.
-    if (this.originalPushState && window.history.pushState === this.wrappedPushState) {
-      window.history.pushState = this.originalPushState;
-    }
-    if (this.originalReplaceState && window.history.replaceState === this.wrappedReplaceState) {
-      window.history.replaceState = this.originalReplaceState;
-    }
-    this.originalPushState = null;
-    this.originalReplaceState = null;
-    this.wrappedPushState = null;
-    this.wrappedReplaceState = null;
+    this.captureController?.sync();
   }
 
   private stopResizeTracking(): void {
@@ -244,7 +213,7 @@ export class FeedbackSdk {
     }
     this.pendingResizeFrame = window.requestAnimationFrame(() => {
       this.pendingResizeFrame = null;
-      this.handleNavigation();
+      this.updatePageContext();
     });
   };
 
@@ -264,11 +233,38 @@ export class FeedbackSdk {
   };
 
   private readonly handleNavigation = (): void => {
+    if (this.isDestroyed) return;
+    this.captureController?.pageChanged();
+    this.updatePageContext();
+  };
+
+  private updatePageContext(): void {
     if (this.isDestroyed || !this.isWidgetReady) {
       return;
     }
     this.postToWidget(createHostToWidgetMessage('page:update', { page: getPageContext() }));
-  };
+  }
+
+  // Saving is allowed on any page with the SDK unless the customer's policy restricts the paths.
+  private async saveScreen(): Promise<void> {
+    if (this.isCapturingScreen) {
+      return;
+    }
+    if (this.capturePolicy && !this.capturePolicy.allowedPaths.includes(window.location.pathname)) {
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'page_not_allowed' }));
+      return;
+    }
+    this.isCapturingScreen = true;
+    try {
+      const capture = await captureScreen(HOST_ELEMENT_TAG_NAME);
+      this.postToWidget(createHostToWidgetMessage('screen:captured', capture));
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Saving the screen failed.`, error);
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'capture_failed' }));
+    } finally {
+      this.isCapturingScreen = false;
+    }
+  }
 
   private readonly handleMessage = (event: MessageEvent): void => {
     if (event.origin !== this.appOrigin) {
@@ -278,6 +274,10 @@ export class FeedbackSdk {
       return;
     }
     const message: unknown = event.data;
+    if (isCaptureCommand(message)) {
+      this.captureController?.handleCommand(message);
+      return;
+    }
     if (!isWidgetToHostMessage(message)) {
       return;
     }
@@ -290,6 +290,10 @@ export class FeedbackSdk {
         this.close();
         break;
       case 'submitted':
+        this.captureController?.reset();
+        break;
+      case 'screen:capture':
+        void this.saveScreen();
         break;
       default: {
         const unhandledMessage: never = message;
