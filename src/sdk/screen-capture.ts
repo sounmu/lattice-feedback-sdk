@@ -25,12 +25,13 @@ import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
 
+import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
+
 /** Comments and proposed moves to mark on the saved screen. */
 export interface ScreenMarkSources {
   comments: readonly CommentPinSource[];
   edits: readonly EditMoveSource[];
 }
-import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
 
 const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
 const MASKED_SELECTOR = '[data-lattice-mask]';
