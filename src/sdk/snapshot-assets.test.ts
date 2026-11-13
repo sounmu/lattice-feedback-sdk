@@ -262,3 +262,38 @@ it('skips a source that does not list the shown file and keeps the active source
   await extractSnapshotAssets(createDocument({ type: 2, tagName: 'picture', attributes: {}, childNodes: [square, second] }), options(`${ORIGIN}/square.png`));
   expect(second.attributes).toEqual({ srcset: `${createAssetReference(0)} 1x`, width: '100', height: '100' });
 });
+
+it('matches a srcset candidate whose URL contains commas', async () => {
+  const shown = `${ORIGIN}/resize/width=200,quality=80/image.png`;
+  const image: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 1,
+    attributes: { src: `${ORIGIN}/small.png`, srcset: `${ORIGIN}/small.png 1x, ${shown} 2x` },
+    childNodes: [],
+  };
+
+  await extractSnapshotAssets(
+    createDocument(image),
+    createOptions({ fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })), findLiveImage: () => shown }),
+  );
+
+  expect(image.attributes).toEqual({ srcset: `${createAssetReference(0)} 2x` });
+});
+
+it('decides the active picture source before downloading, so a later viewport change does not matter', async () => {
+  let isWide = true;
+  const wide: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/wide.png 2x`, media: '(min-width: 800px)' }, childNodes: [] };
+  const fallback: SnapshotNode = { type: 2, tagName: 'img', id: 1, attributes: { src: `${ORIGIN}/fallback.png` }, childNodes: [] };
+  const fetchAsset = vi.fn(async () => {
+    isWide = false;
+    return new Blob(['img'], { type: 'image/png' });
+  });
+
+  await extractSnapshotAssets(
+    createDocument({ type: 2, tagName: 'picture', attributes: {}, childNodes: [wide, fallback] }),
+    createOptions({ fetchAsset, findLiveImage: () => `${ORIGIN}/wide.png`, matchesMedia: () => isWide }),
+  );
+
+  expect(fallback.attributes).toEqual({ srcset: `${createAssetReference(0)} 2x` });
+});

@@ -59,12 +59,29 @@ const FONT_FAMILY_PATTERN = /font-family\s*:\s*([^;}]+)/i;
 const CSS_URL_PATTERN = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/g;
 
 // The descriptor ("2x", "800w") of the srcset candidate for url, '' for a candidate without one, null when absent.
+// Follows the HTML srcset parser: a URL is a run of non-whitespace and may contain commas; only a comma
+// after the URL (or trailing it) separates candidates.
 function findSrcsetDescriptor(srcset: unknown, url: string): string | null {
   if (typeof srcset !== 'string') {
     return null;
   }
-  for (const candidate of srcset.split(',')) {
-    const [candidateUrl, descriptor = ''] = candidate.trim().split(/\s+/);
+  let position = 0;
+  while (position < srcset.length) {
+    position += /^[\s,]*/.exec(srcset.slice(position))?.[0].length ?? 0;
+    let candidateUrl = /^\S*/.exec(srcset.slice(position))?.[0] ?? '';
+    if (candidateUrl === '') {
+      break;
+    }
+    position += candidateUrl.length;
+    let descriptor = '';
+    if (candidateUrl.endsWith(',')) {
+      candidateUrl = candidateUrl.replace(/,+$/, '');
+    } else {
+      const commaIndex = srcset.indexOf(',', position);
+      const end = commaIndex === -1 ? srcset.length : commaIndex;
+      descriptor = srcset.slice(position, end).trim();
+      position = end + 1;
+    }
     if (candidateUrl === url) {
       return descriptor;
     }
@@ -95,7 +112,8 @@ export async function extractSnapshotAssets(
   const images: {
     attributes: SnapshotAttributes;
     source: string;
-    picture: SnapshotNode | null;
+    sources: SnapshotNode[];
+    activeSource: SnapshotNode | undefined;
   }[] = [];
   const urls = new Set<string>();
 
@@ -132,7 +150,18 @@ export async function extractSnapshotAssets(
       if (node.tagName === 'img') {
         const source = options.findLiveImage?.(node) ?? attributes.src;
         if (typeof source === 'string' && isSameOrigin(source)) {
-          images.push({ attributes, source, picture: parent?.tagName === 'picture' ? parent : null });
+          const sources = parent?.tagName === 'picture'
+            ? (parent.childNodes ?? []).filter((candidate) => candidate.tagName === 'source')
+            : [];
+          // Resolved now, before any download, so a later resize or rotation cannot change which source was shown.
+          // Like the browser, the first media-matching <source> is active; one whose type the browser skipped never
+          // lists the shown file, so only a matching source that lists it counts. Otherwise the <img> applies.
+          const activeSource = sources.find(({ attributes: sourceAttributes }) => {
+            const media = sourceAttributes?.media;
+            const matchesMedia = typeof media !== 'string' || !options.matchesMedia || options.matchesMedia(media);
+            return matchesMedia && findSrcsetDescriptor(sourceAttributes?.srcset, source) !== null;
+          });
+          images.push({ attributes, source, sources, activeSource });
           urls.add(source);
         }
       }
@@ -194,20 +223,11 @@ export async function extractSnapshotAssets(
     }
     // The saved file is the one the browser showed. It keeps its own srcset descriptor (2x, 800w), so the
     // browser applies the same density and the page's CSS sizes it exactly as before; other candidates are dropped.
-    for (const { attributes, source, picture } of images) {
+    for (const { attributes, source, sources, activeSource } of images) {
       const reference = references.get(source);
       if (!reference) {
         continue;
       }
-      const sources = (picture?.childNodes ?? []).filter((candidate) => candidate.tagName === 'source');
-      // Like the browser: the first <source> whose media matches is the active one; the <img> only applies when none does.
-      // A source whose type the browser cannot show is skipped, and its candidates never include the shown file,
-      // so only a media-matching source that lists the shown file counts.
-      const activeSource = sources.find(({ attributes: sourceAttributes }) => {
-        const media = sourceAttributes?.media;
-        const matchesMedia = typeof media !== 'string' || !options.matchesMedia || options.matchesMedia(media);
-        return matchesMedia && findSrcsetDescriptor(sourceAttributes?.srcset, source) !== null;
-      });
       const candidateAttributes = activeSource?.attributes ?? attributes;
       const descriptor = findSrcsetDescriptor(candidateAttributes.srcset, source);
       const chosen = descriptor === null ? undefined : { candidateAttributes, descriptor };
