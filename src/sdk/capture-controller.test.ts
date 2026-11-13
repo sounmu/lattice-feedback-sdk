@@ -111,6 +111,22 @@ it('keeps the live element of each comment for pinning on saved screens', () => 
   controller.destroy();
 });
 
+it('pins only the comments written on the current page, keeping their numbers', () => {
+  const { controller } = createHarness();
+  for (const pagePath of ['/', '/orders']) {
+    controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'comment' } }));
+    selectionOptions?.onSelect({
+      element: document.createElement('button'),
+      target: { selector: 'button', pagePath, feedbackId: 'save', tagName: 'button', rect: { x: 1, y: 2, width: 80, height: 30 } },
+    });
+    controller.handleCommand(createCaptureCommand({ type: 'comment:add', payload: { comment: pagePath } }));
+  }
+  (window as { location: { pathname: string } }).location.pathname = '/orders';
+
+  expect(controller.getCommentPinSources().map(({ number, comment }) => ({ number, comment }))).toEqual([{ number: 2, comment: '/orders' }]);
+  controller.destroy();
+});
+
 it('does not reopen the panel when cancelling a drag programmatically', () => {
   const { controller, show } = createHarness();
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'edit' } }));

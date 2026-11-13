@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
-import { addCommentScreen } from '@/lib/comment-screens';
+import { addCommentScreen, type CommentScreens } from '@/lib/comment-screens';
+import { findCommentPins } from '@/lib/screen-snapshot';
 import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
 import type {
   CreateScreenSnapshotInput,
@@ -12,7 +13,6 @@ import type {
   FindMissingScreenSnapshotAssetsResponse,
   ScreenCapture,
   ScreenCaptureFailureReason,
-  ScreenSnapshotSummary,
 } from '@/types/screen-snapshot';
 
 export type ScreenSaveStatus = 'idle' | 'capturing' | 'uploading';
@@ -101,11 +101,11 @@ function getUploadErrorMessage(status: number): string {
 }
 
 export function useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture }: UseScreenSnapshotsOptions) {
-  const [screens, setScreens] = useState<{ snapshots: ScreenSnapshotSummary[]; commentScreenIds: ReadonlySet<string> }>({
-    snapshots: [],
-    commentScreenIds: new Set(),
-  });
-  const { snapshots, commentScreenIds } = screens;
+  const [screens, setScreens] = useState<CommentScreens>({ snapshots: [], commentPinsByScreen: new Map() });
+  const { snapshots, commentPinsByScreen } = screens;
+  const commentScreenIds = useMemo(() => new Set(commentPinsByScreen.keys()), [commentPinsByScreen]);
+  // Uploads finish asynchronously, so the limit check reads the latest screens from here.
+  const screensRef = useRef(screens);
   const [status, setStatus] = useState<ScreenSaveStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const captureTimer = useRef<number | null>(null);
@@ -136,11 +136,16 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
           body,
         });
         const created = (await response.json()) as CreateScreenSnapshotResponse;
-        if (source === 'comment') {
-          setScreens((current) => addCommentScreen(current, created.snapshot));
-        } else {
-          setScreens((current) => ({ ...current, snapshots: [...current.snapshots, created.snapshot] }));
+        const pinNumbers = findCommentPins(screen.events).map((pin) => pin.number);
+        const next = source === 'comment'
+          ? addCommentScreen(screensRef.current, created.snapshot, pinNumbers, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
+          : { ...screensRef.current, snapshots: [...screensRef.current.snapshots, created.snapshot] };
+        if (!next) {
+          setErrorMessage(COMMENT_SCREEN_FULL_MESSAGE);
+          return;
         }
+        screensRef.current = next;
+        setScreens(next);
       } catch (error) {
         if (error instanceof UploadFailedError) {
           setErrorMessage(getUploadErrorMessage(error.status));
@@ -185,8 +190,8 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
   }, [config, subscribeToScreenCapture]);
 
   const canCapture = status === 'idle' && snapshots.length < MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK;
-  // A comment screen may replace an earlier one, so it is allowed at the limit when one exists.
-  const canCaptureComment = canCapture || (status === 'idle' && snapshots.some((snapshot) => commentScreenIds.has(snapshot.id)));
+  // A comment screen may replace an earlier one; whether it fits is checked once it is uploaded.
+  const canCaptureComment = canCapture || (status === 'idle' && commentPinsByScreen.size > 0);
 
   const startCapture = useCallback((source: CaptureSource) => {
     pendingSource.current = source;
@@ -223,11 +228,18 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
   }, [startCapture]);
 
   const remove = useCallback((id: string) => {
-    setScreens((current) => ({ ...current, snapshots: current.snapshots.filter((snapshot) => snapshot.id !== id) }));
+    const next = {
+      snapshots: screensRef.current.snapshots.filter((snapshot) => snapshot.id !== id),
+      commentPinsByScreen: new Map([...screensRef.current.commentPinsByScreen].filter(([screenId]) => screenId !== id)),
+    };
+    screensRef.current = next;
+    setScreens(next);
   }, []);
 
   const reset = useCallback(() => {
-    setScreens({ snapshots: [], commentScreenIds: new Set() });
+    const empty: CommentScreens = { snapshots: [], commentPinsByScreen: new Map() };
+    screensRef.current = empty;
+    setScreens(empty);
     isCommentCaptureQueued.current = false;
     setErrorMessage(null);
   }, []);
