@@ -47,7 +47,7 @@ export const createScreenSnapshotInputSchema = z.object({
     .array(
       z.object({
         url: z.string().max(MAX_URL_LENGTH),
-        reason: z.enum(['fetch_failed', 'too_large', 'budget_exceeded']),
+        reason: z.enum(['fetch_failed', 'too_large', 'budget_exceeded', 'timed_out']),
       }),
     )
     .max(MAX_MISSING_SNAPSHOT_ASSETS),
@@ -58,6 +58,7 @@ export const createScreenSnapshotInputSchema = z.object({
 export const findMissingScreenSnapshotAssetsInputSchema = z.object({
   projectKey: projectKeySchema,
   hostOrigin: hostOriginSchema,
+  pageUrl: pageUrlSchema,
   hashes: z.array(snapshotAssetHashSchema).min(1).max(MAX_SNAPSHOT_ASSETS),
 });
 

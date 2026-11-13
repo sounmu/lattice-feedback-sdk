@@ -13,7 +13,7 @@ export interface ScreenSnapshotPage {
   scrollY: number;
 }
 
-export type MissingSnapshotAssetReason = 'fetch_failed' | 'too_large' | 'budget_exceeded';
+export type MissingSnapshotAssetReason = 'fetch_failed' | 'too_large' | 'budget_exceeded' | 'timed_out';
 
 /** A font or image the SDK could not embed. The viewer lists these instead of hiding the gap. */
 export interface MissingSnapshotAsset {
@@ -67,6 +67,8 @@ export interface ScreenSnapshotAssetFile {
 }
 
 export interface FindMissingScreenSnapshotAssetsInput extends Pick<CreateScreenSnapshotInput, 'projectKey' | 'hostOrigin'> {
+  /** The captured page, so the server applies its path policy before accepting any file. */
+  pageUrl: string;
   hashes: string[];
 }
 

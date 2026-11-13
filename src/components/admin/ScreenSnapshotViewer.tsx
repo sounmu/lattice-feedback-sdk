@@ -26,6 +26,7 @@ const MISSING_ASSET_REASON_LABELS: Record<MissingSnapshotAssetReason, string> = 
   fetch_failed: '가져오지 못함',
   too_large: '파일이 너무 큼',
   budget_exceeded: '전체 용량 한도 초과',
+  timed_out: '저장 시간 초과',
 };
 
 function subscribeToAdminToken(listener: () => void): () => void {

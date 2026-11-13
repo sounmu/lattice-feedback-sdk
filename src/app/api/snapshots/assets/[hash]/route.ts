@@ -41,7 +41,11 @@ export async function PUT(request: Request, context: RouteContext) {
   const { hash } = await context.params;
   const searchParams = new URL(request.url).searchParams;
   const projectKey = searchParams.get('projectKey') ?? '';
-  const uploadError = findScreenAssetUploadError(request, projectKey, searchParams.get('hostOrigin') ?? '');
+  const uploadError = findScreenAssetUploadError(request, {
+    projectKey,
+    hostOrigin: searchParams.get('hostOrigin') ?? '',
+    pageUrl: searchParams.get('pageUrl') ?? '',
+  });
   if (uploadError) {
     return uploadError;
   }
@@ -97,7 +101,8 @@ export async function GET(request: Request, context: RouteContext) {
     return new Response(asset.data.slice(), {
       headers: {
         'Content-Type': asset.contentType,
-        'Cache-Control': 'private, max-age=31536000, immutable',
+        // Customer data behind the admin token: never kept by the browser, so every read is authorized again.
+        'Cache-Control': 'no-store',
         'Content-Security-Policy': "sandbox; default-src 'none'",
         'X-Content-Type-Options': 'nosniff',
       },

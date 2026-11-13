@@ -55,7 +55,7 @@ async function sendOrThrow(url: string, init: RequestInit): Promise<Response> {
 
 // Each project stores a file once, so only the files the server has not seen are uploaded.
 async function uploadAssetFiles(
-  owner: Pick<CreateScreenSnapshotInput, 'projectKey' | 'hostOrigin'>,
+  owner: Pick<FindMissingScreenSnapshotAssetsInput, 'projectKey' | 'hostOrigin' | 'pageUrl'>,
   assetFiles: Blob[],
 ): Promise<string[]> {
   const hashes = await Promise.all(assetFiles.map(getSha256Hex));
@@ -111,7 +111,7 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     async function upload({ screen, assetFiles }: ScreenCapture) {
       setStatus('uploading');
       try {
-        const assetHashes = await uploadAssetFiles({ projectKey, hostOrigin }, assetFiles);
+        const assetHashes = await uploadAssetFiles({ projectKey, hostOrigin, pageUrl: screen.page.url }, assetFiles);
         const input: CreateScreenSnapshotInput = { projectKey, hostOrigin, ...screen, assetHashes };
         const body = new TextEncoder().encode(JSON.stringify(input));
         if (body.length > MAX_SCREEN_SNAPSHOT_BYTES) {

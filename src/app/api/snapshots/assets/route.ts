@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return createApiErrorResponse(400, 'invalid_body', 'Request body failed validation.');
   }
-  const uploadError = findScreenAssetUploadError(request, parsed.data.projectKey, parsed.data.hostOrigin);
+  const uploadError = findScreenAssetUploadError(request, parsed.data);
   if (uploadError) {
     return uploadError;
   }

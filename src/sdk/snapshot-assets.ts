@@ -21,10 +21,16 @@ export interface ExtractSnapshotAssetsOptions {
   pageOrigin: string;
   /** Normalized families of fonts the page actually loaded. Unused @font-face rules are skipped. */
   loadedFontFamilies: ReadonlySet<string>;
-  /** URLs the page actually loaded; CSS images outside this set were never shown and are skipped. */
-  loadedResourceUrls: ReadonlySet<string>;
-  /** Must throw SnapshotAssetTooLargeError instead of reading past maxBytes. */
-  fetchAsset: (url: string, maxBytes: number) => Promise<Blob>;
+  /**
+   * CSS images shown by captured (not blocked) elements. Others were never visible on the saved screen
+   * or belong to an excluded region, so they are not collected.
+   */
+  usedCssImageUrls: ReadonlySet<string>;
+  /** Must throw SnapshotAssetTooLargeError instead of reading past maxBytes, and give up after timeoutMs. */
+  fetchAsset: (url: string, maxBytes: number, timeoutMs: number) => Promise<Blob>;
+  /** Downloads stop at this deadline so the capture answers the widget in time; the rest are reported as timed out. */
+  maxDurationMs: number;
+  now?: () => number;
   maxAssetBytes: number;
   maxTotalBytes: number;
   maxAssetCount: number;
@@ -73,7 +79,7 @@ export async function extractSnapshotAssets(
   function collectCssImages(attributes: SnapshotAttributes, name: string, cssText: string): void {
     cssAttributes.push({ attributes, name });
     for (const url of findCssUrls(cssText.replace(FONT_FACE_PATTERN, ''))) {
-      if (isSameOrigin(url) && options.loadedResourceUrls.has(url)) {
+      if (isSameOrigin(url) && options.usedCssImageUrls.has(url)) {
         urls.add(url);
       }
     }
@@ -115,20 +121,29 @@ export async function extractSnapshotAssets(
   const missingAssets: MissingSnapshotAsset[] = [];
   const references = new Map<string, string>();
   let totalBytes = 0;
+  const now = options.now ?? Date.now;
+  const deadline = now() + options.maxDurationMs;
   for (const url of urls) {
     const remainingBytes = options.maxTotalBytes - totalBytes;
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) {
+      missingAssets.push({ url: getAssetLabel(url), reason: 'timed_out' });
+      continue;
+    }
     if (assetFiles.length >= options.maxAssetCount || remainingBytes <= 0) {
       missingAssets.push({ url: getAssetLabel(url), reason: 'budget_exceeded' });
       continue;
     }
     const isLimitedByTotal = remainingBytes < options.maxAssetBytes;
     try {
-      const blob = await options.fetchAsset(url, Math.min(options.maxAssetBytes, remainingBytes));
+      const blob = await options.fetchAsset(url, Math.min(options.maxAssetBytes, remainingBytes), remainingMs);
       totalBytes += blob.size;
       references.set(url, createAssetReference(assetFiles.length));
       assetFiles.push(blob);
     } catch (error) {
-      if (!(error instanceof SnapshotAssetTooLargeError)) {
+      if (!(error instanceof SnapshotAssetTooLargeError) && now() >= deadline) {
+        missingAssets.push({ url: getAssetLabel(url), reason: 'timed_out' });
+      } else if (!(error instanceof SnapshotAssetTooLargeError)) {
         // Recorded as a missing asset, which the viewer shows to the admin.
         missingAssets.push({ url: getAssetLabel(url), reason: 'fetch_failed' });
       } else if (isLimitedByTotal) {

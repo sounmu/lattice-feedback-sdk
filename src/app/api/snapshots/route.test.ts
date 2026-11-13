@@ -231,7 +231,8 @@ describe('saved screens on feedback', () => {
 describe('saved screen files', () => {
   const FONT = new TextEncoder().encode('font-bytes');
   const FONT_HASH = createHash('sha256').update(FONT).digest('hex');
-  const OWNER_QUERY = `projectKey=demo&hostOrigin=${encodeURIComponent(createScreenSnapshotBody().hostOrigin as string)}`;
+  const PAGE_URL = (createScreenSnapshotBody().page as { url: string }).url;
+  const OWNER_QUERY = `projectKey=demo&hostOrigin=${encodeURIComponent(createScreenSnapshotBody().hostOrigin as string)}&pageUrl=${encodeURIComponent(PAGE_URL)}`;
 
   function uploadFont(hash = FONT_HASH, headers: Record<string, string> = {}) {
     const request = new Request(`${SNAPSHOTS_URL}/assets/${hash}?${OWNER_QUERY}`, {
@@ -248,7 +249,7 @@ describe('saved screen files', () => {
   }
 
   async function lookUp(hashes: string[]) {
-    const body = { projectKey: 'demo', hostOrigin: createScreenSnapshotBody().hostOrigin, hashes };
+    const body = { projectKey: 'demo', hostOrigin: createScreenSnapshotBody().hostOrigin, pageUrl: PAGE_URL, hashes };
     const response = await findMissingAssets(createJsonRequest(`${SNAPSHOTS_URL}/assets`, 'POST', body));
     return ((await response.json()) as FindMissingScreenSnapshotAssetsResponse).missingHashes;
   }
@@ -262,6 +263,7 @@ describe('saved screen files', () => {
     expect(served.status).toBe(200);
     expect(served.headers.get('content-type')).toBe('font/woff2');
     expect(served.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(served.headers.get('cache-control')).toBe('no-store');
     expect(new Uint8Array(await served.arrayBuffer())).toEqual(FONT);
     expect((await requestFont()).status).toBe(401);
   });
@@ -273,6 +275,17 @@ describe('saved screen files', () => {
 
     const crossSite = await uploadFont(FONT_HASH, { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example.com' });
     expect(crossSite.status).toBe(403);
+    expect(await lookUp([FONT_HASH])).toEqual([FONT_HASH]);
+  });
+
+  it('accepts no file for a page the project policy does not allow', async () => {
+    process.env.FEEDBACK_CAPTURE_POLICY = JSON.stringify({ allowedPaths: ['/'], targets: [] });
+
+    const upload = await uploadFont();
+    expect(upload.status).toBe(403);
+    expect(await getErrorCode(upload)).toBe('capture_not_allowed');
+
+    delete process.env.FEEDBACK_CAPTURE_POLICY;
     expect(await lookUp([FONT_HASH])).toEqual([FONT_HASH]);
   });
 
