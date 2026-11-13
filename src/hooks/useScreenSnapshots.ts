@@ -236,6 +236,21 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     setScreens(next);
   }, []);
 
+  // A deleted comment must not reach the admin through a screen saved earlier, so those screens are dropped.
+  const removeScreensWithComment = useCallback((key: string): boolean => {
+    const dropped = new Set([...screensRef.current.commentPinsByScreen].filter(([, keys]) => keys.includes(key)).map(([id]) => id));
+    if (dropped.size === 0) {
+      return false;
+    }
+    const next = {
+      snapshots: screensRef.current.snapshots.filter((snapshot) => !dropped.has(snapshot.id)),
+      commentPinsByScreen: new Map([...screensRef.current.commentPinsByScreen].filter(([id]) => !dropped.has(id))),
+    };
+    screensRef.current = next;
+    setScreens(next);
+    return true;
+  }, []);
+
   const reset = useCallback(() => {
     const empty: CommentScreens = { snapshots: [], commentPinsByScreen: new Map() };
     screensRef.current = empty;
@@ -244,5 +259,5 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     setErrorMessage(null);
   }, []);
 
-  return { snapshots, commentScreenIds, status, errorMessage, canCapture, capture, captureForComment, remove, reset };
+  return { snapshots, commentScreenIds, removeScreensWithComment, status, errorMessage, canCapture, capture, captureForComment, remove, reset };
 }

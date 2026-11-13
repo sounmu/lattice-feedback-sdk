@@ -185,7 +185,7 @@ describe('element selection', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith(selection);
+    expect(onSelect).toHaveBeenCalledWith(selection, { x: expect.any(Number), y: expect.any(Number) });
   });
 
   it('selects on touchend without allowing the host touch action', () => {
@@ -194,7 +194,7 @@ describe('element selection', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(event.propagationStopped).toBe(true);
-    expect(onSelect).toHaveBeenCalledExactlyOnceWith(selection);
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(selection, { x: expect.any(Number), y: expect.any(Number) });
     expect(listenerCount()).toBe(0);
     expect(overlay.removed).toBe(true);
   });

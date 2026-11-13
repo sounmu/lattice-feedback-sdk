@@ -3,8 +3,30 @@ import { SDK_Z_INDEX } from '@/sdk/styles';
 
 export interface ElementSelectionOptions {
   readonly findTarget: (target: EventTarget | null) => CaptureTarget | null;
-  readonly onSelect: (selection: CaptureTarget) => void;
+  /** point is where the element was clicked, as fractions of its width and height. */
+  readonly onSelect: (selection: CaptureTarget, point: SelectionPoint) => void;
   readonly onCancel: () => void;
+}
+
+export interface SelectionPoint {
+  x: number;
+  y: number;
+}
+
+function clampFraction(value: number): number {
+  return Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0.5;
+}
+
+function findSelectionPoint(element: HTMLElement, event: Event): SelectionPoint {
+  const bounds = element.getBoundingClientRect();
+  const source = 'changedTouches' in event ? (event as TouchEvent).changedTouches[0] : (event as MouseEvent);
+  if (!source || bounds.width <= 0 || bounds.height <= 0) {
+    return { x: 0.5, y: 0.5 };
+  }
+  return {
+    x: clampFraction((source.clientX - bounds.left) / bounds.width),
+    y: clampFraction((source.clientY - bounds.top) / bounds.height),
+  };
 }
 
 export interface ElementSelection {
@@ -90,8 +112,9 @@ export function startElementSelection(options: ElementSelectionOptions): Element
     if (!selection) {
       return;
     }
+    const point = findSelectionPoint(selection.element, event);
     cleanup();
-    options.onSelect(selection);
+    options.onSelect(selection, point);
   };
 
   const handleKey = (event: KeyboardEvent): void => {

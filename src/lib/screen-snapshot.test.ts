@@ -3,7 +3,7 @@ import { createScreenSnapshotBody } from '@/app/api/snapshots/screen-snapshot-te
 import { createCommentPinEvent, findCommentPins, isCapturedScreen } from '@/lib/screen-snapshot';
 import type { ScreenCommentPin, ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
-const PIN: ScreenCommentPin = { number: 1, key: 'comment-1', nodeId: 7, rect: { x: 10, y: 20, width: 80, height: 30 }, label: 'save', comment: '버튼이 안 보여요' };
+const PIN: ScreenCommentPin = { number: 1, key: 'comment-1', nodeId: 7, rect: { x: 10, y: 20, width: 80, height: 30 }, offset: { x: 0.25, y: 0.5 }, label: 'save', comment: '버튼이 안 보여요' };
 
 function createScreen(extraEvents: unknown[]) {
   const screen = createScreenSnapshotBody();
@@ -23,6 +23,7 @@ it('rejects malformed pins and other trailing events', () => {
     createCommentPinEvent({ ...PIN, comment: '' }, 1),
     createCommentPinEvent({ ...PIN, number: 0 }, 1),
     createCommentPinEvent({ ...PIN, rect: { ...PIN.rect, width: -1 } }, 1),
+    createCommentPinEvent({ ...PIN, offset: { x: 1.5, y: 0 } }, 1),
     { type: 5, timestamp: 1, data: { tag: 'other', payload: PIN } },
     { type: 3, timestamp: 1, data: {} },
   ];

@@ -52,12 +52,17 @@ function isRectValue(value: unknown, minimum: number): boolean {
   return isFiniteNumber(value) && value >= minimum && value <= MAX_RECT_COORDINATE;
 }
 
+function isFraction(value: unknown): boolean {
+  return isFiniteNumber(value) && value >= 0 && value <= 1;
+}
+
 export function isScreenCommentPin(value: unknown): value is ScreenCommentPin {
   if (!isRecord(value) || !isRecord(value.rect)) {
     return false;
   }
-  const { number, key, nodeId, rect, label, comment } = value;
+  const { number, key, nodeId, rect, label, comment, offset } = value;
   return (
+    isRecord(offset) && isFraction(offset.x) && isFraction(offset.y) &&
     typeof key === 'string' && key.length > 0 && key.length <= MAX_PIN_KEY_LENGTH &&
     Number.isInteger(number) && Number(number) >= 1 && Number(number) <= MAX_COMMENTS &&
     (nodeId === null || (Number.isInteger(nodeId) && Number(nodeId) >= 0)) &&

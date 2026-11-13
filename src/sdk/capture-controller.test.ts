@@ -72,7 +72,7 @@ function selectTarget() {
   selectionOptions.onSelect({
     element: document.createElement('button'),
     target: { selector: 'button', feedbackId: 'save', tagName: 'button', rect: { x: 1, y: 2, width: 80, height: 30 } },
-  });
+  }, { x: 0.25, y: 0.75 });
 }
 
 it('restores Flow synchronously without accessing an unassigned recorder', () => {
@@ -96,7 +96,7 @@ it('attaches a selected comment and preserves it across mode cancellation', () =
 });
 
 it('keeps the live element of each comment for pinning on saved screens', () => {
-  const { controller } = createHarness();
+  const { controller, states } = createHarness();
   for (const comment of ['first', 'second']) {
     controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'comment' } }));
     selectTarget();
@@ -105,7 +105,8 @@ it('keeps the live element of each comment for pinning on saved screens', () => 
   controller.handleCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind: 'comments', index: 0 } }));
 
   const sources = controller.getCommentPinSources();
-  expect(sources).toEqual([{ number: 1, key: 'comment-2', label: 'save', comment: 'second', element: expect.anything() }]);
+  expect(sources).toEqual([{ number: 1, key: 'comment-2', label: 'save', comment: 'second', offset: { x: 0.25, y: 0.75 }, element: expect.anything() }]);
+  expect(states.at(-1)?.commentKeys).toEqual(['comment-2']);
   controller.reset();
   expect(controller.getCommentPinSources()).toEqual([]);
   controller.destroy();
@@ -118,7 +119,7 @@ it('pins only the comments written on the current page, keeping their numbers', 
     selectionOptions?.onSelect({
       element: document.createElement('button'),
       target: { selector: 'button', pagePath, feedbackId: 'save', tagName: 'button', rect: { x: 1, y: 2, width: 80, height: 30 } },
-    });
+    }, { x: 0.5, y: 0.5 });
     controller.handleCommand(createCaptureCommand({ type: 'comment:add', payload: { comment: pagePath } }));
   }
   (window as { location: { pathname: string } }).location.pathname = '/orders';

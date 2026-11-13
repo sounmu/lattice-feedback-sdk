@@ -125,7 +125,14 @@ export function FeedbackWidget() {
               // Saved right away so the admin sees the comment pinned on the screen it was written on.
               screens.captureForComment();
             }}
-            onRemove={(kind, index) => sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }))}
+            onRemove={(kind, index) => {
+              const commentKey = kind === 'comments' ? captureState.commentKeys[index] : undefined;
+              sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }));
+              // Screens that pinned the deleted comment are dropped; the remaining comments are pinned again.
+              if (commentKey && screens.removeScreensWithComment(commentKey) && captureState.attachments.comments.length > 1) {
+                screens.captureForComment();
+              }
+            }}
           />
         )}
         {captureState?.errorMessage && <p role="alert" className="text-sm text-red-600">{captureState.errorMessage}</p>}
