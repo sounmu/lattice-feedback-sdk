@@ -20,6 +20,8 @@ function createOptions(overrides: Partial<ExtractSnapshotAssetsOptions> = {}): E
     maxTotalBytes: 2000,
     maxAssetCount: 10,
     maxDurationMs: 15_000,
+    // A fixed clock keeps the per-request time limit exact; real time would shave off elapsed milliseconds.
+    now: () => 0,
     ...overrides,
   };
 }
