@@ -214,6 +214,22 @@ function getVisualTransform(element: Element, view: Window & typeof globalThis):
   return matrix;
 }
 
+// The copy of `node` inside `copyRoot`, found by walking the same child positions as from `sourceRoot`.
+function findCopiedNode(sourceRoot: Element, copyRoot: Element, node: Element): Element | null {
+  const path: number[] = [];
+  for (let current = node; current !== sourceRoot; current = current.parentElement as Element) {
+    if (!current.parentElement) {
+      return null;
+    }
+    path.unshift(Array.prototype.indexOf.call(current.parentElement.children, current));
+  }
+  let copy: Element | undefined = copyRoot;
+  for (const index of path) {
+    copy = copy?.children[index];
+  }
+  return copy ?? null;
+}
+
 // The clone sits in document coordinates; it is placed again whenever the page or a container scrolls,
 // because the original (kept in place, only hidden) moves with its scroll container.
 function positionProposedClones(replayer: Replayer, moves: ScreenEditMove[]): void {
@@ -270,10 +286,10 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
   }
   // Every clone is built before any original is hidden: an edited element inside another edited one
   // would otherwise inherit the temporary hiding into its copied styles.
-  moves.forEach((move, index) => {
+  const clones = moves.map((move, index) => {
     const element = elements[index];
     if (!element) {
-      return;
+      return null;
     }
     const bounds = element.getBoundingClientRect();
     const clone = element.cloneNode(true) as HTMLElement;
@@ -294,6 +310,19 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
     });
     frameDocument.documentElement.appendChild(clone);
     copyScrollOffsets(element, clone, { remaining: MAX_STYLED_CLONE_ELEMENTS });
+    return clone;
+  });
+  // An edited element inside another edited one is shown only by its own clone; its copy inside the
+  // outer clone keeps its space but is hidden, so it does not appear twice.
+  elements.forEach((outer, outerIndex) => {
+    const outerClone = clones[outerIndex];
+    elements.forEach((inner, innerIndex) => {
+      if (!outer || !outerClone || !inner || innerIndex === outerIndex || !outer.contains(inner)) {
+        return;
+      }
+      const copy = findCopiedNode(outer, outerClone, inner) as HTMLElement | null;
+      copy?.style.setProperty('visibility', 'hidden');
+    });
   });
   elements.forEach((element) => element?.style.setProperty('visibility', 'hidden'));
   positionProposedClones(replayer, moves);
