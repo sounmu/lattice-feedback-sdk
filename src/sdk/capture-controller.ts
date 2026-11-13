@@ -4,7 +4,7 @@ import type { CommentPinSource, EditMoveSource } from '@/sdk/screen-marks';
 import { findCaptureTarget, isCapturePageAllowed, type CaptureTarget } from '@/sdk/capture-policy';
 import { createCaptureStatus } from '@/sdk/capture-status';
 import { startElementDrag } from '@/sdk/element-drag';
-import { startElementSelection } from '@/sdk/element-selection';
+import { startElementSelection, type SelectionPoint } from '@/sdk/element-selection';
 import { createFlowRecorder, type FlowRecorder, type FlowRecorderState } from '@/sdk/flow-recorder';
 import { startReplayRecording, type ReplayRecorder, type ReplayRecording } from '@/sdk/flow-replay-recorder';
 import { clearFlowSession, findSessionStorage, getFlowSessionKey } from '@/sdk/flow-session';
@@ -40,6 +40,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let activeMode: CaptureMode | null = null;
   let selection: ElementTarget | null = null;
   let selectionElement: HTMLElement | null = null;
+  let selectionPoint: SelectionPoint = { x: 0.5, y: 0.5 };
   // The live element of each comment, in the same order as attachments.comments, so saved screens can pin them.
   let commentElements: HTMLElement[] = [];
   // A key per comment and edit that never changes, unlike its number, so saved screens can tell them apart.
@@ -48,6 +49,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let nextMarkKey = 1;
   // Likewise for the dragged element of each edit.
   let editElements: HTMLElement[] = [];
+  let commentPoints: SelectionPoint[] = [];
   let isDragging = false;
   let transientHandle: { cancel(): void } | null = null;
   // Bumped whenever a transient run ends, so callbacks fired by our own cancel() (drag calls onCancel synchronously) are ignored.
@@ -70,6 +72,8 @@ export function createCaptureController(options: CaptureControllerOptions) {
     return {
       enabled: isCapturePageAllowed(policy), activeMode, selection, flowEventCount,
       attachments: { comments: [...attachments.comments], edits: [...attachments.edits], flow: attachments.flow },
+      commentKeys: [...commentKeys],
+      editKeys: [...editKeys],
       errorMessage: controllerErrorMessage ?? flowErrorMessage,
     };
   }
@@ -113,12 +117,13 @@ export function createCaptureController(options: CaptureControllerOptions) {
     showWidget();
   }
 
-  function handleSelect(target: CaptureTarget, token: number): void {
+  function handleSelect(target: CaptureTarget, token: number, point: SelectionPoint): void {
     if (token !== transientToken || isDestroyed) return;
     transientHandle = null;
     if (activeMode === 'comment') {
       selection = target.target;
       selectionElement = target.element;
+      selectionPoint = point;
       emit();
       showWidget();
       return;
@@ -164,7 +169,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     emit();
     const handle = startElementSelection({
       findTarget: (eventTarget) => findCaptureTarget(eventTarget, policy),
-      onSelect: (target) => handleSelect(target, token),
+      onSelect: (target, point) => handleSelect(target, token, point),
       onCancel: () => finishTransientRun(token),
     });
     if (token === transientToken) transientHandle = handle;
@@ -179,6 +184,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
         attachments.comments.push({ target: selection, comment: trimmedComment });
         commentElements.push(selectionElement);
         commentKeys.push(`comment-${nextMarkKey}`);
+        commentPoints.push(selectionPoint);
         nextMarkKey += 1;
       }
       controllerErrorMessage = null;
@@ -196,6 +202,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     if (kind === 'comments') {
       commentElements.splice(index, 1);
       commentKeys.splice(index, 1);
+      commentPoints.splice(index, 1);
     }
     if (kind === 'edits') {
       editElements.splice(index, 1);
@@ -226,6 +233,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     editElements = [];
     commentKeys = [];
     editKeys = [];
+    commentPoints = [];
     controllerErrorMessage = null;
     emit();
   }
@@ -328,7 +336,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
         return [];
       }
       const label = target.feedbackId ?? target.tagName.toLowerCase();
-      return [{ number: index + 1, key: commentKeys[index], label, comment, element: commentElements[index] }];
+      return [{ number: index + 1, key: commentKeys[index], label, comment, offset: commentPoints[index], element: commentElements[index] }];
     });
   }
 

@@ -42,6 +42,10 @@ function isFlow(value: unknown): boolean {
 export function isCaptureMode(value: unknown): value is CaptureMode {
   return value === 'comment' || value === 'edit' || value === 'flow';
 }
+function isKeyList(value: unknown, length: number): boolean {
+  return Array.isArray(value) && value.length === length && value.every((key: unknown) => isText(key, 40));
+}
+
 export function isCaptureState(value: unknown): value is CaptureState {
   if (!isRecord(value) || typeof value.enabled !== 'boolean' ||
     !(value.activeMode === null || isCaptureMode(value.activeMode)) ||
@@ -52,6 +56,7 @@ export function isCaptureState(value: unknown): value is CaptureState {
   const attachments = value.attachments;
   if (!isRecord(attachments) || !Array.isArray(attachments.comments) || !Array.isArray(attachments.edits) ||
     attachments.comments.length > MAX_COMMENTS || attachments.edits.length > MAX_EDITS) return false;
+  if (!isKeyList(value.commentKeys, attachments.comments.length) || !isKeyList(value.editKeys, attachments.edits.length)) return false;
   return attachments.comments.every((comment: unknown) => isRecord(comment) &&
       isTarget(comment.target) && isText(comment.comment, MAX_COMMENT_LENGTH)) &&
     attachments.edits.every((edit: unknown) => isRecord(edit) && isTarget(edit.target) &&

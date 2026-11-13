@@ -271,6 +271,26 @@ export function useScreenSnapshots({
     setFlowScreenIds((current) => new Set([...current].filter((screenId) => screenId !== id)));
   }, []);
 
+  // A removed Flow takes its replay screens with it.
+  const removeFlowScreens = useCallback(() => {
+    flowScreenIds.forEach((id) => remove(id));
+  }, [flowScreenIds, remove]);
+
+  // A deleted comment or edit must not reach the admin through a screen saved earlier, so those screens are dropped.
+  const removeScreensWithMark = useCallback((key: string): boolean => {
+    const dropped = new Set([...screensRef.current.marksByScreen].filter(([, keys]) => keys.includes(key)).map(([id]) => id));
+    if (dropped.size === 0) {
+      return false;
+    }
+    const next = {
+      snapshots: screensRef.current.snapshots.filter((snapshot) => !dropped.has(snapshot.id)),
+      marksByScreen: new Map([...screensRef.current.marksByScreen].filter(([id]) => !dropped.has(id))),
+    };
+    screensRef.current = next;
+    setScreens(next);
+    return true;
+  }, []);
+
   const reset = useCallback(() => {
     const empty: MarkedScreens = { snapshots: [], marksByScreen: new Map() };
     screensRef.current = empty;
@@ -280,5 +300,8 @@ export function useScreenSnapshots({
     setErrorMessage(null);
   }, []);
 
-  return { snapshots, markedScreenIds, flowScreenIds, captureFlow, status, errorMessage, canCapture, capture, captureForMarks, remove, reset };
+  return {
+    snapshots, markedScreenIds, flowScreenIds, captureFlow, removeScreensWithMark, removeFlowScreens,
+    status, errorMessage, canCapture, capture, captureForMarks, remove, reset,
+  };
 }

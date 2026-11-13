@@ -42,6 +42,8 @@ export interface ScreenCommentPin {
   nodeId: number | null;
   /** Document coordinates at capture time, used when the node cannot be found. */
   rect: { x: number; y: number; width: number; height: number };
+  /** Where the reporter clicked inside the element, as fractions of its width and height. */
+  offset: { x: number; y: number };
   /** data-feedback-id or tag name of the element. */
   label: string;
   comment: string;
