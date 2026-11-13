@@ -9,6 +9,8 @@ export interface PinBox {
   y: number;
   width: number;
   height: number;
+  /** The clicked point lies outside a scroll container or other clipping ancestor of its element. */
+  isClipped: boolean;
 }
 
 // Bubble width in screen px, before the inverse scale is applied.
@@ -31,13 +33,13 @@ export function CommentPinOverlay({ boxes, width: viewWidth, height: viewHeight,
   const inverseScale = 1 / scale;
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {boxes.map(({ pin, x, y, width, height }) => {
+      {boxes.map(({ pin, x, y, width, height, isClipped }) => {
         const isSelected = pin.number === selectedNumber;
         // The badge stays on the clicked point; a point scrolled out of view hides the badge rather
         // than moving it over unrelated content.
         const badgeX = x + pin.offset.x * width;
         const badgeY = y + pin.offset.y * height;
-        if (badgeX < 0 || badgeY < 0 || badgeX > viewWidth || badgeY > viewHeight) {
+        if (isClipped || badgeX < 0 || badgeY < 0 || badgeX > viewWidth || badgeY > viewHeight) {
           return null;
         }
         const opensLeft = badgeX + BUBBLE_WIDTH * inverseScale > viewWidth;
