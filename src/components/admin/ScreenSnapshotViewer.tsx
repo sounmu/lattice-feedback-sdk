@@ -177,6 +177,43 @@ function copyResolvedStyles(source: Element, target: Element, view: Window, budg
   });
 }
 
+// The runtime scroll position of a container is not part of a node copy, so it is carried over.
+function copyScrollOffsets(source: Element, target: Element, budget: { remaining: number }): void {
+  if (budget.remaining <= 0) {
+    return;
+  }
+  budget.remaining -= 1;
+  target.scrollTop = source.scrollTop;
+  target.scrollLeft = source.scrollLeft;
+  Array.from(source.children).forEach((child, index) => {
+    const copy = target.children[index];
+    if (copy) {
+      copyScrollOffsets(child, copy, budget);
+    }
+  });
+}
+
+// The scale, rotation and skew the element is drawn with, from its own transform and its ancestors'.
+// The translation is left out: the clone is placed by measuring where it lands.
+function getVisualTransform(element: Element, view: Window & typeof globalThis): DOMMatrix {
+  const chain: Element[] = [];
+  for (let current: Element | null = element; current; current = current.parentElement) {
+    chain.unshift(current);
+  }
+  let matrix = new view.DOMMatrix();
+  for (const current of chain) {
+    const { transform, transformOrigin } = view.getComputedStyle(current);
+    if (transform === 'none') {
+      continue;
+    }
+    const [originX = 0, originY = 0] = transformOrigin.split(' ').map((value) => Number.parseFloat(value));
+    matrix = matrix.translate(originX, originY).multiply(new view.DOMMatrix(transform)).translate(-originX, -originY);
+  }
+  matrix.e = 0;
+  matrix.f = 0;
+  return matrix;
+}
+
 // The clone sits in document coordinates; it is placed again whenever the page or a container scrolls,
 // because the original (kept in place, only hidden) moves with its scroll container.
 function positionProposedClones(replayer: Replayer, moves: ScreenEditMove[]): void {
@@ -193,8 +230,14 @@ function positionProposedClones(replayer: Replayer, moves: ScreenEditMove[]): vo
     }
     const bounds = element.getBoundingClientRect();
     const delta = getMoveDelta(move);
-    clone.style.setProperty('left', `${bounds.left + view.scrollX + delta.x}px`);
-    clone.style.setProperty('top', `${bounds.top + view.scrollY + delta.y}px`);
+    const targetX = bounds.left + delta.x;
+    const targetY = bounds.top + delta.y;
+    clone.style.setProperty('left', `${targetX + view.scrollX}px`);
+    clone.style.setProperty('top', `${targetY + view.scrollY}px`);
+    // A transformed clone is drawn away from its left/top corner; one correction lines up what is seen.
+    const drawn = clone.getBoundingClientRect();
+    clone.style.setProperty('left', `${targetX + view.scrollX + targetX - drawn.left}px`);
+    clone.style.setProperty('top', `${targetY + view.scrollY + targetY - drawn.top}px`);
   }
 }
 
@@ -233,17 +276,21 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
     const clone = element.cloneNode(true) as HTMLElement;
     clone.setAttribute(MOVE_CLONE_ATTRIBUTE, move.key);
     copyResolvedStyles(element, clone, view, { remaining: MAX_STYLED_CLONE_ELEMENTS });
+    // The untransformed layout size is kept and the visible transform reapplied, so a scaled or rotated
+    // element looks the same at the proposed position.
     Object.assign(clone.style, {
       position: 'absolute',
-      width: `${bounds.width}px`,
-      height: `${bounds.height}px`,
+      width: `${element.offsetWidth || bounds.width}px`,
+      height: `${element.offsetHeight || bounds.height}px`,
       margin: '0',
       boxSizing: 'border-box',
-      transform: 'none',
+      transform: getVisualTransform(element, view as Window & typeof globalThis).toString(),
+      transformOrigin: '0 0',
       visibility: 'visible',
       zIndex: '2147483647',
     });
     frameDocument.documentElement.appendChild(clone);
+    copyScrollOffsets(element, clone, { remaining: MAX_STYLED_CLONE_ELEMENTS });
     element.style.setProperty('visibility', 'hidden');
   }
   positionProposedClones(replayer, moves);
