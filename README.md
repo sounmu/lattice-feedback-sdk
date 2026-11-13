@@ -164,17 +164,17 @@ http://localhost:3000/admin/snapshots/{화면 ID}?projectKey=demo
 | POST | `/api/snapshots` | 위젯이 저장한 화면 업로드(최대 12 MB) |
 | GET | `/api/snapshots/{id}?projectKey=demo` | 저장된 화면 전체 조회(관리자 토큰 필요) |
 
-저장된 화면은 현재 **메모리 저장소에서만** 동작합니다. 프로젝트당 50개까지 보관하고,
-서버를 다시 시작하면 사라집니다. `FEEDBACK_STORAGE=supabase`에서는 화면 저장이 503을 반환하며,
-이때도 화면 없이 피드백을 보낼 수 있습니다.
+저장된 화면은 피드백과 같은 저장소(`FEEDBACK_STORAGE`)에 보관됩니다.
+메모리 모드에서는 프로젝트당 50개까지 보관하고, 서버를 다시 시작하면 사라집니다.
 
 ## 5. Supabase로 영구 저장
 
 메모리 대신 Supabase를 사용하려면 다음 순서로 설정합니다.
 
-1. Supabase 개발 프로젝트에서
-   `supabase/migrations/20261112000000-create-feedback.sql`을 적용합니다.
+1. Supabase 개발 프로젝트에서 `supabase/migrations/`의 SQL 파일을 이름 순서대로 적용합니다.
    기존 테이블이 있다면 먼저 스키마를 비교합니다.
+   화면 저장 테이블(`20261113000000-create-screen-snapshots.sql`)이 없으면
+   피드백 상세 조회와 화면 저장이 503을 반환합니다.
 2. `.env.local`의 저장소 설정을 다음과 같이 바꿉니다.
 3. Next.js 서버를 다시 시작하고 피드백 전송·목록 조회를 확인합니다.
 4. 서버를 재시작해 같은 피드백이 남아 있는지 확인합니다.
@@ -237,7 +237,7 @@ npm run build:sdk
 | `storage_unavailable` / 503 | 저장소 모드, Supabase URL·서버 키·SQL 적용 여부 |
 | 수정한 SDK가 반영되지 않음 | `npm run build:sdk` 후 호스트 새로고침 |
 | 화면 저장이 "이 페이지에서는 저장할 수 없습니다" | 수집 정책을 쓰는 경우 현재 경로가 `allowedPaths`에 있는지 확인 |
-| 화면 저장이 "저장소를 사용할 수 없습니다" | `FEEDBACK_STORAGE=memory`인지 확인(Supabase 화면 저장소는 아직 없음) |
+| 화면 저장이 "저장소를 사용할 수 없습니다" | Supabase 모드라면 화면 저장 마이그레이션을 적용했는지 확인 |
 
 origin은 포트까지 정확히 일치해야 하며 끝에 `/`를 붙이지 않습니다.
 `localhost`와 `127.0.0.1`도 서로 다른 origin입니다.

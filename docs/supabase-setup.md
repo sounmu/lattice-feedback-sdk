@@ -3,7 +3,8 @@
 ## 구조
 
 브라우저는 기존 Next.js API에만 요청한다. 서버는 Supabase Data API의
-`public.feedback` 테이블을 사용한다. 기존 저장소 인터페이스와 API 응답을 유지한다.
+`public.feedback`과 저장된 화면용 `public.screen_snapshots` 테이블을 사용한다.
+기존 저장소 인터페이스와 API 응답을 유지한다. 화면은 피드백과 같은 저장소 모드를 따른다.
 추가 패키지 없이 프로젝트에서 사용 중인 `fetch`로 REST 요청을 보낸다.
 요청에는 10초 제한을 두며, 오류 응답과 잘못된 응답 형식은 503으로 처리한다.
 생성 요청은 중복 저장을 피하기 위해 자동 재시도하지 않는다.
@@ -16,8 +17,10 @@ DB에는 RLS를 켜고 `anon`과 `authenticated` 역할의 테이블 권한을 �
 ## DB 적용
 
 1. Supabase 개발 프로젝트를 준비한다.
-2. SQL Editor에서 `supabase/migrations/20261112000000-create-feedback.sql`을 한 번 실행한다.
-   기존 테이블을 덮어쓰거나 삭제하지 않는다. 이미 `public.feedback`이 있다면 실행 전에 스키마를 비교한다.
+2. SQL Editor에서 `supabase/migrations/`의 파일을 이름 순서대로 한 번씩 실행한다.
+   - `20261112000000-create-feedback.sql`: 피드백 테이블
+   - `20261113000000-create-screen-snapshots.sql`: 저장된 화면 테이블. 없으면 피드백 상세 조회와 화면 저장이 503이다.
+   기존 테이블을 덮어쓰거나 삭제하지 않는다. 이미 테이블이 있다면 실행 전에 스키마를 비교한다.
 3. Project URL과 `sb_secret_...` 형식의 Secret key를 확인한다.
    공개용 `sb_publishable_...` 키나 기존 JWT 형태의 service_role 키는 이 구현의 설정 대상이 아니다.
 4. 다음 값을 로컬 `.env.local` 또는 배포 환경의 서버 전용 환경변수에 설정한다.

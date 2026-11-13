@@ -198,6 +198,18 @@ describe('saved screens on feedback', () => {
     expect(await getErrorCode(reused)).toBe('screen_snapshot_not_found');
   });
 
+  it('lets only one of two simultaneous submissions take the same screen', async () => {
+    const snapshotId = await createSnapshotId();
+
+    const responses = await Promise.all([submitFeedback([snapshotId]), submitFeedback([snapshotId])]);
+    const list = await getFeedbackList(
+      new Request(`${FEEDBACK_URL}?projectKey=demo`, { headers: { authorization: ADMIN_AUTHORIZATION } }),
+    );
+
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 400]);
+    expect(((await list.json()) as FeedbackListResponse).items).toHaveLength(1);
+  });
+
   it('rejects an unknown screen without storing the feedback', async () => {
     const response = await submitFeedback([crypto.randomUUID()]);
     const list = await getFeedbackList(
