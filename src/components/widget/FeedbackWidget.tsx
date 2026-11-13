@@ -128,6 +128,7 @@ export function FeedbackWidget() {
             snapshots={screens.snapshots}
             markedScreenIds={screens.markedScreenIds}
             flowScreenIds={screens.flowScreenIds}
+            truncatedFlowScreenIds={screens.truncatedFlowScreenIds}
             status={screens.status}
             errorMessage={screens.errorMessage}
             canCapture={screens.canCapture}

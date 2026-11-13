@@ -13,7 +13,8 @@ import {
   type MoveBox,
   type PinBox,
 } from '@/components/admin/ScreenMarkOverlay';
-import { findCommentPins, findEditMoves, hasReplayEvents } from '@/lib/screen-snapshot';
+import { MAX_REPLAY_DURATION_MS } from '@/lib/feedback-limits';
+import { findCommentPins, findEditMoves, hasReplayEvents, isReplayTruncated } from '@/lib/screen-snapshot';
 import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
 import type {
   MissingSnapshotAssetReason,
@@ -32,6 +33,8 @@ const UNAUTHORIZED_STATUS = 401;
 const ADMIN_TOKEN_STORAGE_KEY = 'lattice-feedback:admin-token';
 const ADMIN_TOKEN_EVENT = 'lattice-feedback:admin-token-change';
 const BUTTON_CLASS = 'min-h-11 rounded border bg-white px-3 py-2 text-sm aria-pressed:bg-gray-900 aria-pressed:text-white';
+const REPLAY_TRUNCATED_MESSAGE =
+  `기록 한도(${MAX_REPLAY_DURATION_MS / 60_000}분·이벤트 수)를 넘었거나 허용되지 않은 페이지로 이동해 뒷부분이 재생에 포함되지 않았습니다.`;
 
 const MISSING_ASSET_REASON_LABELS: Record<MissingSnapshotAssetReason, string> = {
   fetch_failed: '가져오지 못함',
@@ -437,6 +440,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
   const [showsProposed, setShowsProposed] = useState(false);
   const replayerRef = useRef<Replayer | null>(null);
   const isReplay = useMemo(() => hasReplayEvents(snapshot.events), [snapshot]);
+  const isTruncated = useMemo(() => isReplayTruncated(snapshot.events), [snapshot]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [totalMs, setTotalMs] = useState(0);
@@ -629,6 +633,11 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
     <div className="flex flex-col gap-2">
       {isReplay && (
         <ReplayControls isPlaying={isPlaying} currentMs={currentMs} totalMs={totalMs} onPlay={play} onPause={pause} onSeek={seek} />
+      )}
+      {isTruncated && (
+        <p role="alert" className="text-xs text-amber-700">
+          {REPLAY_TRUNCATED_MESSAGE}
+        </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={BUTTON_CLASS} aria-pressed={zoomMode === 'fit'} onClick={() => setZoomMode('fit')}>

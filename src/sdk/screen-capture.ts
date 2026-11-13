@@ -14,6 +14,7 @@ import {
 import {
   createCommentPinEvent,
   createEditMoveEvent,
+  createReplayTruncatedEvent,
   RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
   RRWEB_INCREMENTAL_EVENT_TYPE,
   RRWEB_META_EVENT_TYPE,
@@ -25,8 +26,8 @@ import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { ReplayRecording } from '@/sdk/flow-replay-recorder';
+import { createReplayAssetRoot } from '@/sdk/replay-assets';
 import { sanitizeReplayEvents } from '@/sdk/replay-sanitize';
-import type { SnapshotNode } from '@/sdk/snapshot-assets';
 import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
 
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
@@ -210,17 +211,20 @@ function findLoadedFontFamilies(): Set<string> {
 
 /**
  * Turns a recorded Flow into a saved screen: its first full snapshot plus the page changes after it.
- * The same exclusions as a still screen are applied to every recorded node, and the fonts and images
- * of the first snapshot are pulled out as files.
+ * The same exclusions as a still screen are applied to every recorded node and attribute change, and the
+ * fonts and images they refer to are pulled out as files. A recording that lost its later part ends with a
+ * marker event.
  */
 export async function captureRecording(recording: ReplayRecording, sdkSelector: string): Promise<ScreenCapture> {
   const [meta, full, ...rest] = recording.events;
   if (meta?.type !== RRWEB_META_EVENT_TYPE || full?.type !== RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
     throw new Error('The recording does not start with a full snapshot.');
   }
-  sanitizeReplayEvents(recording.events);
+  // A later Meta or FullSnapshot (a checkout) is not expected; only the changes are kept after the first pair.
+  const events = [meta, full, ...rest.filter((event) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE)];
+  const elements = sanitizeReplayEvents(events);
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
-  const { assetFiles, missingAssets } = await extractSnapshotAssets((full.data as { node: SnapshotNode }).node, {
+  const { assetFiles, missingAssets } = await extractSnapshotAssets(createReplayAssetRoot(events, elements), {
     pageOrigin: window.location.origin,
     loadedFontFamilies: findLoadedFontFamilies(),
     usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
@@ -231,12 +235,14 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
     maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
     maxAssetCount: MAX_SNAPSHOT_ASSETS,
   });
+  if (recording.truncated) {
+    events.push(createReplayTruncatedEvent(events[events.length - 1].timestamp));
+  }
   const screen: CapturedScreen = {
     format: SCREEN_SNAPSHOT_FORMAT,
     capturedAt: recording.startedAt,
     page: recording.page,
-    // A later Meta or FullSnapshot (a checkout) is not expected; only the changes are kept after the first pair.
-    events: [meta, full, ...rest.filter((event) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE)],
+    events,
     missingAssets,
   };
   return { screen, assetFiles };

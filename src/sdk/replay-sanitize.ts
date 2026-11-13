@@ -1,17 +1,20 @@
 // The same exclusions as a saved screen apply to everything a Flow recording adds or changes later:
 // no script content or handlers, and no hidden input or token meta values (AGENTS.md section 5).
 import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_INCREMENTAL_EVENT_TYPE } from '@/lib/screen-snapshot';
-import type { SnapshotNode } from '@/sdk/snapshot-assets';
+import type { SnapshotAttributes, SnapshotNode } from '@/sdk/snapshot-assets';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
 // rrweb IncrementalSource.Mutation.
 export const MUTATION_SOURCE = 0;
+// rrweb NodeType.Element.
+export const ELEMENT_NODE_TYPE = 2;
 
 export interface AttributeChange {
   id: number;
-  attributes: Record<string, unknown>;
+  /** New values by attribute name. Null removes the attribute; a changed style can be an object. */
+  attributes: SnapshotAttributes;
 }
 
 export interface MutationData {
@@ -40,21 +43,23 @@ function sanitizeNode(node: SnapshotNode, elements: RecordedElements): void {
   trackElements(node, elements);
 }
 
-// The change is checked as if it were the element itself with its new attributes, so a token meta whose
-// content rotates, a later javascript: URL or srcdoc are removed like in the first snapshot.
+// The change is checked as the element it produces, its new attributes on top of the recorded ones, so a
+// token meta whose content rotates, a value on an input that is or becomes hidden, and a later javascript:
+// URL or srcdoc are removed like in the first snapshot. A value that is not text (a removal, a style object)
+// only goes when its attribute name is excluded.
 function sanitizeAttributeChange(change: AttributeChange, elements: RecordedElements): void {
   const element = elements.get(change.id);
-  const merged = { ...element?.attributes, ...change.attributes };
-  const probe: SnapshotNode = { tagName: element?.tagName, attributes: merged };
-  removeHiddenValues(probe);
+  const attributes: SnapshotAttributes = { ...element?.attributes, ...change.attributes };
+  const changedElement: SnapshotNode = { type: ELEMENT_NODE_TYPE, tagName: element?.tagName, attributes };
+  removeHiddenValues(changedElement);
+  removeInlineScripts(changedElement);
   for (const name of Object.keys(change.attributes)) {
-    if (!(name in merged)) {
+    if (!(name in attributes)) {
       delete change.attributes[name];
     }
   }
-  removeInlineScripts({ attributes: change.attributes });
   if (element) {
-    element.attributes = { ...element.attributes, ...change.attributes };
+    element.attributes = attributes;
   }
 }
 

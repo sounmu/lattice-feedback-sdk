@@ -39,7 +39,7 @@ beforeEach(() => {
   });
   engines.replay.mockImplementation(() => {
     const replay = { startedAt: '2026-11-13T00:00:00.000Z', page: {}, events: [{}, {}], truncated: false };
-    return { stop: () => replay, discard: vi.fn() };
+    return { stop: () => replay, cutOff: () => ({ ...replay, truncated: true }), discard: vi.fn() };
   });
   engines.drag.mockImplementation((_selection, options: ElementDragOptions) => {
     dragOptions = options;
@@ -70,6 +70,10 @@ function createHarness(policy: CapturePolicy | null = POLICY) {
   });
   controller.sync();
   return { controller, states, show };
+}
+
+function visit(pathname: string) {
+  (window as { location: { pathname: string } }).location.pathname = pathname;
 }
 
 function selectTarget() {
@@ -188,6 +192,43 @@ it('keeps the replay of a completed Flow for one save and drops it on cancel', (
   controller.handleCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind: 'flow', index: 0 } }));
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
   controller.handleCommand(createCaptureCommand({ type: 'capture:cancel', payload: {} }));
+  expect(controller.takeFlowReplay()).toBeNull();
+  controller.destroy();
+});
+
+it('cuts the replay off on a page the policy leaves out and still hands it over when the Flow completes', () => {
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
+  visit('/orders');
+  controller.pageChanged();
+  visit('/');
+  controller.pageChanged();
+  controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
+
+  expect(controller.takeFlowReplay()?.truncated).toBe(true);
+  expect(engines.replay).toHaveBeenCalledOnce();
+  controller.destroy();
+});
+
+it('keeps the replay whole across page changes the policy allows', () => {
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
+  controller.pageChanged();
+  controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
+
+  expect(controller.takeFlowReplay()?.truncated).toBe(false);
+  controller.destroy();
+});
+
+it('records no replay for a Flow restored on a page the policy leaves out, even back on an allowed page', () => {
+  restoredFlow = true;
+  visit('/orders');
+  const { controller } = createHarness();
+  visit('/');
+  controller.pageChanged();
+  controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
+
+  expect(engines.replay).not.toHaveBeenCalled();
   expect(controller.takeFlowReplay()).toBeNull();
   controller.destroy();
 });

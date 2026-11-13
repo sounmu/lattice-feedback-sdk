@@ -61,6 +61,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let replayRecorder: ReplayRecorder | null = null;
   let finishedReplay: ReplayRecording | null = null;
   // The recorder reports the stop before the completed Flow arrives, so the replay waits here until then.
+  // A replay cut off on a page the policy leaves out waits here as well.
   let stoppedReplay: ReplayRecording | null = null;
   let flowErrorMessage: string | null = null;
   let controllerErrorMessage: string | null = null;
@@ -281,8 +282,11 @@ export function createCaptureController(options: CaptureControllerOptions) {
       startReplay();
     } else if (!state.recording && activeMode === 'flow') {
       activeMode = null;
-      stoppedReplay = replayRecorder?.stop() ?? null;
-      replayRecorder = null;
+      // A replay that was cut off has no recorder left and is kept as it is.
+      if (replayRecorder) {
+        stoppedReplay = replayRecorder.stop();
+        replayRecorder = null;
+      }
       queueMicrotask(emit);
       return;
     }
@@ -293,7 +297,16 @@ export function createCaptureController(options: CaptureControllerOptions) {
     discardReplay();
     finishedReplay = null;
     stoppedReplay = null;
+    // A Flow restored on a page the policy leaves out has no replay.
+    if (!isCapturePageAllowed(policy)) return;
     replayRecorder = startReplayRecording(options.sdkSelector);
+  }
+
+  // The replay must not carry a page the policy leaves out. Once cut off it is not resumed, even back on an allowed page.
+  function cutOffReplayOnDisallowedPage(): void {
+    if (!replayRecorder || isCapturePageAllowed(policy)) return;
+    stoppedReplay = replayRecorder.cutOff();
+    replayRecorder = null;
   }
 
   function discardReplay(): void {
@@ -368,6 +381,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
       renderStatus();
     }),
     pageChanged: unlessDestroyed(() => {
+      cutOffReplayOnDisallowedPage();
       cancelTransient();
       flowRecorder?.recordNavigation();
       emit();

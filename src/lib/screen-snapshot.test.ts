@@ -3,11 +3,14 @@ import { createScreenSnapshotBody } from '@/app/api/snapshots/screen-snapshot-te
 import {
   createCommentPinEvent,
   createEditMoveEvent,
+  createReplayTruncatedEvent,
   findCommentPins,
   findEditMoves,
   hasReplayEvents,
   isCapturedScreen,
+  isReplayTruncated,
   reconcileScreenMarks,
+  REPLAY_TRUNCATED_EVENT_TAG,
 } from '@/lib/screen-snapshot';
 import type { ScreenCommentPin, ScreenEditMove, ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
@@ -88,4 +91,16 @@ it('accepts the page changes of a recorded Flow and tells a replay apart from a 
   expect(hasReplayEvents(replay.events as ScreenSnapshotEvent[])).toBe(true);
   expect(hasReplayEvents(still.events as ScreenSnapshotEvent[])).toBe(false);
   expect(isCapturedScreen(createScreen([{ type: 3, timestamp: 2, data: 'not an object' }]))).toBe(false);
+});
+
+it('accepts the marker of a replay that lost its later part and tells such a replay from a whole one', () => {
+  const change = { type: 3, timestamp: 2, data: { source: 2, type: 2, id: 5, x: 10, y: 20 } };
+  const truncated = createScreen([change, createReplayTruncatedEvent(2)]);
+  const malformed = createScreen([change, { type: 5, timestamp: 2, data: { tag: REPLAY_TRUNCATED_EVENT_TAG, payload: null } }]);
+
+  expect(isCapturedScreen(truncated)).toBe(true);
+  expect(isReplayTruncated(truncated.events as ScreenSnapshotEvent[])).toBe(true);
+  expect(isReplayTruncated(createScreen([change]).events as ScreenSnapshotEvent[])).toBe(false);
+  expect(isCapturedScreen(malformed)).toBe(false);
+  expect(isReplayTruncated(malformed.events as ScreenSnapshotEvent[])).toBe(false);
 });

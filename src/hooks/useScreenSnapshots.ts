@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
 import { addMarkedScreen, type MarkedScreens } from '@/lib/marked-screens';
-import { findCommentPins, findEditMoves, reconcileScreenMarks, type LiveMarkKeys } from '@/lib/screen-snapshot';
+import { isCaptureCurrent, type CaptureSource } from '@/lib/screen-capture-generation';
+import { findCommentPins, findEditMoves, isReplayTruncated, reconcileScreenMarks, type LiveMarkKeys } from '@/lib/screen-snapshot';
 import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
 import type {
   CreateScreenSnapshotInput,
@@ -35,14 +36,20 @@ const PAYLOAD_TOO_LARGE_STATUS = 413;
 const FLOW_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 흐름 재생을 저장하지 못했습니다.';
 const MARKED_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 코멘트·편집 위치를 화면에 표시하지 못했습니다.';
 
-type CaptureSource = 'manual' | 'marks' | 'flow';
-
 function findMarkKeys(events: readonly ScreenSnapshotEvent[]): string[] {
   return [...findCommentPins(events).map((pin) => pin.key), ...findEditMoves(events).map((move) => move.key)];
 }
 
 // Captures are taken the moment they are asked for; uploads, and mark updates after a comment or edit is deleted, run one at a time.
-type UploadJob = { type: 'capture'; capture: ScreenCapture; source: CaptureSource } | { type: 'reconcile' };
+interface CaptureJob {
+  type: 'capture';
+  capture: ScreenCapture;
+  source: CaptureSource;
+  /** The Flow generation the capture was asked in; only a replay is tied to it. */
+  flowGeneration: number;
+}
+
+type UploadJob = CaptureJob | { type: 'reconcile' };
 
 /** What a marked screen was saved from, kept so its marks can be updated when a comment or edit is deleted. */
 interface SavedMarkedScreen {
@@ -153,13 +160,17 @@ export function useScreenSnapshots({
   const [isUploading, setIsUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [flowScreenIds, setFlowScreenIds] = useState<ReadonlySet<string>>(new Set());
-  const pendingRequests = useRef(new Map<string, { source: CaptureSource; timer: number }>());
+  // Replays whose later part was dropped by the recording limits; the reporter is told which ones.
+  const [truncatedFlowScreenIds, setTruncatedFlowScreenIds] = useState<ReadonlySet<string>>(new Set());
+  const pendingRequests = useRef(new Map<string, Pick<CaptureJob, 'source' | 'flowGeneration'> & { timer: number }>());
   const jobs = useRef<UploadJob[]>([]);
   const isDraining = useRef(false);
   const savedMarkedScreens = useRef(new Map<string, SavedMarkedScreen>());
   const liveMarkKeys = useRef<LiveMarkKeys>({ comments: [], edits: [] });
   // Bumped by reset so that work started for a discarded draft does not touch the new one.
   const generation = useRef(0);
+  // Bumped when the Flow is removed so that its replay, still being captured or uploaded, is not added afterwards.
+  const flowGeneration = useRef(0);
   const configRef = useRef(config);
   const drainRef = useRef<() => void>(() => undefined);
 
@@ -180,7 +191,19 @@ export function useScreenSnapshots({
     }
   }
 
-  async function runCapture(owner: UploadOwner, { screen, assetFiles }: ScreenCapture, source: CaptureSource, jobGeneration: number) {
+  function isJobCurrent(job: UploadJob, jobGeneration: number): boolean {
+    if (job.type === 'reconcile') {
+      return jobGeneration === generation.current;
+    }
+    return isCaptureCurrent(
+      job.source,
+      { draft: jobGeneration, flow: job.flowGeneration },
+      { draft: generation.current, flow: flowGeneration.current },
+    );
+  }
+
+  async function runCapture(owner: UploadOwner, job: CaptureJob, jobGeneration: number) {
+    const { source, capture: { screen, assetFiles } } = job;
     // A comment or edit deleted while its screen was being captured must not be saved with it.
     const events = source === 'marks' ? reconcileScreenMarks(screen.events, liveMarkKeys.current) : screen.events;
     if (!events) {
@@ -189,7 +212,7 @@ export function useScreenSnapshots({
     const pinnedScreen: CapturedScreen = { ...screen, events: [...events] };
     const assetHashes = await uploadAssetFiles({ ...owner, pageUrl: screen.page.url }, assetFiles);
     const created = await createSnapshot(owner, pinnedScreen, assetHashes);
-    if (jobGeneration !== generation.current) {
+    if (!isJobCurrent(job, jobGeneration)) {
       return;
     }
     const next = source === 'marks'
@@ -201,6 +224,9 @@ export function useScreenSnapshots({
     }
     if (source === 'flow') {
       setFlowScreenIds((current) => new Set([...current, created.id]));
+      if (isReplayTruncated(pinnedScreen.events)) {
+        setTruncatedFlowScreenIds((current) => new Set([...current, created.id]));
+      }
     }
     if (source === 'marks') {
       savedMarkedScreens.current.set(created.id, { screen: pinnedScreen, assetHashes });
@@ -256,12 +282,12 @@ export function useScreenSnapshots({
       const jobGeneration = generation.current;
       try {
         if (job.type === 'capture') {
-          await runCapture({ projectKey, hostOrigin }, job.capture, job.source, jobGeneration);
+          await runCapture({ projectKey, hostOrigin }, job, jobGeneration);
         } else {
           await runReconcile({ projectKey, hostOrigin }, jobGeneration);
         }
       } catch (error) {
-        if (jobGeneration === generation.current) {
+        if (isJobCurrent(job, jobGeneration)) {
           setErrorMessage(getJobErrorMessage(error));
         }
       }
@@ -297,7 +323,12 @@ export function useScreenSnapshots({
         return;
       }
       const { screen, assetFiles } = result.payload;
-      jobs.current.push({ type: 'capture', capture: { screen, assetFiles }, source: request.source });
+      jobs.current.push({
+        type: 'capture',
+        capture: { screen, assetFiles },
+        source: request.source,
+        flowGeneration: request.flowGeneration,
+      });
       drainRef.current();
     });
     return () => {
@@ -321,7 +352,7 @@ export function useScreenSnapshots({
       setPendingCount(requests.size);
       setErrorMessage(SAVE_FAILED_MESSAGE);
     }, CAPTURE_TIMEOUT_MS);
-    requests.set(requestId, { source, timer });
+    requests.set(requestId, { source, timer, flowGeneration: flowGeneration.current });
     setPendingCount(requests.size);
     if (source === 'flow') {
       requestFlowCapture(requestId);
@@ -372,10 +403,22 @@ export function useScreenSnapshots({
       marksByScreen: new Map([...screensRef.current.marksByScreen].filter(([screenId]) => screenId !== id)),
     });
     setFlowScreenIds((current) => new Set([...current].filter((screenId) => screenId !== id)));
+    setTruncatedFlowScreenIds((current) => new Set([...current].filter((screenId) => screenId !== id)));
   }, []);
 
-  // A removed Flow takes its replay screens with it.
+  // A removed Flow takes its replay screens with it, including a replay that is still being captured,
+  // waiting to be uploaded or uploading.
   const removeFlowScreens = useCallback(() => {
+    flowGeneration.current += 1;
+    const requests = pendingRequests.current;
+    for (const [requestId, request] of [...requests]) {
+      if (request.source === 'flow') {
+        window.clearTimeout(request.timer);
+        requests.delete(requestId);
+      }
+    }
+    setPendingCount(requests.size);
+    jobs.current = jobs.current.filter((job) => job.type !== 'capture' || job.source !== 'flow');
     flowScreenIds.forEach((id) => remove(id));
   }, [flowScreenIds, remove]);
 
@@ -387,10 +430,11 @@ export function useScreenSnapshots({
     setPendingCount(0);
     commitScreens({ snapshots: [], marksByScreen: new Map() });
     setFlowScreenIds(new Set());
+    setTruncatedFlowScreenIds(new Set());
     setErrorMessage(null);
   }, []);
 
   return {
-    snapshots, markedScreenIds, flowScreenIds, captureFlow, removeFlowScreens, status, errorMessage, canCapture, capture, captureForMarks, syncMarkKeys, remove, reset,
+    snapshots, markedScreenIds, flowScreenIds, truncatedFlowScreenIds, captureFlow, removeFlowScreens, status, errorMessage, canCapture, capture, captureForMarks, syncMarkKeys, remove, reset,
   };
 }

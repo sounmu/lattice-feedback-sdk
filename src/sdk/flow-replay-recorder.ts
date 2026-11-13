@@ -13,12 +13,14 @@ export interface ReplayRecording {
   startedAt: string;
   page: ScreenSnapshotPage;
   events: ScreenSnapshotEvent[];
-  /** True when events were dropped because the count or duration limit was reached. */
+  /** True when the later part is missing: the count or duration limit was reached, or the recording was cut off. */
   truncated: boolean;
 }
 
 export interface ReplayRecorder {
   stop(): ReplayRecording | null;
+  /** Stops here and marks what was recorded so far as missing its later part. */
+  cutOff(): ReplayRecording | null;
   discard(): void;
 }
 
@@ -60,13 +62,22 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
     stopRecording = undefined;
   }
 
+  function findRecording(): ReplayRecording | null {
+    if (events.length < 2) {
+      return null;
+    }
+    return { startedAt: new Date(events[0].timestamp).toISOString(), page, events: [...events], truncated };
+  }
+
   return {
     stop() {
       end();
-      if (events.length < 2) {
-        return null;
-      }
-      return { startedAt: new Date(events[0].timestamp).toISOString(), page, events: [...events], truncated };
+      return findRecording();
+    },
+    cutOff() {
+      end();
+      truncated = true;
+      return findRecording();
     },
     discard() {
       end();

@@ -7,7 +7,11 @@ import { MAX_MISSING_SNAPSHOT_ASSETS } from '@/lib/feedback-limits';
 import { createAssetReference } from '@/lib/snapshot-asset-references';
 import type { MissingSnapshotAsset } from '@/types/screen-snapshot';
 
-type SnapshotAttributes = Record<string, string | number | boolean | null>;
+/** How rrweb records a style attribute that changed during a Flow: property by property instead of as text. */
+export type SnapshotStyleChange = Record<string, string | false | [string, string]>;
+
+/** Attribute values of a serialized node. Only a recorded attribute change carries a style as an object. */
+export type SnapshotAttributes = Record<string, string | number | boolean | null | SnapshotStyleChange>;
 
 /** The part of an rrweb serialized node this module reads and rewrites. */
 export interface SnapshotNode {
