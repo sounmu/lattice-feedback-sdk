@@ -1,6 +1,6 @@
 import { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, truncateText } from '@/lib/feedback-limits';
 import type { CapturePolicy } from '@/lib/capture-policy';
-import type { CommentPinSource } from '@/sdk/comment-pins';
+import type { CommentPinSource, EditMoveSource } from '@/sdk/screen-marks';
 import { findCaptureTarget, isCapturePageAllowed, type CaptureTarget } from '@/sdk/capture-policy';
 import { createCaptureStatus } from '@/sdk/capture-status';
 import { startElementDrag } from '@/sdk/element-drag';
@@ -39,6 +39,8 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let selectionElement: HTMLElement | null = null;
   // The live element of each comment, in the same order as attachments.comments, so saved screens can pin them.
   let commentElements: HTMLElement[] = [];
+  // Likewise for the dragged element of each edit.
+  let editElements: HTMLElement[] = [];
   let isDragging = false;
   let transientHandle: { cancel(): void } | null = null;
   // Bumped whenever a transient run ends, so callbacks fired by our own cancel() (drag calls onCancel synchronously) are ignored.
@@ -112,7 +114,10 @@ export function createCaptureController(options: CaptureControllerOptions) {
     emit();
     const handle = startElementDrag(target, {
       onComplete: (edit) => {
-        if (token === transientToken && attachments.edits.length < MAX_EDITS) attachments.edits.push(edit);
+        if (token === transientToken && attachments.edits.length < MAX_EDITS) {
+          attachments.edits.push(edit);
+          editElements.push(target.element);
+        }
         finishTransientRun(token);
       },
       onCancel: () => finishTransientRun(token),
@@ -169,6 +174,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     if (kind === 'flow') attachments.flow = null;
     else attachments[kind].splice(index, 1);
     if (kind === 'comments') commentElements.splice(index, 1);
+    if (kind === 'edits') editElements.splice(index, 1);
     emit();
   }
 
@@ -189,6 +195,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     if (activeMode === 'flow') flowRecorder?.cancel();
     attachments = createEmptyAttachments();
     commentElements = [];
+    editElements = [];
     controllerErrorMessage = null;
     emit();
   }
@@ -272,8 +279,19 @@ export function createCaptureController(options: CaptureControllerOptions) {
     }));
   }
 
+  function getEditMoveSources(): EditMoveSource[] {
+    return attachments.edits.map(({ target, originalRect, proposedRect }, index) => ({
+      number: index + 1,
+      label: target.feedbackId ?? target.tagName.toLowerCase(),
+      originalRect,
+      proposedRect,
+      element: editElements[index],
+    }));
+  }
+
   return {
     getCommentPinSources,
+    getEditMoveSources,
     handleCommand: unlessDestroyed(handleCommand),
     sync: emit,
     setPanelVisible: unlessDestroyed((visible: boolean) => {

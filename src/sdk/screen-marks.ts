@@ -1,9 +1,14 @@
 import { MAX_COMMENT_LENGTH, truncateText } from '@/lib/feedback-limits';
 import { MAX_LABEL_LENGTH } from '@/lib/screen-snapshot';
-import type { ScreenCommentPin } from '@/types/screen-snapshot';
+import type { ScreenCommentPin, ScreenEditMove } from '@/types/screen-snapshot';
 
 /** A comment to pin on the saved screen, with the live element it was written for. */
 export interface CommentPinSource extends Pick<ScreenCommentPin, 'number' | 'label' | 'comment'> {
+  element: Element;
+}
+
+/** A proposed move to show on the saved screen, with the live element that was dragged. */
+export interface EditMoveSource extends Pick<ScreenEditMove, 'number' | 'label' | 'originalRect' | 'proposedRect'> {
   element: Element;
 }
 
@@ -28,5 +33,15 @@ export function createCommentPins(sources: readonly CommentPinSource[], position
         label: truncateText(label, MAX_LABEL_LENGTH),
         comment: truncateText(comment, MAX_COMMENT_LENGTH),
       };
+    });
+}
+
+// The rects were recorded in document coordinates when the drag ended, so only the node id is added here.
+export function createEditMoves(sources: readonly EditMoveSource[], findNodeId: (element: Element) => number): ScreenEditMove[] {
+  return sources
+    .filter(({ element }) => element.isConnected)
+    .map(({ element, number, label, originalRect, proposedRect }) => {
+      const nodeId = findNodeId(element);
+      return { number, nodeId: nodeId >= 0 ? nodeId : null, originalRect, proposedRect, label: truncateText(label, MAX_LABEL_LENGTH) };
     });
 }

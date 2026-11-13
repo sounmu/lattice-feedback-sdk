@@ -1,6 +1,6 @@
 'use client';
 
-import type { ScreenCommentPin } from '@/types/screen-snapshot';
+import type { ScreenCommentPin, ScreenEditMove } from '@/types/screen-snapshot';
 
 /** Where a pin's element sits in the rebuilt page's viewport, in CSS px. */
 export interface PinBox {
@@ -102,5 +102,85 @@ export function CommentPinList({ pins, selectedNumber, onSelect }: CommentPinLis
         </li>
       ))}
     </ol>
+  );
+}
+
+/** An element's original and proposed box in the rebuilt page's viewport, in CSS px. */
+export interface MoveBox {
+  move: ScreenEditMove;
+  original: { x: number; y: number; width: number; height: number };
+  proposed: { x: number; y: number; width: number; height: number };
+}
+
+interface EditMoveOverlayProps {
+  boxes: MoveBox[];
+  scale: number;
+  showsProposed: boolean;
+}
+
+// The original position stays outlined with a dashed line and the proposed one with a solid line,
+// so both are visible whichever position the element is currently drawn at.
+export function EditMoveOverlay({ boxes, scale, showsProposed }: EditMoveOverlayProps) {
+  const inverseScale = 1 / scale;
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      {boxes.map(({ move, original, proposed }) => (
+        <div key={move.number}>
+          <div
+            className={`absolute rounded border-2 border-dashed ${showsProposed ? 'border-gray-500' : 'border-orange-500 bg-orange-500/10'}`}
+            style={{ left: original.x, top: original.y, width: original.width, height: original.height }}
+          />
+          <div
+            className={`absolute rounded border-2 ${showsProposed ? 'border-emerald-600 bg-emerald-600/10' : 'border-emerald-600/70'}`}
+            style={{ left: proposed.x, top: proposed.y, width: proposed.width, height: proposed.height }}
+          />
+          <span
+            className="absolute rounded bg-emerald-600 px-1.5 py-0.5 text-xs font-semibold text-white shadow"
+            style={{ left: proposed.x, top: proposed.y, transform: `scale(${inverseScale}) translateY(-100%)`, transformOrigin: 'top left' }}
+          >
+            편집 {move.number}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatDelta(value: number): string {
+  const rounded = Math.round(value);
+  return rounded > 0 ? `+${rounded}` : String(rounded);
+}
+
+interface EditMoveListProps {
+  moves: ScreenEditMove[];
+  showsProposed: boolean;
+  onToggle: () => void;
+}
+
+export function EditMoveList({ moves, showsProposed, onToggle }: EditMoveListProps) {
+  return (
+    <section aria-label={`위치 편집 ${moves.length}개`} className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          aria-pressed={showsProposed}
+          className="min-h-11 rounded border bg-white px-3 py-2 text-sm aria-pressed:bg-emerald-700 aria-pressed:text-white"
+          onClick={onToggle}
+        >
+          {showsProposed ? '원래 위치로 보기' : '제안 위치로 보기'}
+        </button>
+        <span className="text-xs text-gray-600">
+          점선은 원래 위치, 실선은 제안 위치입니다. 좌표 이동 제안이며 실제 레이아웃 코드 변경과 같지 않습니다.
+        </span>
+      </div>
+      <ol className="flex flex-col gap-1 text-sm">
+        {moves.map((move) => (
+          <li key={move.number} className="rounded border bg-white p-2">
+            <span className="font-medium">편집 {move.number}</span> · {move.label} · 가로{' '}
+            {formatDelta(move.proposedRect.x - move.originalRect.x)}px, 세로 {formatDelta(move.proposedRect.y - move.originalRect.y)}px
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { createCommentPins } from '@/sdk/comment-pins';
+import { createCommentPins, createEditMoves } from '@/sdk/screen-marks';
 
 function createElement(isConnected: boolean, left = 10, top = 20) {
   return { isConnected, getBoundingClientRect: () => ({ left, top, width: 80, height: 30 }) } as unknown as Element;
@@ -21,4 +21,18 @@ it('pins connected elements in document coordinates and keeps their rrweb node i
     { number: 1, nodeId: 7, rect: { x: 15, y: 120, width: 80, height: 30 }, label: 'save', comment: 'first' },
     { number: 3, nodeId: null, rect: { x: 5, y: 100, width: 80, height: 30 }, label: 'div', comment: 'third' },
   ]);
+});
+
+it('keeps the recorded rects of a move and adds the node id of the dragged element', () => {
+  const dragged = createElement(true);
+  const rects = { originalRect: { x: 1, y: 2, width: 3, height: 4 }, proposedRect: { x: 51, y: 2, width: 3, height: 4 } };
+  const moves = createEditMoves(
+    [
+      { number: 1, label: 'save', element: dragged, ...rects },
+      { number: 2, label: 'gone', element: createElement(false), ...rects },
+    ],
+    (element) => (element === dragged ? 4 : -1),
+  );
+
+  expect(moves).toEqual([{ number: 1, nodeId: 4, label: 'save', ...rects }]);
 });

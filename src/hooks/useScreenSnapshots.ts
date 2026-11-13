@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
-import { addCommentScreen } from '@/lib/comment-screens';
+import { addMarkedScreen } from '@/lib/marked-screens';
 import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
 import type {
   CreateScreenSnapshotInput,
@@ -28,9 +28,9 @@ const CAPTURE_TIMEOUT_MS = 30_000;
 const SAVE_FAILED_MESSAGE = '화면을 저장하지 못했습니다. 다시 시도해 주세요.';
 const PAGE_NOT_ALLOWED_MESSAGE = '이 페이지에서는 화면을 저장할 수 없습니다.';
 const PAYLOAD_TOO_LARGE_STATUS = 413;
-const COMMENT_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 코멘트 위치를 화면에 표시하지 못했습니다.';
+const MARKED_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 코멘트·편집 위치를 화면에 표시하지 못했습니다.';
 
-type CaptureSource = 'manual' | 'comment';
+type CaptureSource = 'manual' | 'marks';
 
 const CAPTURE_FAILURE_MESSAGES: Record<ScreenCaptureFailureReason, string> = {
   page_not_allowed: PAGE_NOT_ALLOWED_MESSAGE,
@@ -101,17 +101,17 @@ function getUploadErrorMessage(status: number): string {
 }
 
 export function useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture }: UseScreenSnapshotsOptions) {
-  const [screens, setScreens] = useState<{ snapshots: ScreenSnapshotSummary[]; commentScreenIds: ReadonlySet<string> }>({
+  const [screens, setScreens] = useState<{ snapshots: ScreenSnapshotSummary[]; markedScreenIds: ReadonlySet<string> }>({
     snapshots: [],
-    commentScreenIds: new Set(),
+    markedScreenIds: new Set(),
   });
-  const { snapshots, commentScreenIds } = screens;
+  const { snapshots, markedScreenIds } = screens;
   const [status, setStatus] = useState<ScreenSaveStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const captureTimer = useRef<number | null>(null);
   const pendingSource = useRef<CaptureSource>('manual');
-  // A comment attached while another screen is being saved gets its own save afterwards.
-  const isCommentCaptureQueued = useRef(false);
+  // A comment or edit added while another screen is being saved gets its own save afterwards.
+  const isMarksCaptureQueued = useRef(false);
   const startCaptureRef = useRef<(source: CaptureSource) => void>(() => undefined);
 
   useEffect(() => {
@@ -136,8 +136,8 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
           body,
         });
         const created = (await response.json()) as CreateScreenSnapshotResponse;
-        if (source === 'comment') {
-          setScreens((current) => addCommentScreen(current, created.snapshot));
+        if (source === 'marks') {
+          setScreens((current) => addMarkedScreen(current, created.snapshot));
         } else {
           setScreens((current) => ({ ...current, snapshots: [...current.snapshots, created.snapshot] }));
         }
@@ -149,14 +149,14 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
         }
       } finally {
         setStatus('idle');
-        runQueuedCommentCapture();
+        runQueuedMarksCapture();
       }
     }
 
-    function runQueuedCommentCapture() {
-      if (isCommentCaptureQueued.current) {
-        isCommentCaptureQueued.current = false;
-        startCaptureRef.current('comment');
+    function runQueuedMarksCapture() {
+      if (isMarksCaptureQueued.current) {
+        isMarksCaptureQueued.current = false;
+        startCaptureRef.current('marks');
       }
     }
 
@@ -170,7 +170,7 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
       if (result.type === 'screen:capture-failed') {
         setStatus('idle');
         setErrorMessage(CAPTURE_FAILURE_MESSAGES[result.payload.reason]);
-        runQueuedCommentCapture();
+        runQueuedMarksCapture();
         return;
       }
       void upload(result.payload, pendingSource.current);
@@ -185,8 +185,8 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
   }, [config, subscribeToScreenCapture]);
 
   const canCapture = status === 'idle' && snapshots.length < MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK;
-  // A comment screen may replace an earlier one, so it is allowed at the limit when one exists.
-  const canCaptureComment = canCapture || (status === 'idle' && snapshots.some((snapshot) => commentScreenIds.has(snapshot.id)));
+  // A marked screen may replace an earlier one, so it is allowed at the limit when one exists.
+  const canCaptureMarks = canCapture || (status === 'idle' && snapshots.some((snapshot) => markedScreenIds.has(snapshot.id)));
 
   const startCapture = useCallback((source: CaptureSource) => {
     pendingSource.current = source;
@@ -206,17 +206,17 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     }
   }, [canCapture, startCapture]);
 
-  const captureForComment = useCallback(() => {
+  const captureForMarks = useCallback(() => {
     if (status !== 'idle') {
-      isCommentCaptureQueued.current = true;
+      isMarksCaptureQueued.current = true;
       return;
     }
-    if (!canCaptureComment) {
-      setErrorMessage(COMMENT_SCREEN_FULL_MESSAGE);
+    if (!canCaptureMarks) {
+      setErrorMessage(MARKED_SCREEN_FULL_MESSAGE);
       return;
     }
-    startCapture('comment');
-  }, [status, canCaptureComment, startCapture]);
+    startCapture('marks');
+  }, [status, canCaptureMarks, startCapture]);
 
   useEffect(() => {
     startCaptureRef.current = startCapture;
@@ -227,10 +227,10 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
   }, []);
 
   const reset = useCallback(() => {
-    setScreens({ snapshots: [], commentScreenIds: new Set() });
-    isCommentCaptureQueued.current = false;
+    setScreens({ snapshots: [], markedScreenIds: new Set() });
+    isMarksCaptureQueued.current = false;
     setErrorMessage(null);
   }, []);
 
-  return { snapshots, commentScreenIds, status, errorMessage, canCapture, capture, captureForComment, remove, reset };
+  return { snapshots, markedScreenIds, status, errorMessage, canCapture, capture, captureForMarks, remove, reset };
 }

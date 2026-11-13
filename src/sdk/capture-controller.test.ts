@@ -111,6 +111,24 @@ it('keeps the live element of each comment for pinning on saved screens', () => 
   controller.destroy();
 });
 
+it('keeps the dragged element of each edit for marking on saved screens', () => {
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'edit' } }));
+  selectTarget();
+  const rect = { x: 1, y: 2, width: 80, height: 30 };
+  dragOptions?.onComplete({
+    target: { selector: 'button', feedbackId: 'save', tagName: 'button', rect },
+    originalRect: rect, proposedRect: { ...rect, x: 41 }, viewportWidth: 1440, viewportHeight: 900, note: '',
+  });
+
+  expect(controller.getEditMoveSources()).toEqual([
+    { number: 1, label: 'save', originalRect: rect, proposedRect: { ...rect, x: 41 }, element: expect.anything() },
+  ]);
+  controller.handleCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind: 'edits', index: 0 } }));
+  expect(controller.getEditMoveSources()).toEqual([]);
+  controller.destroy();
+});
+
 it('does not reopen the panel when cancelling a drag programmatically', () => {
   const { controller, show } = createHarness();
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'edit' } }));

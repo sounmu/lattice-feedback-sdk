@@ -45,6 +45,20 @@ export interface ScreenCommentPin {
   comment: string;
 }
 
+/**
+ * A position change the reporter proposed by dragging an element. Stored as an rrweb custom event
+ * so the admin viewer can move the same rebuilt element and compare both positions.
+ */
+export interface ScreenEditMove {
+  /** 1-based position of the edit in the feedback. */
+  number: number;
+  nodeId: number | null;
+  /** Document coordinates before and after the drag. */
+  originalRect: ScreenCommentPin['rect'];
+  proposedRect: ScreenCommentPin['rect'];
+  label: string;
+}
+
 export interface CapturedScreen {
   format: ScreenSnapshotFormat;
   /** ISO timestamp. */

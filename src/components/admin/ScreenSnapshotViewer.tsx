@@ -1,16 +1,24 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
 
-import { CommentPinList, CommentPinOverlay, type PinBox } from '@/components/admin/CommentPinOverlay';
-import { findCommentPins } from '@/lib/screen-snapshot';
+import {
+  CommentPinList,
+  CommentPinOverlay,
+  EditMoveList,
+  EditMoveOverlay,
+  type MoveBox,
+  type PinBox,
+} from '@/components/admin/ScreenMarkOverlay';
+import { findCommentPins, findEditMoves } from '@/lib/screen-snapshot';
 import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
 import type {
   MissingSnapshotAssetReason,
   ScreenCommentPin,
+  ScreenEditMove,
   ScreenSnapshot,
   ScreenSnapshotDetailResponse,
 } from '@/types/screen-snapshot';
@@ -112,6 +120,74 @@ function measurePin(replayer: Replayer, pin: ScreenCommentPin): PinBox {
   };
 }
 
+function findMarkedElement(replayer: Replayer, nodeId: number | null): HTMLElement | null {
+  const node = nodeId === null ? null : replayer.getMirror().getNode(nodeId);
+  // The node lives in the replay iframe's realm, so instanceof HTMLElement would be false.
+  return node && 'style' in node && 'getBoundingClientRect' in node ? (node as HTMLElement) : null;
+}
+
+function getMoveDelta(move: ScreenEditMove): { x: number; y: number } {
+  return { x: move.proposedRect.x - move.originalRect.x, y: move.proposedRect.y - move.originalRect.y };
+}
+
+const MOVE_CLONE_ATTRIBUTE = 'data-lattice-move-clone';
+// Inherited text styles are copied because the clone leaves the element's ancestors.
+const INHERITED_STYLE_PROPERTIES = ['color', 'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing'];
+
+// The original element keeps its layout box (it is only hidden while the proposal is shown), so its
+// bounds are the original position either way.
+function measureMove(replayer: Replayer, move: ScreenEditMove): MoveBox {
+  const delta = getMoveDelta(move);
+  const element = findMarkedElement(replayer, move.nodeId);
+  const bounds = element?.getBoundingClientRect();
+  let original = { ...move.originalRect };
+  if (bounds && (bounds.width > 0 || bounds.height > 0)) {
+    original = { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height };
+  } else {
+    const view = replayer.iframe.contentWindow;
+    original = { ...original, x: original.x - (view?.scrollX ?? 0), y: original.y - (view?.scrollY ?? 0) };
+  }
+  return { move, original, proposed: { ...original, x: original.x + delta.x, y: original.y + delta.y } };
+}
+
+// Only the rebuilt page in the sandboxed iframe changes; the host page is never touched. The proposal
+// is drawn as a copy placed in document coordinates, so an ancestor's overflow cannot clip it.
+function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isShown: boolean): void {
+  const frameDocument = replayer.iframe.contentDocument;
+  const view = replayer.iframe.contentWindow;
+  frameDocument?.querySelectorAll(`[${MOVE_CLONE_ATTRIBUTE}]`).forEach((clone) => clone.remove());
+  for (const move of moves) {
+    const element = findMarkedElement(replayer, move.nodeId);
+    if (!element || !frameDocument || !view) {
+      continue;
+    }
+    element.style.removeProperty('visibility');
+    if (!isShown) {
+      continue;
+    }
+    const bounds = element.getBoundingClientRect();
+    const computed = view.getComputedStyle(element);
+    const delta = getMoveDelta(move);
+    const clone = element.cloneNode(true) as HTMLElement;
+    clone.setAttribute(MOVE_CLONE_ATTRIBUTE, '');
+    for (const property of INHERITED_STYLE_PROPERTIES) {
+      clone.style.setProperty(property, computed.getPropertyValue(property));
+    }
+    Object.assign(clone.style, {
+      position: 'absolute',
+      left: `${bounds.left + view.scrollX + delta.x}px`,
+      top: `${bounds.top + view.scrollY + delta.y}px`,
+      width: `${bounds.width}px`,
+      height: `${bounds.height}px`,
+      margin: '0',
+      boxSizing: 'border-box',
+      zIndex: '2147483647',
+    });
+    frameDocument.documentElement.appendChild(clone);
+    element.style.setProperty('visibility', 'hidden');
+  }
+}
+
 function AdminTokenForm() {
   const [value, setValue] = useState('');
 
@@ -171,8 +247,32 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
   const { viewportWidth, viewportHeight } = snapshot.page;
   const pins = useMemo(() => findCommentPins(snapshot.events), [snapshot]);
+  const moves = useMemo(() => findEditMoves(snapshot.events), [snapshot]);
   const [pinBoxes, setPinBoxes] = useState<PinBox[]>([]);
+  const [moveBoxes, setMoveBoxes] = useState<MoveBox[]>([]);
   const [selectedPin, setSelectedPin] = useState<number | null>(null);
+  const [showsProposed, setShowsProposed] = useState(false);
+  const replayerRef = useRef<Replayer | null>(null);
+  const showsProposedRef = useRef(false);
+
+  const measureMarks = useCallback(() => {
+    const replayer = replayerRef.current;
+    if (!replayer) {
+      return;
+    }
+    setPinBoxes(pins.map((pin) => measurePin(replayer, pin)));
+    setMoveBoxes(moves.map((move) => measureMove(replayer, move)));
+  }, [pins, moves]);
+
+  function toggleProposed() {
+    const next = !showsProposedRef.current;
+    showsProposedRef.current = next;
+    if (replayerRef.current) {
+      showProposedPositions(replayerRef.current, moves, next);
+    }
+    setShowsProposed(next);
+    measureMarks();
+  }
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -195,9 +295,8 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
     let frameDocument: Document | null = null;
 
     function measurePins() {
-      if (replayer && !isCancelled) {
-        const current = replayer;
-        setPinBoxes(pins.map((pin) => measurePin(current, pin)));
+      if (!isCancelled) {
+        measureMarks();
       }
     }
 
@@ -231,10 +330,12 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
         triggerFocus: false,
       });
       replayer.pause(0);
-      if (pins.length === 0) {
+      replayerRef.current = replayer;
+      showsProposedRef.current = false;
+      if (pins.length === 0 && moves.length === 0) {
         return;
       }
-      // Pins follow the rebuilt page as it is scrolled and once its fonts have changed the layout.
+      // Marks follow the rebuilt page as it is scrolled and once its fonts have changed the layout.
       frameDocument = replayer.iframe.contentDocument;
       frameDocument?.addEventListener('scroll', measurePins, { capture: true, passive: true });
       measurePins();
@@ -248,10 +349,11 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       stage.removeEventListener('wheel', handleWheel);
       frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
       replayer?.destroy();
+      replayerRef.current = null;
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [snapshot, projectKey, token, pins]);
+  }, [snapshot, projectKey, token, pins, moves, measureMarks]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -293,6 +395,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
               className="[&_.replayer-mouse]:hidden [&_.replayer-mouse-tail]:hidden"
               style={{ width: viewportWidth, height: viewportHeight }}
             />
+            <EditMoveOverlay boxes={moveBoxes} scale={scale} showsProposed={showsProposed} />
             <CommentPinOverlay
               boxes={pinBoxes}
               width={viewportWidth}
@@ -301,6 +404,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
           </div>
         </div>
       </div>
+      {moves.length > 0 && <EditMoveList moves={moves} showsProposed={showsProposed} onToggle={toggleProposed} />}
       {pins.length > 0 && <CommentPinList pins={pins} selectedNumber={selectedPin} onSelect={setSelectedPin} />}
     </div>
   );

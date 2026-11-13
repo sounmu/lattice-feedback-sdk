@@ -16,6 +16,7 @@ import type { FeedbackReporter, PageContext } from '@/types/feedback';
 
 export type ScreenCaptureResult = ScreenCapturedMessage | ScreenCaptureFailedMessage;
 type ScreenCaptureListener = (result: ScreenCaptureResult) => void;
+type CaptureUpdateListener = (state: CaptureState) => void;
 
 interface HostBridgeConfig {
   projectKey: string;
@@ -48,6 +49,7 @@ export function useHostBridge() {
   const [captureState, setCaptureState] = useState<CaptureState | null>(null);
   // A saved screen is several megabytes, so it is handed to its listener instead of kept in state.
   const screenCaptureListeners = useRef(new Set<ScreenCaptureListener>());
+  const captureUpdateListeners = useRef(new Set<CaptureUpdateListener>());
 
   const projectKey = searchParams.get('projectKey');
   const hostOrigin = findValidHostOrigin(searchParams.get('hostOrigin'));
@@ -80,7 +82,9 @@ export function useHostBridge() {
         return;
       }
       if (isCaptureUpdate(event.data)) {
-        setCaptureState(event.data.payload);
+        const state = event.data.payload;
+        setCaptureState(state);
+        captureUpdateListeners.current.forEach((listener) => listener(state));
         return;
       }
       if (!isHostToWidgetMessage(event.data)) {
@@ -132,6 +136,14 @@ export function useHostBridge() {
     };
   }, []);
 
+  const subscribeToCaptureUpdate = useCallback((listener: CaptureUpdateListener) => {
+    const listeners = captureUpdateListeners.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
   const requestScreenCapture = useCallback(() => {
     postToHost(createWidgetToHostMessage('screen:capture', {}));
   }, [postToHost]);
@@ -147,6 +159,7 @@ export function useHostBridge() {
     captureState,
     sendCaptureCommand: postToHost,
     subscribeToScreenCapture,
+    subscribeToCaptureUpdate,
     requestScreenCapture,
     notifyClose,
     notifySubmitted,

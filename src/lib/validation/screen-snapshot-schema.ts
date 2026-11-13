@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import {
-  MAX_COMMENTS,
   MAX_MISSING_SNAPSHOT_ASSETS,
   MAX_PAGE_TITLE_LENGTH,
   MAX_SNAPSHOT_ASSETS,
@@ -8,7 +7,10 @@ import {
 } from '@/lib/feedback-limits';
 import {
   COMMENT_PIN_EVENT_TAG,
+  EDIT_MOVE_EVENT_TAG,
   isScreenCommentPin,
+  isScreenEditMove,
+  MAX_SCREEN_MARK_EVENTS,
   RRWEB_CUSTOM_EVENT_TYPE,
   RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
   RRWEB_META_EVENT_TYPE,
@@ -41,6 +43,15 @@ const commentPinEventSchema = z.object({
   }),
 });
 
+const editMoveEventSchema = z.object({
+  type: z.literal(RRWEB_CUSTOM_EVENT_TYPE),
+  timestamp: z.number().nonnegative(),
+  data: z.object({
+    tag: z.literal(EDIT_MOVE_EVENT_TAG),
+    payload: z.unknown().refine(isScreenEditMove, { message: 'invalid edit move' }),
+  }),
+});
+
 export const snapshotAssetHashSchema = z.string().regex(SNAPSHOT_ASSET_HASH_PATTERN);
 const projectKeySchema = z.string().min(1).max(MAX_SHORT_TEXT_LENGTH);
 const hostOriginSchema = z
@@ -66,8 +77,8 @@ export const createScreenSnapshotInputSchema = z.object({
   }),
   events: z
     .tuple([createEventSchema(RRWEB_META_EVENT_TYPE), createEventSchema(RRWEB_FULL_SNAPSHOT_EVENT_TYPE)])
-    .rest(commentPinEventSchema)
-    .refine((events) => events.length <= 2 + MAX_COMMENTS, { message: 'too many comment pins' }),
+    .rest(z.union([commentPinEventSchema, editMoveEventSchema]))
+    .refine((events) => events.length <= 2 + MAX_SCREEN_MARK_EVENTS, { message: 'too many screen marks' }),
   missingAssets: z
     .array(
       z.object({

@@ -3,6 +3,7 @@
 import {
   MAX_COMMENT_LENGTH,
   MAX_COMMENTS,
+  MAX_EDITS,
   MAX_MISSING_SNAPSHOT_ASSETS,
   MAX_SNAPSHOT_ASSETS,
 } from '@/lib/feedback-limits';
@@ -11,6 +12,7 @@ import type {
   MissingSnapshotAssetReason,
   ScreenCaptureFailureReason,
   ScreenCommentPin,
+  ScreenEditMove,
   ScreenSnapshotEvent,
   ScreenSnapshotFormat,
 } from '@/types/screen-snapshot';
@@ -18,11 +20,13 @@ import type {
 export const SCREEN_SNAPSHOT_FORMAT: ScreenSnapshotFormat = 'rrweb-2';
 
 // rrweb EventType values. A saved screen is one Meta event followed by one FullSnapshot event,
-// then one Custom event per comment pinned on the screen.
+// then one Custom event per comment pinned or element moved on the screen.
 export const RRWEB_FULL_SNAPSHOT_EVENT_TYPE = 2;
 export const RRWEB_META_EVENT_TYPE = 4;
 export const RRWEB_CUSTOM_EVENT_TYPE = 5;
 export const COMMENT_PIN_EVENT_TAG = 'lattice-comment-pin';
+export const EDIT_MOVE_EVENT_TAG = 'lattice-edit-move';
+export const MAX_SCREEN_MARK_EVENTS = MAX_COMMENTS + MAX_EDITS;
 export const MAX_LABEL_LENGTH = 200;
 const MAX_RECT_COORDINATE = 10_000_000;
 
@@ -51,28 +55,61 @@ function isRectValue(value: unknown, minimum: number): boolean {
   return isFiniteNumber(value) && value >= minimum && value <= MAX_RECT_COORDINATE;
 }
 
+function isMarkRect(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isRectValue(value.x, -MAX_RECT_COORDINATE) && isRectValue(value.y, -MAX_RECT_COORDINATE) &&
+    isRectValue(value.width, 0) && isRectValue(value.height, 0)
+  );
+}
+
+function isMarkBase(value: Record<string, unknown>, maxNumber: number): boolean {
+  const { number, nodeId, label } = value;
+  return (
+    Number.isInteger(number) && Number(number) >= 1 && Number(number) <= maxNumber &&
+    (nodeId === null || (Number.isInteger(nodeId) && Number(nodeId) >= 0)) &&
+    typeof label === 'string' && label.length <= MAX_LABEL_LENGTH
+  );
+}
+
+export function isScreenEditMove(value: unknown): value is ScreenEditMove {
+  return isRecord(value) && isMarkBase(value, MAX_EDITS) && isMarkRect(value.originalRect) && isMarkRect(value.proposedRect);
+}
+
 export function isScreenCommentPin(value: unknown): value is ScreenCommentPin {
-  if (!isRecord(value) || !isRecord(value.rect)) {
+  if (!isRecord(value)) {
     return false;
   }
-  const { number, nodeId, rect, label, comment } = value;
+  const { comment } = value;
   return (
-    Number.isInteger(number) && Number(number) >= 1 && Number(number) <= MAX_COMMENTS &&
-    (nodeId === null || (Number.isInteger(nodeId) && Number(nodeId) >= 0)) &&
-    isRectValue(rect.x, -MAX_RECT_COORDINATE) && isRectValue(rect.y, -MAX_RECT_COORDINATE) &&
-    isRectValue(rect.width, 0) && isRectValue(rect.height, 0) &&
-    typeof label === 'string' && label.length <= MAX_LABEL_LENGTH &&
+    isMarkBase(value, MAX_COMMENTS) && isMarkRect(value.rect) &&
     typeof comment === 'string' && comment.length > 0 && comment.length <= MAX_COMMENT_LENGTH
   );
 }
 
+function findMarkPayload(value: unknown, tag: string): unknown {
+  if (!isSnapshotEvent(value, RRWEB_CUSTOM_EVENT_TYPE)) {
+    return undefined;
+  }
+  const data = (value as ScreenSnapshotEvent).data as Record<string, unknown>;
+  return data.tag === tag ? data.payload : undefined;
+}
+
 function isCommentPinEvent(value: unknown): boolean {
-  return (
-    isSnapshotEvent(value, RRWEB_CUSTOM_EVENT_TYPE) &&
-    isRecord((value as ScreenSnapshotEvent).data) &&
-    ((value as { data: Record<string, unknown> }).data.tag === COMMENT_PIN_EVENT_TAG) &&
-    isScreenCommentPin((value as { data: Record<string, unknown> }).data.payload)
-  );
+  return isScreenCommentPin(findMarkPayload(value, COMMENT_PIN_EVENT_TAG));
+}
+
+function isEditMoveEvent(value: unknown): boolean {
+  return isScreenEditMove(findMarkPayload(value, EDIT_MOVE_EVENT_TAG));
+}
+
+export function createEditMoveEvent(move: ScreenEditMove, timestamp: number): ScreenSnapshotEvent {
+  return { type: RRWEB_CUSTOM_EVENT_TYPE, timestamp, data: { tag: EDIT_MOVE_EVENT_TAG, payload: move } };
+}
+
+/** The proposed element moves of a saved screen, in event order. Malformed events are skipped. */
+export function findEditMoves(events: readonly ScreenSnapshotEvent[]): ScreenEditMove[] {
+  return events.filter(isEditMoveEvent).map((event) => (event.data as { payload: ScreenEditMove }).payload);
 }
 
 export function createCommentPinEvent(pin: ScreenCommentPin, timestamp: number): ScreenSnapshotEvent {
@@ -111,13 +148,13 @@ export function isCapturedScreen(value: unknown): value is CapturedScreen {
   if (![page.viewportWidth, page.viewportHeight, page.scrollX, page.scrollY].every(isFiniteNumber)) {
     return false;
   }
-  if (!Array.isArray(events) || events.length < 2 || events.length > 2 + MAX_COMMENTS) {
+  if (!Array.isArray(events) || events.length < 2 || events.length > 2 + MAX_SCREEN_MARK_EVENTS) {
     return false;
   }
   if (!isSnapshotEvent(events[0], RRWEB_META_EVENT_TYPE) || !isSnapshotEvent(events[1], RRWEB_FULL_SNAPSHOT_EVENT_TYPE)) {
     return false;
   }
-  if (!events.slice(2).every(isCommentPinEvent)) {
+  if (!events.slice(2).every((event) => isCommentPinEvent(event) || isEditMoveEvent(event))) {
     return false;
   }
   return (
