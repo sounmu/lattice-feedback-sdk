@@ -39,6 +39,10 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let selectionElement: HTMLElement | null = null;
   // The live element of each comment, in the same order as attachments.comments, so saved screens can pin them.
   let commentElements: HTMLElement[] = [];
+  // A key per comment and edit that never changes, unlike its number, so saved screens can tell them apart.
+  let commentKeys: string[] = [];
+  let editKeys: string[] = [];
+  let nextMarkKey = 1;
   // Likewise for the dragged element of each edit.
   let editElements: HTMLElement[] = [];
   let isDragging = false;
@@ -117,6 +121,8 @@ export function createCaptureController(options: CaptureControllerOptions) {
         if (token === transientToken && attachments.edits.length < MAX_EDITS) {
           attachments.edits.push(edit);
           editElements.push(target.element);
+          editKeys.push(`edit-${nextMarkKey}`);
+          nextMarkKey += 1;
         }
         finishTransientRun(token);
       },
@@ -163,6 +169,8 @@ export function createCaptureController(options: CaptureControllerOptions) {
       if (attachments.comments.length < MAX_COMMENTS) {
         attachments.comments.push({ target: selection, comment: trimmedComment });
         commentElements.push(selectionElement);
+        commentKeys.push(`comment-${nextMarkKey}`);
+        nextMarkKey += 1;
       }
       controllerErrorMessage = null;
       endTransientMode();
@@ -173,8 +181,14 @@ export function createCaptureController(options: CaptureControllerOptions) {
   function removeAttachment(kind: AttachmentKind, index: number): void {
     if (kind === 'flow') attachments.flow = null;
     else attachments[kind].splice(index, 1);
-    if (kind === 'comments') commentElements.splice(index, 1);
-    if (kind === 'edits') editElements.splice(index, 1);
+    if (kind === 'comments') {
+      commentElements.splice(index, 1);
+      commentKeys.splice(index, 1);
+    }
+    if (kind === 'edits') {
+      editElements.splice(index, 1);
+      editKeys.splice(index, 1);
+    }
     emit();
   }
 
@@ -196,6 +210,8 @@ export function createCaptureController(options: CaptureControllerOptions) {
     attachments = createEmptyAttachments();
     commentElements = [];
     editElements = [];
+    commentKeys = [];
+    editKeys = [];
     controllerErrorMessage = null;
     emit();
   }
@@ -278,7 +294,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
         return [];
       }
       const label = target.feedbackId ?? target.tagName.toLowerCase();
-      return [{ number: index + 1, label, comment, element: commentElements[index] }];
+      return [{ number: index + 1, key: commentKeys[index], label, comment, element: commentElements[index] }];
     });
   }
 
@@ -288,7 +304,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
         return [];
       }
       const label = target.feedbackId ?? target.tagName.toLowerCase();
-      return [{ number: index + 1, label, originalRect, proposedRect, element: editElements[index] }];
+      return [{ number: index + 1, key: editKeys[index], label, originalRect, proposedRect, element: editElements[index] }];
     });
   }
 
