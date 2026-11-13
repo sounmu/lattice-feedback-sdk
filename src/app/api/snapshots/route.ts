@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { MAX_SCREEN_SNAPSHOT_BYTES } from '@/lib/feedback-limits';
 import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
+import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { createApiErrorResponse } from '@/lib/http/api-error';
 import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyTextWithLimit } from '@/lib/http/read-body';
 import { consumeRateLimit, getClientAddress, RATE_LIMIT_RETRY_AFTER_SECONDS } from '@/lib/http/rate-limit';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
-import { findScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
+import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { createScreenSnapshotInputSchema } from '@/lib/validation/screen-snapshot-schema';
 import type { CreateScreenSnapshotResponse } from '@/types/screen-snapshot';
 
@@ -68,16 +69,15 @@ export async function POST(request: Request) {
     return createApiErrorResponse(403, 'capture_not_allowed', 'Screens cannot be saved on this page.');
   }
 
-  const repository = findScreenSnapshotRepository();
-  if (!repository) {
-    return createApiErrorResponse(503, 'storage_unavailable', 'Screen storage is unavailable.');
-  }
   try {
-    const body: CreateScreenSnapshotResponse = { snapshot: await repository.create(parsed.data) };
+    const body: CreateScreenSnapshotResponse = { snapshot: await getScreenSnapshotRepository().create(parsed.data) };
     return NextResponse.json(body, { status: 201 });
   } catch (error) {
     if (error instanceof FeedbackStorageFullError) {
       return createApiErrorResponse(503, 'storage_full', 'Screen storage is full.');
+    }
+    if (error instanceof FeedbackStorageUnavailableError) {
+      return createApiErrorResponse(503, 'storage_unavailable', 'Screen storage is unavailable.');
     }
     throw error;
   }

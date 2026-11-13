@@ -9,7 +9,7 @@ import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyTextWithLimit } from
 import { consumeRateLimit, getClientAddress, RATE_LIMIT_RETRY_AFTER_SECONDS } from '@/lib/http/rate-limit';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
-import { findScreenSnapshotRepository, type ScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
+import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import type { CreateFeedbackResponse, FeedbackListResponse } from '@/types/feedback';
 
@@ -67,20 +67,15 @@ export async function POST(request: Request) {
   }
 
   const { screenSnapshotIds, ...feedbackInput } = parsed.data;
-  let screenSnapshotRepository: ScreenSnapshotRepository | null = null;
-  if (screenSnapshotIds.length > 0) {
-    screenSnapshotRepository = findScreenSnapshotRepository();
-    if (!screenSnapshotRepository) {
-      return createApiErrorResponse(503, 'storage_unavailable', 'Screen storage is unavailable.');
-    }
-    if (!(await screenSnapshotRepository.isAttachable(project.projectKey, screenSnapshotIds))) {
+  try {
+    const hasScreens = screenSnapshotIds.length > 0;
+    if (hasScreens && !(await getScreenSnapshotRepository().isAttachable(project.projectKey, screenSnapshotIds))) {
       return createApiErrorResponse(400, 'screen_snapshot_not_found', 'A saved screen is missing or already submitted.');
     }
-  }
-
-  try {
     const feedback = await getFeedbackRepository().create(feedbackInput);
-    await screenSnapshotRepository?.attachToFeedback(project.projectKey, screenSnapshotIds, feedback.id);
+    if (hasScreens) {
+      await getScreenSnapshotRepository().attachToFeedback(project.projectKey, screenSnapshotIds, feedback.id);
+    }
     const body: CreateFeedbackResponse = { feedback };
     return NextResponse.json(body, { status: 201 });
   } catch (error) {

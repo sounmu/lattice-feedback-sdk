@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { FeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
+import { getSupabaseConfiguration } from '@/lib/supabase-rest';
 import { createFeedbackInputSchema, updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import type { Feedback } from '@/types/feedback';
 
@@ -21,23 +22,8 @@ const feedbackRowsSchema = z.array(
   }),
 );
 
-const supabaseConfigSchema = z.object({
-  url: z.url().refine((value) => {
-    const url = new URL(value);
-    return url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname));
-  }),
-  secretKey: z.string().startsWith('sb_secret_'),
-});
-
 export function createSupabaseFeedbackRepository(): FeedbackRepository {
-  const configuration = supabaseConfigSchema.safeParse({
-    url: process.env.SUPABASE_URL,
-    secretKey: process.env.SUPABASE_SECRET_KEY,
-  });
-  if (!configuration.success) {
-    throw new FeedbackStorageUnavailableError();
-  }
-  const { url, secretKey } = configuration.data;
+  const { url, secretKey } = getSupabaseConfiguration();
 
   async function requestRows(parameters: Record<string, string>, options: RequestInit = {}): Promise<Feedback[]> {
     const endpoint = new URL('/rest/v1/feedback', url);

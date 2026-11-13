@@ -1,5 +1,7 @@
 import { getFeedbackStorageMode } from '@/lib/feedback-repository';
+import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { createMemoryScreenSnapshotRepository } from '@/lib/memory-screen-snapshot-repository';
+import { createSupabaseScreenSnapshotRepository } from '@/lib/supabase-screen-snapshot-repository';
 import type { CreateScreenSnapshotInput, ScreenSnapshot, ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
 export interface ScreenSnapshotRepository {
@@ -14,11 +16,14 @@ export interface ScreenSnapshotRepository {
 
 const memoryScreenSnapshotRepository = createMemoryScreenSnapshotRepository();
 
-// Saved screens have a memory store only. Under Supabase feedback storage there is no screen
-// store yet, and nothing falls back to memory silently: callers get null and answer 503.
-export function findScreenSnapshotRepository(): ScreenSnapshotRepository | null {
-  if (getFeedbackStorageMode() === 'memory') {
-    return memoryScreenSnapshotRepository;
+// Follows the feedback storage mode, so a screen and its feedback always live in the same store.
+export function getScreenSnapshotRepository(): ScreenSnapshotRepository {
+  switch (getFeedbackStorageMode()) {
+    case 'memory':
+      return memoryScreenSnapshotRepository;
+    case 'supabase':
+      return createSupabaseScreenSnapshotRepository();
+    default:
+      throw new FeedbackStorageUnavailableError();
   }
-  return null;
 }

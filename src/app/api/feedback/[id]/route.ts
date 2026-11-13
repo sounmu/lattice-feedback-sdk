@@ -4,7 +4,7 @@ import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavaila
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
 import { findProject } from '@/lib/projects';
-import { findScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
+import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import type { Feedback, FeedbackDetailResponse } from '@/types/feedback';
 
@@ -13,11 +13,8 @@ interface RouteContext {
 }
 
 async function createDetailBody(feedback: Feedback): Promise<FeedbackDetailResponse> {
-  const repository = findScreenSnapshotRepository();
-  if (!repository) {
-    return { feedback, screenSnapshots: [] };
-  }
-  return { feedback, screenSnapshots: await repository.findManyByFeedback(feedback.projectKey, feedback.id) };
+  const screenSnapshots = await getScreenSnapshotRepository().findManyByFeedback(feedback.projectKey, feedback.id);
+  return { feedback, screenSnapshots };
 }
 
 function createFeedbackNotFoundResponse() {
