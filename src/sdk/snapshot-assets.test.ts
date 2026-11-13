@@ -158,7 +158,7 @@ it('stops downloading at the deadline and reports the rest as timed out', async 
   expect(fetchAsset).toHaveBeenCalledTimes(2);
 });
 
-it('saves the responsive image the browser picked and drops candidates that could pick another', async () => {
+it('saves the responsive image the browser picked, keeps its laid-out size, and drops other candidates', async () => {
   const plain: SnapshotNode = {
     type: 2,
     tagName: 'img',
@@ -166,21 +166,34 @@ it('saves the responsive image the browser picked and drops candidates that coul
     attributes: { src: `${ORIGIN}/small.png`, srcset: `${ORIGIN}/large.png 2x`, sizes: '100vw' },
     childNodes: [],
   };
+  const sized: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 3,
+    attributes: { src: `${ORIGIN}/small.png`, srcset: `${ORIGIN}/large.png 2x`, width: '80' },
+    childNodes: [],
+  };
   const source: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/wide.webp`, media: '(min-width: 800px)' }, childNodes: [] };
   const fallback: SnapshotNode = { type: 2, tagName: 'img', id: 2, attributes: { src: `${ORIGIN}/fallback.png` }, childNodes: [] };
   const picture: SnapshotNode = { type: 2, tagName: 'picture', attributes: {}, childNodes: [source, fallback] };
-  const picked: Record<number, string> = { 1: `${ORIGIN}/large.png`, 2: `${ORIGIN}/wide.webp` };
+  const blocked: SnapshotNode = { type: 2, tagName: 'img', id: 4, attributes: { rr_width: '100px', rr_height: '50px' }, childNodes: [] };
+  const live: Record<number, string> = { 1: `${ORIGIN}/large.png`, 2: `${ORIGIN}/wide.webp`, 3: `${ORIGIN}/large.png` };
   const options = createOptions({
     fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })),
-    findCurrentImageSource: (node) => (node.id === undefined ? null : picked[node.id]),
+    findLiveImage: (node) => {
+      const url = node.id === undefined ? undefined : live[node.id];
+      return url ? { url, width: 100, height: 50 } : null;
+    },
   });
 
-  await extractSnapshotAssets(createDocument(plain, picture), options);
+  await extractSnapshotAssets(createDocument(plain, sized, picture, blocked), options);
 
   expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/large.png`, expect.any(Number), expect.any(Number));
   expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/wide.webp`, expect.any(Number), expect.any(Number));
   expect(options.fetchAsset).not.toHaveBeenCalledWith(`${ORIGIN}/small.png`, expect.any(Number), expect.any(Number));
-  expect(plain.attributes).toEqual({ src: createAssetReference(0) });
-  expect(fallback.attributes).toEqual({ src: createAssetReference(1) });
+  expect(plain.attributes).toEqual({ src: createAssetReference(0), width: 100, height: 50 });
+  expect(sized.attributes).toEqual({ src: createAssetReference(0), width: '80' });
+  expect(fallback.attributes).toEqual({ src: createAssetReference(1), width: 100, height: 50 });
   expect(source.attributes).toEqual({ media: '(min-width: 800px)' });
+  expect(blocked.attributes).toEqual({ rr_width: '100px', rr_height: '50px' });
 });

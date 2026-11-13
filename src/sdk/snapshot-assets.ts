@@ -5,6 +5,7 @@
 // Cross-origin URLs stay as they are. Works on the serialized snapshot only; the host DOM is never touched.
 import { MAX_MISSING_SNAPSHOT_ASSETS } from '@/lib/feedback-limits';
 import { createAssetReference } from '@/lib/snapshot-asset-references';
+import type { LiveImageSource } from '@/sdk/live-image-source';
 import type { MissingSnapshotAsset } from '@/types/screen-snapshot';
 
 type SnapshotAttributes = Record<string, string | number | boolean | null>;
@@ -32,8 +33,8 @@ export interface ExtractSnapshotAssetsOptions {
   /** Downloads stop at this deadline so the capture answers the widget in time; the rest are reported as timed out. */
   maxDurationMs: number;
   now?: () => number;
-  /** The image URL the browser actually picked from srcset or <picture>, when it differs from src. */
-  findCurrentImageSource?: (node: SnapshotNode) => string | null;
+  /** The image the browser actually shows for an <img>, picked from srcset or <picture>. Null for excluded images. */
+  findLiveImage?: (node: SnapshotNode) => LiveImageSource | null;
   maxAssetBytes: number;
   maxTotalBytes: number;
   maxAssetCount: number;
@@ -76,7 +77,12 @@ export async function extractSnapshotAssets(
   const isSameOrigin = (url: string): boolean => url.startsWith(`${options.pageOrigin}/`);
   // Each entry is an attribute holding CSS text: a serialized stylesheet (_cssText) or an inline style.
   const cssAttributes: { attributes: SnapshotAttributes; name: string }[] = [];
-  const images: { attributes: SnapshotAttributes; source: string; picture: SnapshotNode | null }[] = [];
+  const images: {
+    attributes: SnapshotAttributes;
+    source: string;
+    live: LiveImageSource | null;
+    picture: SnapshotNode | null;
+  }[] = [];
   const urls = new Set<string>();
 
   function collectCssImages(attributes: SnapshotAttributes, name: string, cssText: string): void {
@@ -109,10 +115,13 @@ export async function extractSnapshotAssets(
           }
         }
       }
-      const source = node.tagName === 'img' ? (options.findCurrentImageSource?.(node) ?? attributes.src) : null;
-      if (typeof source === 'string' && isSameOrigin(source)) {
-        images.push({ attributes, source, picture: parent?.tagName === 'picture' ? parent : null });
-        urls.add(source);
+      if (node.tagName === 'img') {
+        const live = options.findLiveImage?.(node) ?? null;
+        const source = live?.url ?? attributes.src;
+        if (typeof source === 'string' && isSameOrigin(source)) {
+          images.push({ attributes, source, live, picture: parent?.tagName === 'picture' ? parent : null });
+          urls.add(source);
+        }
       }
     }
     node.childNodes?.forEach((child) => visit(child, node));
@@ -171,10 +180,16 @@ export async function extractSnapshotAssets(
       );
     }
     // The saved file is the one the browser showed, so responsive candidates that could pick another are dropped.
-    for (const { attributes, source, picture } of images) {
+    for (const { attributes, source, live, picture } of images) {
       const reference = references.get(source);
       if (!reference) {
         continue;
+      }
+      // Without srcset the browser no longer applies the candidate's density, so its laid-out size is kept explicitly.
+      const isResponsive = attributes.srcset !== undefined || picture !== null;
+      if (isResponsive && live && attributes.width === undefined && attributes.height === undefined) {
+        attributes.width = live.width;
+        attributes.height = live.height;
       }
       attributes.src = reference;
       delete attributes.srcset;

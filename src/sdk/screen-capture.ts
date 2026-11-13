@@ -14,6 +14,7 @@ import {
 import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_META_EVENT_TYPE, SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
 import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError } from '@/sdk/snapshot-assets';
+import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
@@ -135,12 +136,11 @@ export async function captureScreen(sdkSelector: string): Promise<ScreenCapture>
     usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
     fetchAsset: fetchSameOriginAsset,
     maxDurationMs: ASSET_COLLECTION_DURATION_MS,
-    findCurrentImageSource: (serialized) => {
-      const element = serialized.id === undefined ? null : mirror.getNode(serialized.id);
-      if (element instanceof HTMLImageElement && element.currentSrc) {
-        return element.currentSrc;
+    findLiveImage: (serialized) => {
+      if (serialized.id === undefined) {
+        return null;
       }
-      return null;
+      return findLiveImageSource(mirror.getNode(serialized.id), excludedSelector);
     },
     maxAssetBytes: MAX_SNAPSHOT_ASSET_BYTES,
     maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
