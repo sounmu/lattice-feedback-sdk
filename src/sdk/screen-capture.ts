@@ -7,18 +7,24 @@ import { snapshot } from 'rrweb-snapshot';
 import {
   MAX_PAGE_TITLE_LENGTH,
   MAX_SNAPSHOT_ASSET_BYTES,
+  MAX_SNAPSHOT_ASSETS,
   MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
   truncateText,
 } from '@/lib/feedback-limits';
 import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_META_EVENT_TYPE, SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
-import { inlineSnapshotAssets, normalizeFontFamily } from '@/sdk/snapshot-assets';
+import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError } from '@/sdk/snapshot-assets';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
-import type { CapturedScreen } from '@/types/screen-snapshot';
+import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
 
 const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
 const MASKED_SELECTOR = '[data-lattice-mask]';
 const ASSET_FETCH_TIMEOUT_MS = 10_000;
+// The widget waits 30 s for the capture; this leaves time to serialize and answer.
+const ASSET_COLLECTION_DURATION_MS = 15_000;
+const CSS_IMAGE_PROPERTIES = ['background-image', 'border-image-source', 'list-style-image', 'mask-image'] as const;
+const PSEUDO_ELEMENTS = [null, '::before', '::after'] as const;
+const CSS_IMAGE_URL_PATTERN = /url\(\s*"([^"]*)"\s*\)/g;
 
 function isMaskedInput(element: HTMLElement): boolean {
   if (element.closest(MASKED_SELECTOR)) {
@@ -28,31 +34,72 @@ function isMaskedInput(element: HTMLElement): boolean {
   return element instanceof HTMLInputElement && (element.type === 'password' || element.autocomplete.includes('password'));
 }
 
-async function fetchSameOriginAsset(url: string): Promise<Blob> {
+// Reads at most maxBytes, so a file over the budget is cancelled instead of being held in the host page's memory.
+async function fetchSameOriginAsset(url: string, maxBytes: number, timeoutMs: number): Promise<Blob> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), ASSET_FETCH_TIMEOUT_MS);
+  const timer = window.setTimeout(() => controller.abort(), Math.min(ASSET_FETCH_TIMEOUT_MS, timeoutMs));
   try {
     const response = await fetch(url, { credentials: 'same-origin', cache: 'force-cache', signal: controller.signal });
-    if (!response.ok) {
+    if (!response.ok || !response.body) {
       throw new Error(`Asset request failed with status ${response.status}.`);
     }
-    return await response.blob();
+    if (Number(response.headers.get('content-length') ?? 0) > maxBytes) {
+      controller.abort();
+      throw new SnapshotAssetTooLargeError();
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
+    let totalBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw new SnapshotAssetTooLargeError();
+      }
+      chunks.push(value);
+    }
+    return new Blob(chunks, { type: response.headers.get('content-type') ?? '' });
   } finally {
     window.clearTimeout(timer);
   }
 }
 
-export async function captureScreen(sdkSelector: string): Promise<CapturedScreen> {
+// CSS images that captured elements actually show. Elements in a blocked region are skipped, so a
+// stylesheet shared with them cannot carry their images into the saved screen.
+function findUsedCssImageUrls(excludedSelector: string): Set<string> {
+  const urls = new Set<string>();
+  for (const element of document.querySelectorAll('*')) {
+    if (element.closest(excludedSelector)) {
+      continue;
+    }
+    for (const pseudoElement of PSEUDO_ELEMENTS) {
+      const style = getComputedStyle(element, pseudoElement);
+      for (const property of CSS_IMAGE_PROPERTIES) {
+        for (const match of style.getPropertyValue(property).matchAll(CSS_IMAGE_URL_PATTERN)) {
+          urls.add(match[1]);
+        }
+      }
+    }
+  }
+  return urls;
+}
+
+export async function captureScreen(sdkSelector: string): Promise<ScreenCapture> {
   const capturedAt = Date.now();
+  const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
   const node = snapshot(document, {
-    blockSelector: `${sdkSelector}, ${BLOCKED_SELECTOR}`,
+    blockSelector: excludedSelector,
     maskTextSelector: MASKED_SELECTOR,
     // Every input value passes through maskInputFn, which hides only the ones that must not be stored.
     maskAllInputs: true,
     maskInputFn: (text, element) => (isMaskedInput(element) ? '*'.repeat(text.length) : text),
     inlineStylesheet: true,
     slimDOM: { script: true },
-    // rrweb's image inlining rewrites crossOrigin on live <img> elements; assets are embedded below instead.
+    // rrweb's image inlining rewrites crossOrigin on live <img> elements; assets are extracted below instead.
     inlineImages: false,
     recordCanvas: false,
   });
@@ -61,44 +108,51 @@ export async function captureScreen(sdkSelector: string): Promise<CapturedScreen
   }
   removeInlineScripts(node);
 
+  // Read together with the DOM, before any await: the reporter may scroll or navigate while files download.
+  const url = getPageUrl(window.location.href);
+  const page: CapturedScreen['page'] = {
+    url,
+    title: truncateText(document.title, MAX_PAGE_TITLE_LENGTH),
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+  };
   const loadedFontFamilies = new Set<string>();
   document.fonts.forEach((fontFace) => {
     if (fontFace.status === 'loaded') {
       loadedFontFamilies.add(normalizeFontFamily(fontFace.family));
     }
   });
-  const missingAssets = await inlineSnapshotAssets(node, {
+
+  const { assetFiles, missingAssets } = await extractSnapshotAssets(node, {
     pageOrigin: window.location.origin,
     loadedFontFamilies,
+    usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
     fetchAsset: fetchSameOriginAsset,
+    maxDurationMs: ASSET_COLLECTION_DURATION_MS,
     maxAssetBytes: MAX_SNAPSHOT_ASSET_BYTES,
     maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
+    maxAssetCount: MAX_SNAPSHOT_ASSETS,
   });
 
-  const url = getPageUrl(window.location.href);
-  return {
+  const screen: CapturedScreen = {
     format: SCREEN_SNAPSHOT_FORMAT,
     capturedAt: new Date(capturedAt).toISOString(),
-    page: {
-      url,
-      title: truncateText(document.title, MAX_PAGE_TITLE_LENGTH),
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
-    },
+    page,
     events: [
       {
         type: RRWEB_META_EVENT_TYPE,
         timestamp: capturedAt,
-        data: { href: url, width: window.innerWidth, height: window.innerHeight },
+        data: { href: url, width: page.viewportWidth, height: page.viewportHeight },
       },
       {
         type: RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
         timestamp: capturedAt,
-        data: { node, initialOffset: { left: window.scrollX, top: window.scrollY } },
+        data: { node, initialOffset: { left: page.scrollX, top: page.scrollY } },
       },
     ],
     missingAssets,
   };
+  return { screen, assetFiles };
 }

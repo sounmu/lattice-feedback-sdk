@@ -5,9 +5,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
 import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
 import type {
-  CapturedScreen,
   CreateScreenSnapshotInput,
   CreateScreenSnapshotResponse,
+  FindMissingScreenSnapshotAssetsInput,
+  FindMissingScreenSnapshotAssetsResponse,
+  ScreenCapture,
   ScreenCaptureFailureReason,
   ScreenSnapshotSummary,
 } from '@/types/screen-snapshot';
@@ -30,6 +32,54 @@ const CAPTURE_FAILURE_MESSAGES: Record<ScreenCaptureFailureReason, string> = {
   page_not_allowed: PAGE_NOT_ALLOWED_MESSAGE,
   capture_failed: SAVE_FAILED_MESSAGE,
 };
+
+class UploadFailedError extends Error {
+  constructor(readonly status: number) {
+    super(`Upload failed with status ${status}.`);
+    this.name = 'UploadFailedError';
+  }
+}
+
+async function getSha256Hex(file: Blob): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function sendOrThrow(url: string, init: RequestInit): Promise<Response> {
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    throw new UploadFailedError(response.status);
+  }
+  return response;
+}
+
+// Each project stores a file once, so only the files the server has not seen are uploaded.
+async function uploadAssetFiles(
+  owner: Pick<FindMissingScreenSnapshotAssetsInput, 'projectKey' | 'hostOrigin' | 'pageUrl'>,
+  assetFiles: Blob[],
+): Promise<string[]> {
+  const hashes = await Promise.all(assetFiles.map(getSha256Hex));
+  if (hashes.length === 0) {
+    return hashes;
+  }
+  const lookup: FindMissingScreenSnapshotAssetsInput = { ...owner, hashes: [...new Set(hashes)] };
+  const response = await sendOrThrow('/api/snapshots/assets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(lookup),
+  });
+  const { missingHashes } = (await response.json()) as FindMissingScreenSnapshotAssetsResponse;
+  const query = new URLSearchParams(owner).toString();
+  for (const hash of missingHashes) {
+    const file = assetFiles[hashes.indexOf(hash)];
+    await sendOrThrow(`/api/snapshots/assets/${hash}?${query}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+  }
+  return hashes;
+}
 
 function getUploadErrorMessage(status: number): string {
   switch (status) {
@@ -58,28 +108,29 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     }
     const { projectKey, hostOrigin } = config;
 
-    async function upload(screen: CapturedScreen) {
+    async function upload({ screen, assetFiles }: ScreenCapture) {
       setStatus('uploading');
       try {
-        const input: CreateScreenSnapshotInput = { projectKey, hostOrigin, ...screen };
+        const assetHashes = await uploadAssetFiles({ projectKey, hostOrigin, pageUrl: screen.page.url }, assetFiles);
+        const input: CreateScreenSnapshotInput = { projectKey, hostOrigin, ...screen, assetHashes };
         const body = new TextEncoder().encode(JSON.stringify(input));
         if (body.length > MAX_SCREEN_SNAPSHOT_BYTES) {
           setErrorMessage(getUploadErrorMessage(PAYLOAD_TOO_LARGE_STATUS));
           return;
         }
-        const response = await fetch('/api/snapshots', {
+        const response = await sendOrThrow('/api/snapshots', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body,
         });
-        if (!response.ok) {
-          setErrorMessage(getUploadErrorMessage(response.status));
-          return;
-        }
         const created = (await response.json()) as CreateScreenSnapshotResponse;
         setSnapshots((current) => [...current, created.snapshot]);
-      } catch {
-        setErrorMessage(SAVE_FAILED_MESSAGE);
+      } catch (error) {
+        if (error instanceof UploadFailedError) {
+          setErrorMessage(getUploadErrorMessage(error.status));
+        } else {
+          setErrorMessage(SAVE_FAILED_MESSAGE);
+        }
       } finally {
         setStatus('idle');
       }
@@ -97,7 +148,7 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
         setErrorMessage(CAPTURE_FAILURE_MESSAGES[result.payload.reason]);
         return;
       }
-      void upload(result.payload.screen);
+      void upload(result.payload);
     });
     return () => {
       unsubscribe();

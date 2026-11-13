@@ -70,7 +70,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body: CreateScreenSnapshotResponse = { snapshot: await getScreenSnapshotRepository().create(parsed.data) };
+    const repository = getScreenSnapshotRepository();
+    const missingHashes = await repository.findMissingAssetHashes(project.projectKey, parsed.data.assetHashes);
+    if (missingHashes.length > 0) {
+      return createApiErrorResponse(400, 'screen_snapshot_asset_missing', 'A file of the saved screen was not uploaded.');
+    }
+    const body: CreateScreenSnapshotResponse = { snapshot: await repository.create(parsed.data) };
     return NextResponse.json(body, { status: 201 });
   } catch (error) {
     if (error instanceof FeedbackStorageFullError) {

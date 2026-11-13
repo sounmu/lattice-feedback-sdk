@@ -256,8 +256,8 @@ export class FeedbackSdk {
     }
     this.isCapturingScreen = true;
     try {
-      const screen = await captureScreen(HOST_ELEMENT_TAG_NAME);
-      this.postToWidget(createHostToWidgetMessage('screen:captured', { screen }));
+      const capture = await captureScreen(HOST_ELEMENT_TAG_NAME);
+      this.postToWidget(createHostToWidgetMessage('screen:captured', capture));
     } catch (error) {
       console.warn(`${LOG_PREFIX} Saving the screen failed.`, error);
       this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'capture_failed' }));

@@ -16,7 +16,7 @@
  * Anything else is ignored silently.
  */
 import type { ElementTarget, FeedbackAttachments, FeedbackReporter, PageContext } from '@/types/feedback';
-import type { CapturedScreen, ScreenCaptureFailureReason } from '@/types/screen-snapshot';
+import type { ScreenCapture, ScreenCaptureFailureReason } from '@/types/screen-snapshot';
 
 export const MESSAGE_SOURCE = 'lattice-feedback' as const;
 export const PROTOCOL_VERSION = 1 as const;
@@ -50,7 +50,7 @@ export interface CaptureState {
 export type CaptureUpdateMessage = ProtocolMessage<'capture:update', CaptureState>;
 
 // Saved screens: the widget asks with 'screen:capture', the SDK serializes the host page and answers once.
-export type ScreenCapturedMessage = ProtocolMessage<'screen:captured', { screen: CapturedScreen }>;
+export type ScreenCapturedMessage = ProtocolMessage<'screen:captured', ScreenCapture>;
 export type ScreenCaptureFailedMessage = ProtocolMessage<'screen:capture-failed', { reason: ScreenCaptureFailureReason }>;
 
 export type HostToWidgetMessage =

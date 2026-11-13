@@ -19,6 +19,7 @@ export function createScreenSnapshotBody(overrides: Record<string, unknown> = {}
       { type: 2, timestamp: 1, data: { node: { type: 0, childNodes: [], id: 1 }, initialOffset: { left: 0, top: 120 } } },
     ],
     missingAssets: [],
+    assetHashes: [],
     ...overrides,
   };
 }

@@ -9,6 +9,7 @@ import {
 import type { CreateScreenSnapshotInput } from '@/types/screen-snapshot';
 
 const INPUT = createScreenSnapshotBody() as CreateScreenSnapshotInput;
+const FONT = { contentType: 'font/woff2', data: new Uint8Array([1, 2, 3]) };
 const repository = createMemoryScreenSnapshotRepository();
 
 async function fillStore(): Promise<string[]> {
@@ -38,6 +39,17 @@ it('refuses a new screen when every stored one belongs to a feedback', async () 
 
   await expect(repository.create(INPUT)).rejects.toBeInstanceOf(FeedbackStorageFullError);
   expect(await repository.findManyByFeedback('demo', 'feedback-1')).toHaveLength(MAX_SCREEN_SNAPSHOTS_PER_PROJECT);
+});
+
+it('stores a file once per project and keeps projects apart', async () => {
+  const hash = 'a'.repeat(64);
+  await repository.saveAsset({ projectKey: 'demo', hash, ...FONT });
+  await repository.saveAsset({ projectKey: 'demo', hash, contentType: 'image/png', data: new Uint8Array([9]) });
+
+  expect(await repository.findAsset('demo', hash)).toEqual(FONT);
+  expect(await repository.findMissingAssetHashes('demo', [hash, 'b'.repeat(64), hash])).toEqual(['b'.repeat(64)]);
+  expect(await repository.findAsset('other', hash)).toBeNull();
+  expect(await repository.findMissingAssetHashes('other', [hash])).toEqual([hash]);
 });
 
 it('claims all requested screens or none, and releases a claim for feedback that was never stored', async () => {

@@ -27,6 +27,7 @@ const summaryRow = {
   capturedAt: '2026-11-13T03:00:00+00:00',
   page: input.page,
   missingAssets: input.missingAssets,
+  assetHashes: input.assetHashes,
 };
 
 const received: ReceivedRequest[] = [];
@@ -96,6 +97,7 @@ describe('Supabase saved screen repository', () => {
       page: input.page,
       events: input.events,
       missing_assets: [],
+      asset_hashes: [],
     });
     expect(snapshot).toEqual(summaryRow);
   });
@@ -157,6 +159,24 @@ describe('Supabase saved screen repository', () => {
       order: 'created_at.asc,id.asc',
     });
     expect(snapshots).toEqual([{ ...summaryRow, feedbackId: FEEDBACK_ID }]);
+  });
+
+  it('stores files once per project as bytea and reads them back', async () => {
+    const repository = createSupabaseScreenSnapshotRepository();
+    const stored = 'a'.repeat(64);
+    const missing = 'b'.repeat(64);
+    responseBodies = [[{ hash: stored }], [], [{ contentType: 'font/woff2', data: '\\x010203' }]];
+
+    expect(await repository.findMissingAssetHashes('demo', [stored, missing, stored])).toEqual([missing]);
+    await repository.saveAsset({ projectKey: 'demo', hash: missing, contentType: 'font/woff2', data: new Uint8Array([1, 2, 3]) });
+    const asset = await repository.findAsset('demo', stored);
+
+    expect(getSearch(received[0])).toMatchObject({ project_key: 'eq.demo', hash: `in.(${stored},${missing})` });
+    expect(received[1].headers.prefer).toContain('resolution=ignore-duplicates');
+    expect(getSearch(received[1]).on_conflict).toBe('project_key,hash');
+    expect(JSON.parse(received[1].body)).toMatchObject({ project_key: 'demo', hash: missing, byte_size: 3, data: '\\x010203' });
+    expect(getSearch(received[2])).toMatchObject({ project_key: 'eq.demo', hash: `eq.${stored}` });
+    expect(asset).toEqual({ contentType: 'font/woff2', data: new Uint8Array([1, 2, 3]) });
   });
 
   it('reports a failed request, an unexpected row, or a missing key as unavailable storage', async () => {

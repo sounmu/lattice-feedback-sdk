@@ -5,9 +5,12 @@ import { getSupabaseConfiguration, requestSupabaseRows } from '@/lib/supabase-re
 import { createScreenSnapshotInputSchema } from '@/lib/validation/screen-snapshot-schema';
 
 const TABLE = 'screen_snapshots';
+const ASSET_TABLE = 'screen_snapshot_assets';
+// PostgREST reads and writes bytea in Postgres hex form.
+const BYTEA_HEX_PREFIX = '\\x';
 const SUMMARY_SELECT = [
   'id', 'projectKey:project_key', 'feedbackId:feedback_id', 'createdAt:created_at', 'format',
-  'capturedAt:captured_at', 'page', 'missingAssets:missing_assets',
+  'capturedAt:captured_at', 'page', 'missingAssets:missing_assets', 'assetHashes:asset_hashes',
 ].join(',');
 // The event payload is large, so only the detail read selects it.
 const DETAIL_SELECT = `${SUMMARY_SELECT},events`;
@@ -22,10 +25,15 @@ const summaryRowSchema = z.object({
   capturedAt: z.iso.datetime({ offset: true }),
   page: inputShape.page,
   missingAssets: inputShape.missingAssets,
+  assetHashes: inputShape.assetHashes,
 });
 const summaryRowsSchema = z.array(summaryRowSchema);
 const detailRowsSchema = z.array(summaryRowSchema.extend({ events: inputShape.events }));
 const idRowsSchema = z.array(z.object({ id: z.uuid() }));
+const hashRowsSchema = z.array(z.object({ hash: z.string() }));
+const assetRowsSchema = z.array(
+  z.object({ contentType: z.string(), data: z.string().regex(/^\\x(?:[0-9a-f]{2})*$/) }),
+);
 
 function isUuid(value: string): boolean {
   return z.uuid().safeParse(value).success;
@@ -68,6 +76,7 @@ export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotReposito
           page: input.page,
           events: input.events,
           missing_assets: input.missingAssets,
+          asset_hashes: input.assetHashes,
         }),
       });
       const snapshot = parseRows(summaryRowsSchema, rows)[0];
@@ -138,5 +147,48 @@ export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotReposito
     },
 
     releaseFromFeedback,
+
+    async findMissingAssetHashes(projectKey, hashes) {
+      const uniqueHashes = [...new Set(hashes)];
+      if (uniqueHashes.length === 0) {
+        return [];
+      }
+      const rows = await requestSupabaseRows(configuration, ASSET_TABLE, {
+        select: 'hash',
+        project_key: `eq.${projectKey}`,
+        hash: `in.(${uniqueHashes.join(',')})`,
+      });
+      const stored = new Set(parseRows(hashRowsSchema, rows).map((row) => row.hash));
+      return uniqueHashes.filter((hash) => !stored.has(hash));
+    },
+
+    async saveAsset({ projectKey, hash, contentType, data }) {
+      await requestSupabaseRows(configuration, ASSET_TABLE, { select: 'hash', on_conflict: 'project_key,hash' }, {
+        method: 'POST',
+        body: JSON.stringify({
+          project_key: projectKey,
+          hash,
+          content_type: contentType,
+          byte_size: data.byteLength,
+          data: `${BYTEA_HEX_PREFIX}${Buffer.from(data).toString('hex')}`,
+        }),
+      }, ['resolution=ignore-duplicates']);
+    },
+
+    async findAsset(projectKey, hash) {
+      const rows = await requestSupabaseRows(configuration, ASSET_TABLE, {
+        select: 'contentType:content_type,data',
+        project_key: `eq.${projectKey}`,
+        hash: `eq.${hash}`,
+      });
+      const asset = parseRows(assetRowsSchema, rows)[0];
+      if (!asset) {
+        return null;
+      }
+      return {
+        contentType: asset.contentType,
+        data: new Uint8Array(Buffer.from(asset.data.slice(BYTEA_HEX_PREFIX.length), 'hex')),
+      };
+    },
   };
 }

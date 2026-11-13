@@ -1,17 +1,25 @@
 import { expect, it, vi } from 'vitest';
-import { inlineSnapshotAssets, type InlineSnapshotAssetsOptions, type SnapshotNode } from '@/sdk/snapshot-assets';
+import { createAssetReference, resolveAssetReferences } from '@/lib/snapshot-asset-references';
+import {
+  extractSnapshotAssets,
+  SnapshotAssetTooLargeError,
+  type ExtractSnapshotAssetsOptions,
+  type SnapshotNode,
+} from '@/sdk/snapshot-assets';
 
 const ORIGIN = 'https://host.example.com';
 const FONT_BYTES = 'font-bytes';
-const FONT_DATA_URL = `data:font/woff2;base64,${btoa(FONT_BYTES)}`;
 
-function createOptions(overrides: Partial<InlineSnapshotAssetsOptions> = {}): InlineSnapshotAssetsOptions {
+function createOptions(overrides: Partial<ExtractSnapshotAssetsOptions> = {}): ExtractSnapshotAssetsOptions {
   return {
     pageOrigin: ORIGIN,
     loadedFontFamilies: new Set(['pretendard']),
+    usedCssImageUrls: new Set(),
     fetchAsset: vi.fn(async () => new Blob([FONT_BYTES], { type: 'font/woff2' })),
     maxAssetBytes: 1000,
     maxTotalBytes: 2000,
+    maxAssetCount: 10,
+    maxDurationMs: 15_000,
     ...overrides,
   };
 }
@@ -20,11 +28,15 @@ function createStyleNode(cssText: string): SnapshotNode {
   return { type: 2, tagName: 'style', attributes: { _cssText: cssText }, childNodes: [] };
 }
 
+function createImage(src: string): SnapshotNode {
+  return { type: 2, tagName: 'img', attributes: { src }, childNodes: [] };
+}
+
 function createDocument(...childNodes: SnapshotNode[]): SnapshotNode {
   return { type: 0, childNodes };
 }
 
-it('embeds only the first same-origin source of a font family the page loaded', async () => {
+it('pulls out only the first same-origin source of a font family the page loaded', async () => {
   const style = createStyleNode(
     [
       `@font-face { font-family: "Pretendard"; src: url("${ORIGIN}/fonts/a.woff2") format("woff2"), url("${ORIGIN}/fonts/a.woff") format("woff"); }`,
@@ -35,12 +47,13 @@ it('embeds only the first same-origin source of a font family the page loaded', 
   );
   const options = createOptions();
 
-  const missingAssets = await inlineSnapshotAssets(createDocument(style), options);
+  const { assetFiles, missingAssets } = await extractSnapshotAssets(createDocument(style), options);
 
   const cssText = String(style.attributes?._cssText);
   expect(options.fetchAsset).toHaveBeenCalledTimes(1);
-  expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/fonts/a.woff2`);
-  expect(cssText).toContain(`url("${FONT_DATA_URL}") format("woff2")`);
+  expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/fonts/a.woff2`, 1000, 15_000);
+  expect(await assetFiles[0].text()).toBe(FONT_BYTES);
+  expect(resolveAssetReferences(cssText, (index) => `blob:file-${index}`)).toContain('url("blob:file-0") format("woff2")');
   expect(cssText).toContain(`url("${ORIGIN}/fonts/a.woff")`);
   expect(cssText).toContain(`url("${ORIGIN}/fonts/unused.woff2")`);
   expect(cssText).toContain('url("https://cdn.example.com/b.woff2")');
@@ -48,50 +61,99 @@ it('embeds only the first same-origin source of a font family the page loaded', 
   expect(missingAssets).toEqual([]);
 });
 
-it('embeds same-origin images and leaves cross-origin images to load from their own URL', async () => {
-  const local: SnapshotNode = {
-    type: 2,
-    tagName: 'img',
-    attributes: { src: `${ORIGIN}/logo.svg`, srcset: `${ORIGIN}/logo@2x.svg 2x` },
-    childNodes: [],
-  };
-  const remote: SnapshotNode = {
-    type: 2,
-    tagName: 'img',
-    attributes: { src: 'https://cdn.example.com/banner.png' },
-    childNodes: [],
-  };
+it('refers to same-origin images by position and leaves cross-origin images on their own URL', async () => {
+  const local = createImage(`${ORIGIN}/logo.svg`);
+  local.attributes = { ...local.attributes, srcset: `${ORIGIN}/logo@2x.svg 2x` };
+  const repeated = createImage(`${ORIGIN}/logo.svg`);
+  const remote = createImage('https://cdn.example.com/banner.png');
   const options = createOptions({ fetchAsset: vi.fn(async () => new Blob(['<svg/>'], { type: 'image/svg+xml' })) });
 
-  await inlineSnapshotAssets(createDocument({ type: 2, tagName: 'body', attributes: {}, childNodes: [local, remote] }), options);
+  const { assetFiles } = await extractSnapshotAssets(createDocument(local, repeated, remote), options);
 
-  expect(local.attributes).toEqual({ src: `data:image/svg+xml;base64,${btoa('<svg/>')}` });
+  expect(assetFiles).toHaveLength(1);
+  expect(local.attributes).toEqual({ src: createAssetReference(0) });
+  expect(repeated.attributes?.src).toBe(local.attributes?.src);
   expect(remote.attributes).toEqual({ src: 'https://cdn.example.com/banner.png' });
   expect(options.fetchAsset).toHaveBeenCalledTimes(1);
 });
 
-it('records assets it could not embed, without query strings, and keeps their original URLs', async () => {
-  const images = ['failed.png?token=secret', 'huge.png', 'first.png', 'over-budget.png'].map(
-    (name): SnapshotNode => ({ type: 2, tagName: 'img', attributes: { src: `${ORIGIN}/${name}` }, childNodes: [] }),
-  );
-  const sizes: Record<string, number> = { 'huge.png': 11, 'first.png': 8, 'over-budget.png': 8 };
-  const fetchAsset = vi.fn(async (url: string) => {
+it('pulls out CSS background images captured elements show, from stylesheets and inline styles', async () => {
+  const style = createStyleNode(`.hero { background: url("${ORIGIN}/hero.png"); } .unused { background: url("${ORIGIN}/unused.png"); }`);
+  const banner: SnapshotNode = {
+    type: 2,
+    tagName: 'div',
+    attributes: { style: `background-image: url(${ORIGIN}/inline.png)` },
+    childNodes: [],
+  };
+  const options = createOptions({
+    usedCssImageUrls: new Set([`${ORIGIN}/hero.png`, `${ORIGIN}/inline.png`]),
+    fetchAsset: vi.fn(async () => new Blob(['png'], { type: 'image/png' })),
+  });
+
+  const { assetFiles } = await extractSnapshotAssets(createDocument(style, banner), options);
+
+  expect(assetFiles).toHaveLength(2);
+  expect(options.fetchAsset).not.toHaveBeenCalledWith(`${ORIGIN}/unused.png`, expect.any(Number), expect.any(Number));
+  expect(style.attributes?._cssText).toContain(`url("${createAssetReference(0)}")`);
+  expect(style.attributes?._cssText).toContain(`url("${ORIGIN}/unused.png")`);
+  expect(banner.attributes?.style).toBe(`background-image: url("${createAssetReference(1)}")`);
+});
+
+it('records files it could not keep without downloading past the budget, and keeps their original URLs', async () => {
+  const names = ['failed.png?token=secret', 'huge.png', 'first.png', 'over-budget.png', 'small.png', 'over-count.png'];
+  const images = names.map((name) => createImage(`${ORIGIN}/${name}`));
+  const sizes: Record<string, number> = { 'huge.png': 11, 'first.png': 8, 'over-budget.png': 8, 'small.png': 1, 'over-count.png': 1 };
+  const fetchAsset = vi.fn(async (url: string, maxBytes: number) => {
     const name = url.slice(ORIGIN.length + 1);
     if (!(name in sizes)) {
       throw new TypeError('Failed to fetch');
     }
+    if (sizes[name] > maxBytes) {
+      throw new SnapshotAssetTooLargeError();
+    }
     return new Blob(['x'.repeat(sizes[name])], { type: 'image/png' });
   });
 
-  const missingAssets = await inlineSnapshotAssets(
+  const { assetFiles, missingAssets } = await extractSnapshotAssets(
     createDocument(...images),
-    createOptions({ fetchAsset, maxAssetBytes: 10, maxTotalBytes: 12 }),
+    createOptions({ fetchAsset, maxAssetBytes: 10, maxTotalBytes: 12, maxAssetCount: 2 }),
   );
 
+  expect(assetFiles).toHaveLength(2);
   expect(missingAssets).toEqual([
     { url: `${ORIGIN}/failed.png`, reason: 'fetch_failed' },
     { url: `${ORIGIN}/huge.png`, reason: 'too_large' },
     { url: `${ORIGIN}/over-budget.png`, reason: 'budget_exceeded' },
+    { url: `${ORIGIN}/over-count.png`, reason: 'budget_exceeded' },
   ]);
-  expect(images.map((image) => String(image.attributes?.src).startsWith('data:'))).toEqual([false, false, true, false]);
+  expect(fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/over-budget.png`, 4, 15_000);
+  expect(fetchAsset).not.toHaveBeenCalledWith(`${ORIGIN}/over-count.png`, expect.any(Number), expect.any(Number));
+  expect(images.map((image) => String(image.attributes?.src).startsWith('lattice-asset:'))).toEqual([
+    false, false, true, false, true, false,
+  ]);
+});
+
+it('stops downloading at the deadline and reports the rest as timed out', async () => {
+  let clock = 0;
+  const images = ['slow.png', 'late.png', 'never.png'].map((name) => createImage(`${ORIGIN}/${name}`));
+  const fetchAsset = vi.fn(async (url: string, _maxBytes: number, timeoutMs: number) => {
+    clock += 6_000;
+    if (url.endsWith('late.png')) {
+      expect(timeoutMs).toBe(4_000);
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    }
+    return new Blob(['png'], { type: 'image/png' });
+  });
+
+  const { assetFiles, missingAssets } = await extractSnapshotAssets(
+    createDocument(...images),
+    createOptions({ fetchAsset, maxDurationMs: 10_000, now: () => clock }),
+  );
+
+  expect(assetFiles).toHaveLength(1);
+  expect(missingAssets).toEqual([
+    { url: `${ORIGIN}/late.png`, reason: 'timed_out' },
+    { url: `${ORIGIN}/never.png`, reason: 'timed_out' },
+  ]);
+  expect(fetchAsset).toHaveBeenCalledTimes(2);
 });

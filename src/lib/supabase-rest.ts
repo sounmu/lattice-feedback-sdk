@@ -32,6 +32,7 @@ export async function requestSupabaseRows(
   table: string,
   parameters: Record<string, string>,
   options: RequestInit = {},
+  extraPreferences: readonly string[] = [],
 ): Promise<unknown> {
   const endpoint = new URL(`/rest/v1/${table}`, configuration.url);
   endpoint.search = new URLSearchParams(parameters).toString();
@@ -42,7 +43,7 @@ export async function requestSupabaseRows(
       headers: {
         apikey: configuration.secretKey,
         'Content-Type': 'application/json',
-        Prefer: 'return=representation',
+        Prefer: ['return=representation', ...extraPreferences].join(','),
       },
       cache: 'no-store',
       redirect: 'error',
