@@ -10,11 +10,12 @@ import type { FlowAttachment } from '@/types/feedback';
 
 const engines = vi.hoisted(() => ({
   select: vi.fn(), drag: vi.fn(), flow: vi.fn(), render: vi.fn(), removeStatus: vi.fn(),
-  cancelSelection: vi.fn(), cancelDrag: vi.fn(), destroyFlow: vi.fn(),
+  cancelSelection: vi.fn(), cancelDrag: vi.fn(), destroyFlow: vi.fn(), replay: vi.fn(),
 }));
 vi.mock('@/sdk/element-selection', () => ({ startElementSelection: engines.select }));
 vi.mock('@/sdk/element-drag', () => ({ startElementDrag: engines.drag }));
 vi.mock('@/sdk/flow-recorder', () => ({ createFlowRecorder: engines.flow }));
+vi.mock('@/sdk/flow-replay-recorder', () => ({ startReplayRecording: engines.replay }));
 vi.mock('@/sdk/capture-status', () => ({
   createCaptureStatus: () => ({ render: engines.render, destroy: engines.removeStatus }),
 }));
@@ -35,6 +36,10 @@ beforeEach(() => {
   engines.select.mockImplementation((options: ElementSelectionOptions) => {
     selectionOptions = options;
     return { cancel: engines.cancelSelection };
+  });
+  engines.replay.mockImplementation(() => {
+    const replay = { startedAt: '2026-11-13T00:00:00.000Z', page: {}, events: [{}, {}], truncated: false };
+    return { stop: () => replay, discard: vi.fn() };
   });
   engines.drag.mockImplementation((_selection, options: ElementDragOptions) => {
     dragOptions = options;
@@ -60,7 +65,7 @@ function createHarness(policy: CapturePolicy | null = POLICY) {
   const states: CaptureState[] = [];
   const show = vi.fn();
   const controller = createCaptureController({
-    projectKey: 'demo', policy, root: document.createElement('div').attachShadow({ mode: 'closed' }),
+    projectKey: 'demo', policy, sdkSelector: 'lattice-feedback-root', root: document.createElement('div').attachShadow({ mode: 'closed' }),
     onUpdate: (state) => states.push(state), onShowWidget: show, onHideWidget: vi.fn(),
   });
   controller.sync();
@@ -168,6 +173,21 @@ it('publishes Flow completion atomically without a submit-ready empty attachment
 
   expect(states.at(-1)?.attachments.flow).toEqual(FLOW);
   expect(states.slice(beforeStop).every((state) => state.activeMode === 'flow' || state.attachments.flow !== null)).toBe(true);
+  controller.destroy();
+});
+
+it('keeps the replay of a completed Flow for one save and drops it on cancel', () => {
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
+  controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
+
+  expect(controller.takeFlowReplay()?.events).toHaveLength(2);
+  expect(controller.takeFlowReplay()).toBeNull();
+
+  controller.handleCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind: 'flow', index: 0 } }));
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
+  controller.handleCommand(createCaptureCommand({ type: 'capture:cancel', payload: {} }));
+  expect(controller.takeFlowReplay()).toBeNull();
   controller.destroy();
 });
 

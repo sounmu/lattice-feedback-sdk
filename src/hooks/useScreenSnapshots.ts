@@ -21,6 +21,7 @@ interface UseScreenSnapshotsOptions {
   config: Pick<CreateScreenSnapshotInput, 'projectKey' | 'hostOrigin'> | null;
   subscribeToScreenCapture: (listener: (result: ScreenCaptureResult) => void) => () => void;
   requestScreenCapture: () => void;
+  requestFlowCapture: () => void;
 }
 
 // An SDK build without screen saving never answers, so the request must not wait forever.
@@ -28,9 +29,10 @@ const CAPTURE_TIMEOUT_MS = 30_000;
 const SAVE_FAILED_MESSAGE = '화면을 저장하지 못했습니다. 다시 시도해 주세요.';
 const PAGE_NOT_ALLOWED_MESSAGE = '이 페이지에서는 화면을 저장할 수 없습니다.';
 const PAYLOAD_TOO_LARGE_STATUS = 413;
+const FLOW_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 흐름 재생을 저장하지 못했습니다.';
 const MARKED_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 코멘트·편집 위치를 화면에 표시하지 못했습니다.';
 
-type CaptureSource = 'manual' | 'marks';
+type CaptureSource = 'manual' | 'marks' | 'flow';
 
 const CAPTURE_FAILURE_MESSAGES: Record<ScreenCaptureFailureReason, string> = {
   page_not_allowed: PAGE_NOT_ALLOWED_MESSAGE,
@@ -100,7 +102,12 @@ function getUploadErrorMessage(status: number): string {
   }
 }
 
-export function useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture }: UseScreenSnapshotsOptions) {
+export function useScreenSnapshots({
+  config,
+  subscribeToScreenCapture,
+  requestScreenCapture,
+  requestFlowCapture,
+}: UseScreenSnapshotsOptions) {
   const [screens, setScreens] = useState<MarkedScreens>({ snapshots: [], marksByScreen: new Map() });
   const { snapshots, marksByScreen } = screens;
   const markedScreenIds = useMemo(() => new Set(marksByScreen.keys()), [marksByScreen]);
@@ -111,7 +118,9 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
   const captureTimer = useRef<number | null>(null);
   const pendingSource = useRef<CaptureSource>('manual');
   // A comment or edit added while another screen is being saved gets its own save afterwards.
-  const isMarksCaptureQueued = useRef(false);
+  // Saves asked for while another screen is being saved run afterwards, in order.
+  const queuedCaptures = useRef<CaptureSource[]>([]);
+  const [flowScreenIds, setFlowScreenIds] = useState<ReadonlySet<string>>(new Set());
   const startCaptureRef = useRef<(source: CaptureSource) => void>(() => undefined);
 
   useEffect(() => {
@@ -143,9 +152,12 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
         const next = source === 'marks'
           ? addMarkedScreen(screensRef.current, created.snapshot, markKeys, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
           : { ...screensRef.current, snapshots: [...screensRef.current.snapshots, created.snapshot] };
-        if (!next) {
-          setErrorMessage(MARKED_SCREEN_FULL_MESSAGE);
+        if (!next || next.snapshots.length > MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK) {
+          setErrorMessage(source === 'flow' ? FLOW_SCREEN_FULL_MESSAGE : MARKED_SCREEN_FULL_MESSAGE);
           return;
+        }
+        if (source === 'flow') {
+          setFlowScreenIds((current) => new Set([...current, created.snapshot.id]));
         }
         screensRef.current = next;
         setScreens(next);
@@ -162,9 +174,9 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     }
 
     function runQueuedMarksCapture() {
-      if (isMarksCaptureQueued.current) {
-        isMarksCaptureQueued.current = false;
-        startCaptureRef.current('marks');
+      const next = queuedCaptures.current.shift();
+      if (next) {
+        startCaptureRef.current(next);
       }
     }
 
@@ -205,8 +217,12 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
       setStatus('idle');
       setErrorMessage(SAVE_FAILED_MESSAGE);
     }, CAPTURE_TIMEOUT_MS);
-    requestScreenCapture();
-  }, [requestScreenCapture]);
+    if (source === 'flow') {
+      requestFlowCapture();
+    } else {
+      requestScreenCapture();
+    }
+  }, [requestScreenCapture, requestFlowCapture]);
 
   const capture = useCallback(() => {
     if (canCapture) {
@@ -216,7 +232,9 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
 
   const captureForMarks = useCallback(() => {
     if (status !== 'idle') {
-      isMarksCaptureQueued.current = true;
+      if (!queuedCaptures.current.includes('marks')) {
+        queuedCaptures.current.push('marks');
+      }
       return;
     }
     if (!canCaptureMarks) {
@@ -225,6 +243,19 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     }
     startCapture('marks');
   }, [status, canCaptureMarks, startCapture]);
+
+  // The replay of a finished Flow is saved as its own screen, which the viewer plays back.
+  const captureFlow = useCallback(() => {
+    if (status !== 'idle') {
+      queuedCaptures.current.push('flow');
+      return;
+    }
+    if (!canCapture) {
+      setErrorMessage(FLOW_SCREEN_FULL_MESSAGE);
+      return;
+    }
+    startCapture('flow');
+  }, [status, canCapture, startCapture]);
 
   useEffect(() => {
     startCaptureRef.current = startCapture;
@@ -237,15 +268,17 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     };
     screensRef.current = next;
     setScreens(next);
+    setFlowScreenIds((current) => new Set([...current].filter((screenId) => screenId !== id)));
   }, []);
 
   const reset = useCallback(() => {
     const empty: MarkedScreens = { snapshots: [], marksByScreen: new Map() };
     screensRef.current = empty;
     setScreens(empty);
-    isMarksCaptureQueued.current = false;
+    queuedCaptures.current = [];
+    setFlowScreenIds(new Set());
     setErrorMessage(null);
   }, []);
 
-  return { snapshots, markedScreenIds, status, errorMessage, canCapture, capture, captureForMarks, remove, reset };
+  return { snapshots, markedScreenIds, flowScreenIds, captureFlow, status, errorMessage, canCapture, capture, captureForMarks, remove, reset };
 }

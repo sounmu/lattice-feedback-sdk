@@ -6,6 +6,7 @@ import { createCaptureStatus } from '@/sdk/capture-status';
 import { startElementDrag } from '@/sdk/element-drag';
 import { startElementSelection } from '@/sdk/element-selection';
 import { createFlowRecorder, type FlowRecorder, type FlowRecorderState } from '@/sdk/flow-recorder';
+import { startReplayRecording, type ReplayRecorder, type ReplayRecording } from '@/sdk/flow-replay-recorder';
 import { clearFlowSession, findSessionStorage, getFlowSessionKey } from '@/sdk/flow-session';
 import type { AttachmentKind, CaptureCommand, CaptureMode, CaptureState } from '@/types/sdk-message';
 import type { ElementTarget, FeedbackAttachments, FlowAttachment } from '@/types/feedback';
@@ -14,6 +15,8 @@ export interface CaptureControllerOptions {
   projectKey: string;
   policy: CapturePolicy | null;
   root: ShadowRoot;
+  /** The SDK's own elements, left out of the Flow replay. */
+  sdkSelector: string;
   onUpdate: (state: CaptureState) => void;
   onShowWidget: () => void;
   onHideWidget: () => void;
@@ -51,6 +54,12 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let transientToken = 0;
   let flowRecorder: FlowRecorder | null = null;
   let flowEventCount = 0;
+  // Records the page for replay while Flow runs. Only the current document is kept: a reload or
+  // full navigation starts a new recording, while the Flow timeline itself continues across them.
+  let replayRecorder: ReplayRecorder | null = null;
+  let finishedReplay: ReplayRecording | null = null;
+  // The recorder reports the stop before the completed Flow arrives, so the replay waits here until then.
+  let stoppedReplay: ReplayRecording | null = null;
   let flowErrorMessage: string | null = null;
   let controllerErrorMessage: string | null = null;
   let isPanelVisible = false;
@@ -179,7 +188,10 @@ export function createCaptureController(options: CaptureControllerOptions) {
   }
 
   function removeAttachment(kind: AttachmentKind, index: number): void {
-    if (kind === 'flow') attachments.flow = null;
+    if (kind === 'flow') {
+      attachments.flow = null;
+      finishedReplay = null;
+    }
     else attachments[kind].splice(index, 1);
     if (kind === 'comments') {
       commentElements.splice(index, 1);
@@ -208,6 +220,8 @@ export function createCaptureController(options: CaptureControllerOptions) {
     endTransientMode();
     if (activeMode === 'flow') flowRecorder?.cancel();
     attachments = createEmptyAttachments();
+    finishedReplay = null;
+    stoppedReplay = null;
     commentElements = [];
     editElements = [];
     commentKeys = [];
@@ -219,6 +233,8 @@ export function createCaptureController(options: CaptureControllerOptions) {
   function destroyCapture(): void {
     endTransientMode();
     isDestroyed = true;
+    discardReplay();
+    finishedReplay = null;
     flowRecorder?.destroy();
     const storage = flowRecorder ? null : findSessionStorage();
     if (storage) clearFlowSession(storage, getFlowSessionKey(options.projectKey));
@@ -254,16 +270,34 @@ export function createCaptureController(options: CaptureControllerOptions) {
     if (state.recording && activeMode !== 'flow') {
       endTransientMode();
       activeMode = 'flow';
+      startReplay();
     } else if (!state.recording && activeMode === 'flow') {
       activeMode = null;
+      stoppedReplay = replayRecorder?.stop() ?? null;
+      replayRecorder = null;
       queueMicrotask(emit);
       return;
     }
     emit();
   }
 
+  function startReplay(): void {
+    discardReplay();
+    finishedReplay = null;
+    stoppedReplay = null;
+    replayRecorder = startReplayRecording(options.sdkSelector);
+  }
+
+  function discardReplay(): void {
+    replayRecorder?.discard();
+    replayRecorder = null;
+  }
+
   function handleFlowComplete(flow: FlowAttachment): void {
     if (isDestroyed) return;
+    finishedReplay = stoppedReplay ?? replayRecorder?.stop() ?? null;
+    stoppedReplay = null;
+    replayRecorder = null;
     attachments.flow = flow;
     emit();
     showWidget();
@@ -308,7 +342,15 @@ export function createCaptureController(options: CaptureControllerOptions) {
     });
   }
 
+  /** Hands over the replay of the last completed Flow once; later calls return null. */
+  function takeFlowReplay(): ReplayRecording | null {
+    const replay = finishedReplay;
+    finishedReplay = null;
+    return replay;
+  }
+
   return {
+    takeFlowReplay,
     getCommentPinSources,
     getEditMoveSources,
     handleCommand: unlessDestroyed(handleCommand),

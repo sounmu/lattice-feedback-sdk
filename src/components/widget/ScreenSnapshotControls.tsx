@@ -8,6 +8,8 @@ interface ScreenSnapshotControlsProps {
   snapshots: ScreenSnapshotSummary[];
   /** Screens saved automatically for comments and edits; they show where those are on the page. */
   markedScreenIds: ReadonlySet<string>;
+  /** Screens holding the replay of a Flow. */
+  flowScreenIds: ReadonlySet<string>;
   status: ScreenSaveStatus;
   errorMessage: string | null;
   canCapture: boolean;
@@ -22,10 +24,16 @@ const STATUS_MESSAGES: Record<ScreenSaveStatus, string> = {
   uploading: '저장한 화면을 올리는 중입니다…',
 };
 
-function getSnapshotSummary(snapshot: ScreenSnapshotSummary, index: number, isMarkedScreen: boolean): string {
+function getSnapshotKind(isMarkedScreen: boolean, isFlowScreen: boolean): string {
+  if (isFlowScreen) {
+    return ' · 흐름 재생';
+  }
+  return isMarkedScreen ? ' · 코멘트·편집 위치 포함' : '';
+}
+
+function getSnapshotSummary(snapshot: ScreenSnapshotSummary, index: number, kind: string): string {
   const { viewportWidth, viewportHeight } = snapshot.page;
   const time = new Date(snapshot.capturedAt).toLocaleTimeString('ko-KR');
-  const kind = isMarkedScreen ? ' · 코멘트·편집 위치 포함' : '';
   const summary = `화면 ${index + 1}${kind} · ${viewportWidth}×${viewportHeight} · ${time}`;
   if (snapshot.missingAssets.length === 0) {
     return summary;
@@ -36,6 +44,7 @@ function getSnapshotSummary(snapshot: ScreenSnapshotSummary, index: number, isMa
 export function ScreenSnapshotControls({
   snapshots,
   markedScreenIds,
+  flowScreenIds,
   status,
   errorMessage,
   canCapture,
@@ -65,7 +74,7 @@ export function ScreenSnapshotControls({
         <ul className="flex flex-col gap-2" aria-label={`저장된 화면 ${snapshots.length}/${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}`}>
           {snapshots.map((snapshot, index) => (
             <li key={snapshot.id} className="flex items-start justify-between gap-2 rounded border p-2">
-              <span className="min-w-0 break-words text-xs">{getSnapshotSummary(snapshot, index, markedScreenIds.has(snapshot.id))}</span>
+              <span className="min-w-0 break-words text-xs">{getSnapshotSummary(snapshot, index, getSnapshotKind(markedScreenIds.has(snapshot.id), flowScreenIds.has(snapshot.id)))}</span>
               <button
                 type="button"
                 aria-label={`화면 ${index + 1} 삭제`}

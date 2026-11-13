@@ -5,7 +5,7 @@ import { createCaptureController } from '@/sdk/capture-controller';
 import { trackHistory } from '@/sdk/history-tracking';
 import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
-import { captureScreen } from '@/sdk/screen-capture';
+import { captureRecording, captureScreen } from '@/sdk/screen-capture';
 import { HOST_ELEMENT_STYLE, PANEL_OPEN_CLASS_NAME, SDK_STYLES } from '@/sdk/styles';
 import type { FeedbackSdkInitOptions } from '@/sdk/types';
 import type { FeedbackReporter } from '@/types/feedback';
@@ -152,7 +152,7 @@ export class FeedbackSdk {
     this.hostElement = hostElement;
     this.panelElement = panelElement;
     this.captureController = createCaptureController({
-      projectKey, policy: this.capturePolicy, root: shadowRoot,
+      projectKey, policy: this.capturePolicy, root: shadowRoot, sdkSelector: HOST_ELEMENT_TAG_NAME,
       onUpdate: (state) => {
         if (this.isWidgetReady) this.postToWidget(createCaptureUpdate(state));
       },
@@ -269,6 +269,20 @@ export class FeedbackSdk {
     }
   }
 
+  private async saveFlowReplay(): Promise<void> {
+    const replay = this.captureController?.takeFlowReplay() ?? null;
+    if (!replay) {
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'capture_failed' }));
+      return;
+    }
+    try {
+      this.postToWidget(createHostToWidgetMessage('screen:captured', await captureRecording(replay, HOST_ELEMENT_TAG_NAME)));
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Saving the Flow replay failed.`, error);
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'capture_failed' }));
+    }
+  }
+
   private readonly handleMessage = (event: MessageEvent): void => {
     if (event.origin !== this.appOrigin) {
       return;
@@ -297,6 +311,9 @@ export class FeedbackSdk {
         break;
       case 'screen:capture':
         void this.saveScreen();
+        break;
+      case 'flow:capture':
+        void this.saveFlowReplay();
         break;
       default: {
         const unhandledMessage: never = message;

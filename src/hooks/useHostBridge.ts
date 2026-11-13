@@ -148,6 +148,10 @@ export function useHostBridge() {
     postToHost(createWidgetToHostMessage('screen:capture', {}));
   }, [postToHost]);
 
+  const requestFlowCapture = useCallback(() => {
+    postToHost(createWidgetToHostMessage('flow:capture', {}));
+  }, [postToHost]);
+
   const errorMessage = config ? null : 'projectKey 또는 hostOrigin이 올바르지 않습니다.';
 
   return {
@@ -161,6 +165,7 @@ export function useHostBridge() {
     subscribeToScreenCapture,
     subscribeToCaptureUpdate,
     requestScreenCapture,
+    requestFlowCapture,
     notifyClose,
     notifySubmitted,
   };

@@ -15,6 +15,7 @@ import {
   createCommentPinEvent,
   createEditMoveEvent,
   RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
+  RRWEB_INCREMENTAL_EVENT_TYPE,
   RRWEB_META_EVENT_TYPE,
   SCREEN_SNAPSHOT_FORMAT,
 } from '@/lib/screen-snapshot';
@@ -23,6 +24,9 @@ import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError 
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
+import type { ReplayRecording } from '@/sdk/flow-replay-recorder';
+import { sanitizeReplayEvents } from '@/sdk/replay-sanitize';
+import type { SnapshotNode } from '@/sdk/snapshot-assets';
 import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
 
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
@@ -33,8 +37,8 @@ export interface ScreenMarkSources {
   edits: readonly EditMoveSource[];
 }
 
-const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
-const MASKED_SELECTOR = '[data-lattice-mask]';
+export const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
+export const MASKED_SELECTOR = '[data-lattice-mask]';
 const ASSET_FETCH_TIMEOUT_MS = 10_000;
 // The widget waits 30 s for the capture; this leaves time to serialize and answer.
 const ASSET_COLLECTION_DURATION_MS = 15_000;
@@ -189,6 +193,50 @@ export async function captureScreen(
       ...pins.map((pin) => createCommentPinEvent(pin, capturedAt)),
       ...moves.map((move) => createEditMoveEvent(move, capturedAt)),
     ],
+    missingAssets,
+  };
+  return { screen, assetFiles };
+}
+
+function findLoadedFontFamilies(): Set<string> {
+  const families = new Set<string>();
+  document.fonts.forEach((fontFace) => {
+    if (fontFace.status === 'loaded') {
+      families.add(normalizeFontFamily(fontFace.family));
+    }
+  });
+  return families;
+}
+
+/**
+ * Turns a recorded Flow into a saved screen: its first full snapshot plus the page changes after it.
+ * The same exclusions as a still screen are applied to every recorded node, and the fonts and images
+ * of the first snapshot are pulled out as files.
+ */
+export async function captureRecording(recording: ReplayRecording, sdkSelector: string): Promise<ScreenCapture> {
+  const [meta, full, ...rest] = recording.events;
+  if (meta?.type !== RRWEB_META_EVENT_TYPE || full?.type !== RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
+    throw new Error('The recording does not start with a full snapshot.');
+  }
+  sanitizeReplayEvents(recording.events);
+  const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
+  const { assetFiles, missingAssets } = await extractSnapshotAssets((full.data as { node: SnapshotNode }).node, {
+    pageOrigin: window.location.origin,
+    loadedFontFamilies: findLoadedFontFamilies(),
+    usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
+    fetchAsset: fetchSameOriginAsset,
+    maxDurationMs: ASSET_COLLECTION_DURATION_MS,
+    matchesMedia: (query) => window.matchMedia(query).matches,
+    maxAssetBytes: MAX_SNAPSHOT_ASSET_BYTES,
+    maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
+    maxAssetCount: MAX_SNAPSHOT_ASSETS,
+  });
+  const screen: CapturedScreen = {
+    format: SCREEN_SNAPSHOT_FORMAT,
+    capturedAt: recording.startedAt,
+    page: recording.page,
+    // A later Meta or FullSnapshot (a checkout) is not expected; only the changes are kept after the first pair.
+    events: [meta, full, ...rest.filter((event) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE)],
     missingAssets,
   };
   return { screen, assetFiles };

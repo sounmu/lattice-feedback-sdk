@@ -24,11 +24,12 @@ const FEEDBACK_TYPE_OPTIONS: { value: FeedbackType; label: string }[] = [
 export function FeedbackWidget() {
   const {
     config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, notifyClose, notifySubmitted,
-    captureState, sendCaptureCommand, subscribeToScreenCapture, subscribeToCaptureUpdate, requestScreenCapture,
+    captureState, sendCaptureCommand, subscribeToScreenCapture, subscribeToCaptureUpdate, requestScreenCapture, requestFlowCapture,
   } = useHostBridge();
-  const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture });
-  const { captureForMarks } = screens;
+  const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture, requestFlowCapture });
+  const { captureForMarks, captureFlow } = screens;
   const editCount = useRef(0);
+  const hasFlow = useRef(false);
 
   // A finished drag arrives as a new edit in the capture state; the screen is saved right away so the
   // admin can compare the element's original and proposed position on it.
@@ -38,7 +39,13 @@ export function FeedbackWidget() {
       captureForMarks();
     }
     editCount.current = count;
-  }), [subscribeToCaptureUpdate, captureForMarks]);
+    // A newly attached Flow brings a replay of the page, saved as its own screen.
+    const flowAttached = state.attachments.flow !== null;
+    if (flowAttached && !hasFlow.current) {
+      captureFlow();
+    }
+    hasFlow.current = flowAttached;
+  }), [subscribeToCaptureUpdate, captureForMarks, captureFlow]);
   const { submit, reset, status, errorMessage } = useSubmitFeedback();
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
@@ -114,6 +121,7 @@ export function FeedbackWidget() {
           <ScreenSnapshotControls
             snapshots={screens.snapshots}
             markedScreenIds={screens.markedScreenIds}
+            flowScreenIds={screens.flowScreenIds}
             status={screens.status}
             errorMessage={screens.errorMessage}
             canCapture={screens.canCapture}

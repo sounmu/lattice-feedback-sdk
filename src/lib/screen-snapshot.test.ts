@@ -1,6 +1,13 @@
 import { expect, it } from 'vitest';
 import { createScreenSnapshotBody } from '@/app/api/snapshots/screen-snapshot-test-fixtures';
-import { createCommentPinEvent, createEditMoveEvent, findCommentPins, findEditMoves, isCapturedScreen } from '@/lib/screen-snapshot';
+import {
+  createCommentPinEvent,
+  createEditMoveEvent,
+  findCommentPins,
+  findEditMoves,
+  hasReplayEvents,
+  isCapturedScreen,
+} from '@/lib/screen-snapshot';
 import type { ScreenCommentPin, ScreenEditMove, ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
 const PIN: ScreenCommentPin = { number: 1, key: 'comment-1', nodeId: 7, rect: { x: 10, y: 20, width: 80, height: 30 }, label: 'save', comment: '버튼이 안 보여요' };
@@ -24,7 +31,7 @@ it('rejects malformed pins and other trailing events', () => {
     createCommentPinEvent({ ...PIN, number: 0 }, 1),
     createCommentPinEvent({ ...PIN, rect: { ...PIN.rect, width: -1 } }, 1),
     { type: 5, timestamp: 1, data: { tag: 'other', payload: PIN } },
-    { type: 3, timestamp: 1, data: {} },
+    { type: 1, timestamp: 1, data: {} },
   ];
   for (const event of malformed) {
     expect(isCapturedScreen(createScreen([event]))).toBe(false);
@@ -49,4 +56,14 @@ it('accepts proposed moves next to comment pins and reads each kind separately',
   expect(findCommentPins(events)).toEqual([PIN]);
   expect(isCapturedScreen(createScreen([createEditMoveEvent({ ...move, number: 11 }, 1)]))).toBe(false);
   expect(isCapturedScreen(createScreen([createEditMoveEvent({ ...move, proposedRect: { x: 0, y: 0, width: -1, height: 0 } }, 1)]))).toBe(false);
+});
+
+it('accepts the page changes of a recorded Flow and tells a replay apart from a still screen', () => {
+  const replay = createScreen([{ type: 3, timestamp: 2, data: { source: 2, type: 2, id: 5, x: 10, y: 20 } }]);
+  const still = createScreen([]);
+
+  expect(isCapturedScreen(replay)).toBe(true);
+  expect(hasReplayEvents(replay.events as ScreenSnapshotEvent[])).toBe(true);
+  expect(hasReplayEvents(still.events as ScreenSnapshotEvent[])).toBe(false);
+  expect(isCapturedScreen(createScreen([{ type: 3, timestamp: 2, data: 'not an object' }]))).toBe(false);
 });
