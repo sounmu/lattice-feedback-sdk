@@ -13,9 +13,12 @@ export interface FeedbackRepository {
 
 const memoryFeedbackRepository = createMemoryFeedbackRepository();
 
+export function getFeedbackStorageMode(): string {
+  return process.env.FEEDBACK_STORAGE ?? (process.env.NODE_ENV === 'production' ? 'supabase' : 'memory');
+}
+
 export function getFeedbackRepository(): FeedbackRepository {
-  const storage = process.env.FEEDBACK_STORAGE ?? (process.env.NODE_ENV === 'production' ? 'supabase' : 'memory');
-  switch (storage) {
+  switch (getFeedbackStorageMode()) {
     case 'memory':
       return memoryFeedbackRepository;
     case 'supabase':

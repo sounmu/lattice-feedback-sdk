@@ -4,11 +4,20 @@ import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavaila
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
 import { findProject } from '@/lib/projects';
+import { findScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
-import type { FeedbackDetailResponse } from '@/types/feedback';
+import type { Feedback, FeedbackDetailResponse } from '@/types/feedback';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
+}
+
+async function createDetailBody(feedback: Feedback): Promise<FeedbackDetailResponse> {
+  const repository = findScreenSnapshotRepository();
+  if (!repository) {
+    return { feedback, screenSnapshots: [] };
+  }
+  return { feedback, screenSnapshots: await repository.findManyByFeedback(feedback.projectKey, feedback.id) };
 }
 
 function createFeedbackNotFoundResponse() {
@@ -31,8 +40,7 @@ export async function GET(request: Request, context: RouteContext) {
     if (!feedback) {
       return createFeedbackNotFoundResponse();
     }
-    const body: FeedbackDetailResponse = { feedback };
-    return NextResponse.json(body);
+    return NextResponse.json(await createDetailBody(feedback));
   } catch (error) {
     if (error instanceof FeedbackStorageUnavailableError) {
       return createApiErrorResponse(503, 'storage_unavailable', error.message);
@@ -68,8 +76,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (!feedback) {
       return createFeedbackNotFoundResponse();
     }
-    const body: FeedbackDetailResponse = { feedback };
-    return NextResponse.json(body);
+    return NextResponse.json(await createDetailBody(feedback));
   } catch (error) {
     if (error instanceof FeedbackStorageUnavailableError) {
       return createApiErrorResponse(503, 'storage_unavailable', error.message);

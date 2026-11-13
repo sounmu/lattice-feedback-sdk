@@ -2,6 +2,8 @@
 // Data minimization (AGENTS.md section 5): nothing in these shapes may carry
 // input values, query strings, hashes, cookies, tokens, or raw DOM/CSS.
 
+import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
+
 export type FeedbackStatus = 'open' | 'in_progress' | 'resolved';
 
 export type FeedbackType = 'bug' | 'improvement' | 'question' | 'other';
@@ -102,6 +104,8 @@ export interface Feedback {
 export type CreateFeedbackInput = Pick<Feedback, 'projectKey' | 'message' | 'type' | 'reporter' | 'page'> & {
   hostOrigin: string;
   attachments?: Partial<FeedbackAttachments>;
+  /** Saved screens uploaded before submission. They are linked to the feedback when it is created. */
+  screenSnapshotIds?: string[];
 };
 
 export type UpdateFeedbackInput = Partial<Pick<Feedback, 'status' | 'adminReply'>>;
@@ -116,6 +120,8 @@ export interface FeedbackListResponse {
 
 export interface FeedbackDetailResponse {
   feedback: Feedback;
+  /** Screens saved with this feedback, without their event payload. */
+  screenSnapshots: ScreenSnapshotSummary[];
 }
 
 export interface ApiErrorResponse {

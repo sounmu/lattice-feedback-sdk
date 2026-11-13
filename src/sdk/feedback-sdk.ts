@@ -5,6 +5,7 @@ import { createCaptureController } from '@/sdk/capture-controller';
 import { trackHistory } from '@/sdk/history-tracking';
 import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
+import { captureScreen } from '@/sdk/screen-capture';
 import { HOST_ELEMENT_STYLE, PANEL_OPEN_CLASS_NAME, SDK_STYLES } from '@/sdk/styles';
 import type { FeedbackSdkInitOptions } from '@/sdk/types';
 import type { FeedbackReporter } from '@/types/feedback';
@@ -29,6 +30,7 @@ export class FeedbackSdk {
   private capturePolicy: CapturePolicy | null = null;
   private captureController: ReturnType<typeof createCaptureController> | null = null;
   private pendingResizeFrame: number | null = null;
+  private isCapturingScreen = false;
 
   constructor(appOrigin: string) {
     this.appOrigin = appOrigin;
@@ -243,6 +245,27 @@ export class FeedbackSdk {
     this.postToWidget(createHostToWidgetMessage('page:update', { page: getPageContext() }));
   }
 
+  // Saving is allowed on any page with the SDK unless the customer's policy restricts the paths.
+  private async saveScreen(): Promise<void> {
+    if (this.isCapturingScreen) {
+      return;
+    }
+    if (this.capturePolicy && !this.capturePolicy.allowedPaths.includes(window.location.pathname)) {
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'page_not_allowed' }));
+      return;
+    }
+    this.isCapturingScreen = true;
+    try {
+      const screen = await captureScreen(HOST_ELEMENT_TAG_NAME);
+      this.postToWidget(createHostToWidgetMessage('screen:captured', { screen }));
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Saving the screen failed.`, error);
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'capture_failed' }));
+    } finally {
+      this.isCapturingScreen = false;
+    }
+  }
+
   private readonly handleMessage = (event: MessageEvent): void => {
     if (event.origin !== this.appOrigin) {
       return;
@@ -268,6 +291,9 @@ export class FeedbackSdk {
         break;
       case 'submitted':
         this.captureController?.reset();
+        break;
+      case 'screen:capture':
+        void this.saveScreen();
         break;
       default: {
         const unhandledMessage: never = message;

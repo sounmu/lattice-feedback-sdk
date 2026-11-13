@@ -3,8 +3,10 @@
 import { useState, type FormEvent } from 'react';
 
 import { useHostBridge } from '@/hooks/useHostBridge';
+import { useScreenSnapshots } from '@/hooks/useScreenSnapshots';
 import { useSubmitFeedback } from '@/hooks/useSubmitFeedback';
 import { CaptureControls } from '@/components/widget/CaptureControls';
+import { ScreenSnapshotControls } from '@/components/widget/ScreenSnapshotControls';
 import { createCaptureCommand } from '@/lib/capture-protocol';
 import type { FeedbackReporter, FeedbackType } from '@/types/feedback';
 
@@ -20,14 +22,17 @@ const FEEDBACK_TYPE_OPTIONS: { value: FeedbackType; label: string }[] = [
 ];
 
 export function FeedbackWidget() {
-  const { config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, notifyClose, notifySubmitted, captureState, sendCaptureCommand } =
-    useHostBridge();
+  const {
+    config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, notifyClose, notifySubmitted,
+    captureState, sendCaptureCommand, subscribeToScreenCapture, requestScreenCapture,
+  } = useHostBridge();
+  const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture });
   const { submit, reset, status, errorMessage } = useSubmitFeedback();
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
 
   const canSubmit = isInitialized && page !== null && message.trim().length > 0 &&
-    status !== 'submitting' && !captureState?.activeMode;
+    status !== 'submitting' && !captureState?.activeMode && screens.status === 'idle';
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -42,6 +47,7 @@ export function FeedbackWidget() {
       reporter: reporter ?? ANONYMOUS_REPORTER,
       page,
       attachments: captureState?.attachments,
+      screenSnapshotIds: screens.snapshots.map((snapshot) => snapshot.id),
     });
     if (result) {
       notifySubmitted(result.feedback.id);
@@ -52,6 +58,7 @@ export function FeedbackWidget() {
     setMessage('');
     setType('bug');
     reset();
+    screens.reset();
     sendCaptureCommand(createCaptureCommand({ type: 'draft:reset', payload: {} }));
   }
 
@@ -91,6 +98,17 @@ export function FeedbackWidget() {
           required
           onChange={(event) => setMessage(event.target.value)}
         />
+        {isInitialized && (
+          <ScreenSnapshotControls
+            snapshots={screens.snapshots}
+            status={screens.status}
+            errorMessage={screens.errorMessage}
+            canCapture={screens.canCapture}
+            disabled={status === 'submitting'}
+            onCapture={screens.capture}
+            onRemove={screens.remove}
+          />
+        )}
         {captureState && (
           <CaptureControls
             attachments={captureState.attachments}

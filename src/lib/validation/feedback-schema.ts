@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS,
-  MAX_PAGE_TITLE_LENGTH, MAX_USER_AGENT_LENGTH, truncateText,
+  MAX_PAGE_TITLE_LENGTH, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK, MAX_USER_AGENT_LENGTH, truncateText,
 } from '@/lib/feedback-limits';
 import type { CreateFeedbackInput, UpdateFeedbackInput } from '@/types/feedback';
 
@@ -29,7 +29,7 @@ function findHttpUrl(value: string): URL | null {
   }
 }
 
-function isHttpOrigin(value: string): boolean {
+export function isHttpOrigin(value: string): boolean {
   const url = findHttpUrl(value);
   return url !== null && url.origin === value;
 }
@@ -40,7 +40,7 @@ function isPathOnly(value: string): boolean {
 
 const shortTextSchema = z.string().max(MAX_SHORT_TEXT_LENGTH);
 
-const pageUrlSchema = z
+export const pageUrlSchema = z
   .string()
   .max(MAX_URL_LENGTH)
   .refine((value) => findHttpUrl(value) !== null, { message: 'page.url must be an http(s) URL' })
@@ -126,6 +126,11 @@ export const createFeedbackInputSchema = z.object({
     userAgent: z.string().transform((value) => truncateText(value, MAX_USER_AGENT_LENGTH)),
   }),
   attachments: attachmentsSchema,
+  screenSnapshotIds: z
+    .array(z.uuid())
+    .max(MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
+    .refine((ids) => new Set(ids).size === ids.length, { message: 'screenSnapshotIds must be unique' })
+    .default([]),
 });
 
 export const updateFeedbackInputSchema = z.object({
