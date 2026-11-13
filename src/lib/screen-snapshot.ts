@@ -126,6 +126,54 @@ export function createCommentPinEvent(pin: ScreenCommentPin, timestamp: number):
   return { type: RRWEB_CUSTOM_EVENT_TYPE, timestamp, data: { tag: COMMENT_PIN_EVENT_TAG, payload: pin } };
 }
 
+/** Keys of the comments and edits that still exist in the draft, each list in its current order. */
+export interface LiveMarkKeys {
+  comments: readonly string[];
+  edits: readonly string[];
+}
+
+/**
+ * The events of a saved screen with only the comment pins and proposed moves that still exist, each
+ * numbered by its place among its kind. Returns the same array when nothing changes, and null when no
+ * mark is left.
+ */
+export function reconcileScreenMarks(
+  events: readonly ScreenSnapshotEvent[],
+  live: LiveMarkKeys,
+): readonly ScreenSnapshotEvent[] | null {
+  let isChanged = false;
+  let markCount = 0;
+  const next = events.flatMap((event) => {
+    let liveKeys: readonly string[];
+    let mark: ScreenCommentPin | ScreenEditMove;
+    if (isCommentPinEvent(event)) {
+      liveKeys = live.comments;
+      mark = (event.data as { payload: ScreenCommentPin }).payload;
+    } else if (isEditMoveEvent(event)) {
+      liveKeys = live.edits;
+      mark = (event.data as { payload: ScreenEditMove }).payload;
+    } else {
+      return [event];
+    }
+    const number = liveKeys.indexOf(mark.key) + 1;
+    if (number === 0) {
+      isChanged = true;
+      return [];
+    }
+    markCount += 1;
+    if (number === mark.number) {
+      return [event];
+    }
+    isChanged = true;
+    const data = event.data as { tag: string; payload: object };
+    return [{ ...event, data: { ...data, payload: { ...mark, number } } }];
+  });
+  if (markCount === 0) {
+    return null;
+  }
+  return isChanged ? next : events;
+}
+
 /** The comment pins of a saved screen, in event order. Malformed events are skipped. */
 export function findCommentPins(events: readonly ScreenSnapshotEvent[]): ScreenCommentPin[] {
   return events.filter(isCommentPinEvent).map((event) => (event.data as { payload: ScreenCommentPin }).payload);

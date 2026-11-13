@@ -102,12 +102,34 @@ function scrollSavedScreen(frame: HTMLIFrameElement, event: WheelEvent): void {
 
 // Finds the pinned element in the rebuilt page. When it was not serialized, the saved document
 // coordinates are shifted by the rebuilt page's scroll instead.
+// A point outside any ancestor that clips its content (a scrolled list, for example) is not visible,
+// even when it is still inside the page's viewport.
+function isPointClipped(element: Element, x: number, y: number): boolean {
+  const view = element.ownerDocument.defaultView;
+  for (let ancestor = element.parentElement; ancestor && view; ancestor = ancestor.parentElement) {
+    const { overflowX, overflowY } = view.getComputedStyle(ancestor);
+    if (overflowX === 'visible' && overflowY === 'visible') {
+      continue;
+    }
+    const clip = ancestor.getBoundingClientRect();
+    if (x < clip.left || x > clip.right || y < clip.top || y > clip.bottom) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function measurePin(replayer: Replayer, pin: ScreenCommentPin): PinBox {
   const node = pin.nodeId === null ? null : replayer.getMirror().getNode(pin.nodeId);
   if (node && 'getBoundingClientRect' in node) {
     const bounds = (node as Element).getBoundingClientRect();
     if (bounds.width > 0 || bounds.height > 0) {
-      return { pin, x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height };
+      const isClipped = isPointClipped(
+        node as Element,
+        bounds.left + pin.offset.x * bounds.width,
+        bounds.top + pin.offset.y * bounds.height,
+      );
+      return { pin, x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height, isClipped };
     }
   }
   const view = replayer.iframe.contentWindow;
@@ -117,6 +139,7 @@ function measurePin(replayer: Replayer, pin: ScreenCommentPin): PinBox {
     y: pin.rect.y - (view?.scrollY ?? 0),
     width: pin.rect.width,
     height: pin.rect.height,
+    isClipped: false,
   };
 }
 
@@ -398,6 +421,17 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       }
     }
 
+    // Marks follow the rebuilt page as it (or a scroll container inside it) is scrolled and once its
+    // fonts have changed the layout.
+    // A rebuild reopens the same document object, which drops its listeners, so they are added again.
+    function followMarks() {
+      frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
+      frameDocument = replayer?.iframe.contentDocument ?? null;
+      frameDocument?.addEventListener('scroll', measurePins, { capture: true, passive: true });
+      void frameDocument?.fonts.ready.then(measurePins);
+      measurePins();
+    }
+
     function handleWheel(event: WheelEvent) {
       event.preventDefault();
       if (replayer) {
@@ -427,6 +461,11 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
         showWarning: false,
         triggerFocus: false,
       });
+      const hasMarks = pins.length > 0 || moves.length > 0;
+      if (hasMarks) {
+        // Rebuilding the page replaces its document, so the scroll watch is attached after each rebuild.
+        replayer.on('fullsnapshot-rebuilded', followMarks);
+      }
       replayer.pause(0);
       replayerRef.current = replayer;
       if (isReplay) {
@@ -441,14 +480,9 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
         setIsPlaying(false);
       }
       showsProposedRef.current = false;
-      if (pins.length === 0 && moves.length === 0) {
-        return;
+      if (hasMarks) {
+        followMarks();
       }
-      // Marks follow the rebuilt page as it is scrolled and once its fonts have changed the layout.
-      frameDocument = replayer.iframe.contentDocument;
-      frameDocument?.addEventListener('scroll', measurePins, { capture: true, passive: true });
-      measurePins();
-      void frameDocument?.fonts.ready.then(measurePins);
     }
 
     void mount(stage);

@@ -9,21 +9,8 @@ import { CaptureControls } from '@/components/widget/CaptureControls';
 import { ScreenSnapshotControls } from '@/components/widget/ScreenSnapshotControls';
 import { createCaptureCommand } from '@/lib/capture-protocol';
 import type { FeedbackReporter, FeedbackType } from '@/types/feedback';
-import type { AttachmentKind, CaptureState } from '@/types/sdk-message';
 
 const MAX_MESSAGE_LENGTH = 5000;
-
-/** The key saved screens use for a comment or edit; a Flow has none. */
-function findMarkKey(state: CaptureState, kind: AttachmentKind, index: number): string | undefined {
-  switch (kind) {
-    case 'comments':
-      return state.commentKeys[index];
-    case 'edits':
-      return state.editKeys[index];
-    case 'flow':
-      return undefined;
-  }
-}
 
 const ANONYMOUS_REPORTER: FeedbackReporter = { id: 'anonymous', name: 'Anonymous' };
 
@@ -40,9 +27,15 @@ export function FeedbackWidget() {
     captureState, sendCaptureCommand, subscribeToScreenCapture, subscribeToCaptureUpdate, requestScreenCapture, requestFlowCapture,
   } = useHostBridge();
   const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture, requestFlowCapture });
-  const { captureForMarks, captureFlow } = screens;
+  const { syncMarkKeys, captureForMarks, captureFlow } = screens;
+  const commentKeys = captureState?.commentKeys;
+  const editKeys = captureState?.editKeys;
   const editCount = useRef(0);
   const hasFlow = useRef(false);
+
+  useEffect(() => {
+    syncMarkKeys({ comments: commentKeys ?? [], edits: editKeys ?? [] });
+  }, [commentKeys, editKeys, syncMarkKeys]);
 
   // A finished drag arrives as a new edit in the capture state; the screen is saved right away so the
   // admin can compare the element's original and proposed position on it.
@@ -159,15 +152,9 @@ export function FeedbackWidget() {
               screens.captureForMarks();
             }}
             onRemove={(kind, index) => {
-              const markKey = findMarkKey(captureState, kind, index);
               sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }));
               if (kind === 'flow') {
                 screens.removeFlowScreens();
-              }
-              // Screens that showed the deleted mark are dropped; the remaining marks are saved again.
-              const remainingMarks = captureState.attachments.comments.length + captureState.attachments.edits.length - 1;
-              if (markKey && screens.removeScreensWithMark(markKey) && remainingMarks > 0) {
-                screens.captureForMarks();
               }
             }}
           />

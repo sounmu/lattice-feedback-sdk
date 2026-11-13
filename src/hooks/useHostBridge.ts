@@ -144,12 +144,12 @@ export function useHostBridge() {
     };
   }, []);
 
-  const requestScreenCapture = useCallback(() => {
-    postToHost(createWidgetToHostMessage('screen:capture', {}));
+  const requestScreenCapture = useCallback((requestId: string) => {
+    postToHost(createWidgetToHostMessage('screen:capture', { requestId }));
   }, [postToHost]);
 
-  const requestFlowCapture = useCallback(() => {
-    postToHost(createWidgetToHostMessage('flow:capture', {}));
+  const requestFlowCapture = useCallback((requestId: string) => {
+    postToHost(createWidgetToHostMessage('flow:capture', { requestId }));
   }, [postToHost]);
 
   const errorMessage = config ? null : 'projectKey 또는 hostOrigin이 올바르지 않습니다.';

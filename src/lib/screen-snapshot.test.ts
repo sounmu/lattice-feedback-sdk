@@ -7,9 +7,18 @@ import {
   findEditMoves,
   hasReplayEvents,
   isCapturedScreen,
+  reconcileScreenMarks,
 } from '@/lib/screen-snapshot';
 import type { ScreenCommentPin, ScreenEditMove, ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
+const MOVE: ScreenEditMove = {
+  number: 1,
+  key: 'edit-2',
+  nodeId: 9,
+  originalRect: { x: 10, y: 20, width: 80, height: 30 },
+  proposedRect: { x: 110, y: -20, width: 80, height: 30 },
+  label: 'save',
+};
 const PIN: ScreenCommentPin = { number: 1, key: 'comment-1', nodeId: 7, rect: { x: 10, y: 20, width: 80, height: 30 }, offset: { x: 0.25, y: 0.5 }, label: 'save', comment: '버튼이 안 보여요' };
 
 function createScreen(extraEvents: unknown[]) {
@@ -41,14 +50,7 @@ it('rejects malformed pins and other trailing events', () => {
 });
 
 it('accepts proposed moves next to comment pins and reads each kind separately', () => {
-  const move: ScreenEditMove = {
-    number: 1,
-    key: 'edit-2',
-    nodeId: 9,
-    originalRect: { x: 10, y: 20, width: 80, height: 30 },
-    proposedRect: { x: 110, y: -20, width: 80, height: 30 },
-    label: 'save',
-  };
+  const move = MOVE;
   const screen = createScreen([createCommentPinEvent(PIN, 1), createEditMoveEvent(move, 1)]);
   const events = screen.events as ScreenSnapshotEvent[];
 
@@ -57,6 +59,25 @@ it('accepts proposed moves next to comment pins and reads each kind separately',
   expect(findCommentPins(events)).toEqual([PIN]);
   expect(isCapturedScreen(createScreen([createEditMoveEvent({ ...move, number: 11 }, 1)]))).toBe(false);
   expect(isCapturedScreen(createScreen([createEditMoveEvent({ ...move, proposedRect: { x: 0, y: 0, width: -1, height: 0 } }, 1)]))).toBe(false);
+});
+
+it('drops the marks of deleted comments and edits from a saved screen and renumbers each kind', () => {
+  const events = createScreen([
+    createCommentPinEvent(PIN, 1),
+    createCommentPinEvent({ ...PIN, number: 2, key: 'comment-2' }, 1),
+    createCommentPinEvent({ ...PIN, number: 3, key: 'comment-3' }, 1),
+    createEditMoveEvent(MOVE, 1),
+    createEditMoveEvent({ ...MOVE, number: 2, key: 'edit-3' }, 1),
+  ]).events as ScreenSnapshotEvent[];
+
+  const kept = reconcileScreenMarks(events, { comments: ['comment-1', 'comment-2', 'comment-3'], edits: ['edit-2', 'edit-3'] });
+  const updated = reconcileScreenMarks(events, { comments: ['comment-2', 'comment-3'], edits: ['edit-3'] }) ?? [];
+
+  expect(kept).toBe(events);
+  expect(findCommentPins(updated).map(({ key, number }) => [key, number])).toEqual([['comment-2', 1], ['comment-3', 2]]);
+  expect(findEditMoves(updated).map(({ key, number }) => [key, number])).toEqual([['edit-3', 1]]);
+  expect(updated.slice(0, 2)).toEqual(events.slice(0, 2));
+  expect(reconcileScreenMarks(events, { comments: ['comment-9'], edits: [] })).toBeNull();
 });
 
 it('accepts the page changes of a recorded Flow and tells a replay apart from a still screen', () => {
