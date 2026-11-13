@@ -1,6 +1,11 @@
 import { expect, it, vi } from 'vitest';
 import { createAssetReference, resolveAssetReferences } from '@/lib/snapshot-asset-references';
-import { extractSnapshotAssets, type ExtractSnapshotAssetsOptions, type SnapshotNode } from '@/sdk/snapshot-assets';
+import {
+  extractSnapshotAssets,
+  SnapshotAssetTooLargeError,
+  type ExtractSnapshotAssetsOptions,
+  type SnapshotNode,
+} from '@/sdk/snapshot-assets';
 
 const ORIGIN = 'https://host.example.com';
 const FONT_BYTES = 'font-bytes';
@@ -9,6 +14,7 @@ function createOptions(overrides: Partial<ExtractSnapshotAssetsOptions> = {}): E
   return {
     pageOrigin: ORIGIN,
     loadedFontFamilies: new Set(['pretendard']),
+    loadedResourceUrls: new Set(),
     fetchAsset: vi.fn(async () => new Blob([FONT_BYTES], { type: 'font/woff2' })),
     maxAssetBytes: 1000,
     maxTotalBytes: 2000,
@@ -44,7 +50,7 @@ it('pulls out only the first same-origin source of a font family the page loaded
 
   const cssText = String(style.attributes?._cssText);
   expect(options.fetchAsset).toHaveBeenCalledTimes(1);
-  expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/fonts/a.woff2`);
+  expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/fonts/a.woff2`, 1000);
   expect(await assetFiles[0].text()).toBe(FONT_BYTES);
   expect(resolveAssetReferences(cssText, (index) => `blob:file-${index}`)).toContain('url("blob:file-0") format("woff2")');
   expect(cssText).toContain(`url("${ORIGIN}/fonts/a.woff")`);
@@ -70,32 +76,58 @@ it('refers to same-origin images by position and leaves cross-origin images on t
   expect(options.fetchAsset).toHaveBeenCalledTimes(1);
 });
 
-it('records files it could not keep, without query strings, and keeps their original URLs', async () => {
-  const images = ['failed.png?token=secret', 'huge.png', 'first.png', 'over-budget.png', 'over-count.png'].map((name) =>
-    createImage(`${ORIGIN}/${name}`),
-  );
-  const sizes: Record<string, number> = { 'huge.png': 11, 'first.png': 8, 'over-budget.png': 8, 'over-count.png': 1 };
-  const fetchAsset = vi.fn(async (url: string) => {
+it('pulls out CSS background images the page loaded, from stylesheets and inline styles', async () => {
+  const style = createStyleNode(`.hero { background: url("${ORIGIN}/hero.png"); } .unused { background: url("${ORIGIN}/unused.png"); }`);
+  const banner: SnapshotNode = {
+    type: 2,
+    tagName: 'div',
+    attributes: { style: `background-image: url(${ORIGIN}/inline.png)` },
+    childNodes: [],
+  };
+  const options = createOptions({
+    loadedResourceUrls: new Set([`${ORIGIN}/hero.png`, `${ORIGIN}/inline.png`]),
+    fetchAsset: vi.fn(async () => new Blob(['png'], { type: 'image/png' })),
+  });
+
+  const { assetFiles } = await extractSnapshotAssets(createDocument(style, banner), options);
+
+  expect(assetFiles).toHaveLength(2);
+  expect(options.fetchAsset).not.toHaveBeenCalledWith(`${ORIGIN}/unused.png`, expect.any(Number));
+  expect(style.attributes?._cssText).toContain(`url("${createAssetReference(0)}")`);
+  expect(style.attributes?._cssText).toContain(`url("${ORIGIN}/unused.png")`);
+  expect(banner.attributes?.style).toBe(`background-image: url("${createAssetReference(1)}")`);
+});
+
+it('records files it could not keep without downloading past the budget, and keeps their original URLs', async () => {
+  const names = ['failed.png?token=secret', 'huge.png', 'first.png', 'over-budget.png', 'small.png', 'over-count.png'];
+  const images = names.map((name) => createImage(`${ORIGIN}/${name}`));
+  const sizes: Record<string, number> = { 'huge.png': 11, 'first.png': 8, 'over-budget.png': 8, 'small.png': 1, 'over-count.png': 1 };
+  const fetchAsset = vi.fn(async (url: string, maxBytes: number) => {
     const name = url.slice(ORIGIN.length + 1);
     if (!(name in sizes)) {
       throw new TypeError('Failed to fetch');
+    }
+    if (sizes[name] > maxBytes) {
+      throw new SnapshotAssetTooLargeError();
     }
     return new Blob(['x'.repeat(sizes[name])], { type: 'image/png' });
   });
 
   const { assetFiles, missingAssets } = await extractSnapshotAssets(
     createDocument(...images),
-    createOptions({ fetchAsset, maxAssetBytes: 10, maxTotalBytes: 12, maxAssetCount: 1 }),
+    createOptions({ fetchAsset, maxAssetBytes: 10, maxTotalBytes: 12, maxAssetCount: 2 }),
   );
 
-  expect(assetFiles).toHaveLength(1);
+  expect(assetFiles).toHaveLength(2);
   expect(missingAssets).toEqual([
     { url: `${ORIGIN}/failed.png`, reason: 'fetch_failed' },
     { url: `${ORIGIN}/huge.png`, reason: 'too_large' },
     { url: `${ORIGIN}/over-budget.png`, reason: 'budget_exceeded' },
     { url: `${ORIGIN}/over-count.png`, reason: 'budget_exceeded' },
   ]);
+  expect(fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/over-budget.png`, 4);
+  expect(fetchAsset).not.toHaveBeenCalledWith(`${ORIGIN}/over-count.png`, expect.any(Number));
   expect(images.map((image) => String(image.attributes?.src).startsWith('lattice-asset:'))).toEqual([
-    false, false, true, false, false,
+    false, false, true, false, true, false,
   ]);
 });
