@@ -11,25 +11,13 @@ import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
-import type { CreateFeedbackInput, CreateFeedbackResponse, FeedbackListResponse } from '@/types/feedback';
+import { createFeedbackWithClaimedScreens } from '@/lib/feedback-submission';
+import type { CreateFeedbackResponse, Feedback, FeedbackListResponse } from '@/types/feedback';
 
 const MAX_BODY_BYTES = 65536;
 
 function createPayloadTooLargeResponse() {
   return createApiErrorResponse(413, 'payload_too_large', 'Request body is too large.');
-}
-
-async function createFeedbackOrReleaseScreens(input: CreateFeedbackInput, id: string, hasScreens: boolean) {
-  try {
-    return await getFeedbackRepository().create(input, id);
-  } catch (error) {
-    if (hasScreens) {
-      await getScreenSnapshotRepository()
-        .releaseFromFeedback(input.projectKey, id)
-        .catch((releaseError: unknown) => console.error('Releasing saved screens of unsaved feedback failed.', releaseError));
-    }
-    throw error;
-  }
 }
 
 export async function POST(request: Request) {
@@ -90,7 +78,18 @@ export async function POST(request: Request) {
         return createApiErrorResponse(400, 'screen_snapshot_not_found', 'A saved screen is missing or already submitted.');
       }
     }
-    const feedback = await createFeedbackOrReleaseScreens(feedbackInput, feedbackId, screenSnapshotIds.length > 0);
+    const feedbackRepository = getFeedbackRepository();
+    let feedback: Feedback;
+    if (screenSnapshotIds.length > 0) {
+      feedback = await createFeedbackWithClaimedScreens({
+        feedbackRepository,
+        screenSnapshotRepository: getScreenSnapshotRepository(),
+        input: feedbackInput,
+        id: feedbackId,
+      });
+    } else {
+      feedback = await feedbackRepository.create(feedbackInput, feedbackId);
+    }
     const body: CreateFeedbackResponse = { feedback };
     return NextResponse.json(body, { status: 201 });
   } catch (error) {
