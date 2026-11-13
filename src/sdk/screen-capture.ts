@@ -230,6 +230,8 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
     loadedFontFamilies: findLoadedFontFamilies(),
     // Images the page showed while recording count too, not only those still shown at the end.
     usedCssImageUrls: new Set([...recording.usedCssImageUrls, ...findUsedCssImageUrls(excludedSelector)]),
+    // As for a saved screen, the file the browser chose from srcset or <picture> is the one kept.
+    findLiveImage: (serialized) => (serialized.id === undefined ? null : recording.liveImageSources.get(serialized.id) ?? null),
     fetchAsset: fetchSameOriginAsset,
     maxDurationMs: ASSET_COLLECTION_DURATION_MS,
     matchesMedia: (query) => window.matchMedia(query).matches,

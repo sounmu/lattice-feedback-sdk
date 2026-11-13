@@ -27,7 +27,7 @@ const MODE_LABELS: Record<CaptureMode, string> = {
 const MODE_STATUS: Record<CaptureMode, string> = {
   comment: '페이지에서 코멘트할 요소를 클릭하세요.',
   edit: '페이지에서 요소를 끌어 원하는 위치를 보여주세요.',
-  flow: '흐름 기록 중: 클릭, 화면 이동, 입력 발생 여부만 기록합니다. 입력값은 수집하지 않습니다.',
+  flow: '흐름 기록 중: 클릭·화면 이동·입력 발생과 함께 화면 내용(HTML·CSS)과 그 변화를 기록해 관리자가 재생할 수 있게 합니다. 입력값은 가려지고, 기록을 마치면 화면 재생이 자동으로 첨부됩니다.',
 };
 
 const FLOW_EVENT_LABELS: Record<FlowEventType, string> = {

@@ -90,7 +90,7 @@ function getStatusMessage(state: CaptureState, mode: CaptureMode): string {
       return `Edit: 위치를 바꿀 요소를 클릭하세요 (${state.attachments.edits.length}/${MAX_EDITS})`;
     case 'flow':
       if (!state.enabled) return 'Flow 일시중지 · 허용된 화면에서 기록을 이어갑니다.';
-      return `Flow 기록 중 · 이벤트 ${state.flowEventCount}/${MAX_FLOW_EVENTS}`;
+      return `Flow 기록 중 · 화면 내용과 변화 포함 · 이벤트 ${state.flowEventCount}/${MAX_FLOW_EVENTS}`;
   }
 }
 

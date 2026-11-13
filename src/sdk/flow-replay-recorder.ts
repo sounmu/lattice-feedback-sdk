@@ -4,6 +4,7 @@ import { record } from '@rrweb/record';
 
 import { MAX_PAGE_TITLE_LENGTH, MAX_REPLAY_DURATION_MS, MAX_REPLAY_EVENTS, truncateText } from '@/lib/feedback-limits';
 import { getPageUrl } from '@/sdk/page-context';
+import { findLiveImageSource } from '@/sdk/live-image-source';
 import { BLOCKED_SELECTOR, findUsedCssImageUrls, MASKED_SELECTOR } from '@/sdk/screen-capture';
 import type { ScreenSnapshotEvent, ScreenSnapshotPage } from '@/types/screen-snapshot';
 
@@ -21,6 +22,8 @@ export interface ReplayRecording {
   truncated: boolean;
   /** Same-origin CSS image URLs the page showed at some point while recording, not only at the end. */
   usedCssImageUrls: ReadonlySet<string>;
+  /** The file each recorded <img> showed (srcset or <picture> choice), by rrweb node id. */
+  liveImageSources: ReadonlyMap<number, string>;
 }
 
 export interface ReplayRecorder {
@@ -52,6 +55,19 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
   }
 
   sampleCssImageUsage(startedAtMs);
+  const liveImageSources = new Map<number, string>();
+
+  // The first file seen for an image is kept, so the replay starts with what the reporter saw.
+  function sampleLiveImages(): void {
+    for (const image of document.querySelectorAll('img')) {
+      const id = record.mirror.getId(image);
+      const source = findLiveImageSource(image, excludedSelector);
+      if (id >= 0 && source && !liveImageSources.has(id)) {
+        liveImageSources.set(id, source);
+      }
+    }
+  }
+
   let stopRecording: (() => void) | undefined = record({
     emit: (event) => {
       const recorded = event as ScreenSnapshotEvent;
@@ -75,8 +91,12 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
     // Pointer moves are thinned out; clicks, scrolls and DOM changes are kept.
     sampling: { mousemove: 100, scroll: 150, input: 'last' },
   });
+  sampleLiveImages();
 
   function end(): void {
+    if (stopRecording) {
+      sampleLiveImages();
+    }
     stopRecording?.();
     stopRecording = undefined;
   }
@@ -91,6 +111,7 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
       events: [...events],
       truncated,
       usedCssImageUrls: new Set(usedCssImageUrls),
+      liveImageSources: new Map(liveImageSources),
     };
   }
 
