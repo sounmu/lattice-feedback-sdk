@@ -6,6 +6,7 @@ const STATE: CaptureState = {
   enabled: true, activeMode: null, selection: null,
   attachments: { comments: [], edits: [], flow: null },
   commentKeys: [],
+  editKeys: [],
   flowEventCount: 0, errorMessage: null,
 };
 
@@ -32,6 +33,11 @@ describe('capture protocol', () => {
     { type: 'attachment:remove', payload: { kind: 'edits', index: 0.5 } },
   ])('rejects invalid capture command payload: %j', ({ type, payload }) => {
     expect(isCaptureCommand({ ...createCaptureCommand({ type: 'draft:reset', payload: {} }), type, payload })).toBe(false);
+  });
+
+  it('rejects mark keys that do not line up with the attachments', () => {
+    expect(isCaptureUpdate(createCaptureUpdate({ ...STATE, commentKeys: ['comment-1'] }))).toBe(false);
+    expect(isCaptureUpdate(createCaptureUpdate({ ...STATE, editKeys: [''] }))).toBe(false);
   });
 
   it('accepts a complete empty draft and bounded restored Flow state', () => {

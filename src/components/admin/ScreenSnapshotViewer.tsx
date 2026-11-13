@@ -1,16 +1,24 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
 
-import { CommentPinList, CommentPinOverlay, type PinBox } from '@/components/admin/CommentPinOverlay';
-import { findCommentPins } from '@/lib/screen-snapshot';
+import {
+  CommentPinList,
+  CommentPinOverlay,
+  EditMoveList,
+  EditMoveOverlay,
+  type MoveBox,
+  type PinBox,
+} from '@/components/admin/ScreenMarkOverlay';
+import { findCommentPins, findEditMoves } from '@/lib/screen-snapshot';
 import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
 import type {
   MissingSnapshotAssetReason,
   ScreenCommentPin,
+  ScreenEditMove,
   ScreenSnapshot,
   ScreenSnapshotDetailResponse,
 } from '@/types/screen-snapshot';
@@ -135,6 +143,191 @@ function measurePin(replayer: Replayer, pin: ScreenCommentPin): PinBox {
   };
 }
 
+function findMarkedElement(replayer: Replayer, nodeId: number | null): HTMLElement | null {
+  const node = nodeId === null ? null : replayer.getMirror().getNode(nodeId);
+  // The node lives in the replay iframe's realm, so instanceof HTMLElement would be false.
+  return node && 'style' in node && 'getBoundingClientRect' in node ? (node as HTMLElement) : null;
+}
+
+function getMoveDelta(move: ScreenEditMove): { x: number; y: number } {
+  return { x: move.proposedRect.x - move.originalRect.x, y: move.proposedRect.y - move.originalRect.y };
+}
+
+const MOVE_CLONE_ATTRIBUTE = 'data-lattice-move-clone';
+// Styling a very large subtree element by element would stall the viewer; the rest keeps its own rules.
+const MAX_STYLED_CLONE_ELEMENTS = 500;
+
+// The clone leaves the element's ancestors, so rules such as ".toolbar button" and inherited values no
+// longer reach it. Each element's resolved styles are written onto its copy before it is moved.
+function copyResolvedStyles(source: Element, target: Element, view: Window, budget: { remaining: number }): void {
+  const style = (target as Partial<ElementCSSInlineStyle>).style;
+  if (budget.remaining <= 0 || !style) {
+    return;
+  }
+  budget.remaining -= 1;
+  const computed = view.getComputedStyle(source);
+  for (const property of Array.from(computed)) {
+    style.setProperty(property, computed.getPropertyValue(property));
+  }
+  Array.from(source.children).forEach((child, index) => {
+    const copy = target.children[index];
+    if (copy) {
+      copyResolvedStyles(child, copy, view, budget);
+    }
+  });
+}
+
+// The runtime scroll position of a container is not part of a node copy, so it is carried over.
+function copyScrollOffsets(source: Element, target: Element, budget: { remaining: number }): void {
+  if (budget.remaining <= 0) {
+    return;
+  }
+  budget.remaining -= 1;
+  target.scrollTop = source.scrollTop;
+  target.scrollLeft = source.scrollLeft;
+  Array.from(source.children).forEach((child, index) => {
+    const copy = target.children[index];
+    if (copy) {
+      copyScrollOffsets(child, copy, budget);
+    }
+  });
+}
+
+// The scale, rotation and skew the element is drawn with, from its own transform and its ancestors'.
+// The translation is left out: the clone is placed by measuring where it lands.
+function getVisualTransform(element: Element, view: Window & typeof globalThis): DOMMatrix {
+  const chain: Element[] = [];
+  for (let current: Element | null = element; current; current = current.parentElement) {
+    chain.unshift(current);
+  }
+  let matrix = new view.DOMMatrix();
+  for (const current of chain) {
+    const { transform, transformOrigin } = view.getComputedStyle(current);
+    if (transform === 'none') {
+      continue;
+    }
+    const [originX = 0, originY = 0] = transformOrigin.split(' ').map((value) => Number.parseFloat(value));
+    matrix = matrix.translate(originX, originY).multiply(new view.DOMMatrix(transform)).translate(-originX, -originY);
+  }
+  matrix.e = 0;
+  matrix.f = 0;
+  return matrix;
+}
+
+// The copy of `node` inside `copyRoot`, found by walking the same child positions as from `sourceRoot`.
+function findCopiedNode(sourceRoot: Element, copyRoot: Element, node: Element): Element | null {
+  const path: number[] = [];
+  for (let current = node; current !== sourceRoot; current = current.parentElement as Element) {
+    if (!current.parentElement) {
+      return null;
+    }
+    path.unshift(Array.prototype.indexOf.call(current.parentElement.children, current));
+  }
+  let copy: Element | undefined = copyRoot;
+  for (const index of path) {
+    copy = copy?.children[index];
+  }
+  return copy ?? null;
+}
+
+// The clone sits in document coordinates; it is placed again whenever the page or a container scrolls,
+// because the original (kept in place, only hidden) moves with its scroll container.
+function positionProposedClones(replayer: Replayer, moves: ScreenEditMove[]): void {
+  const frameDocument = replayer.iframe.contentDocument;
+  const view = replayer.iframe.contentWindow;
+  if (!frameDocument || !view) {
+    return;
+  }
+  for (const move of moves) {
+    const element = findMarkedElement(replayer, move.nodeId);
+    const clone = frameDocument.querySelector<HTMLElement>(`[${MOVE_CLONE_ATTRIBUTE}="${move.key}"]`);
+    if (!element || !clone) {
+      continue;
+    }
+    const bounds = element.getBoundingClientRect();
+    const delta = getMoveDelta(move);
+    const targetX = bounds.left + delta.x;
+    const targetY = bounds.top + delta.y;
+    clone.style.setProperty('left', `${targetX + view.scrollX}px`);
+    clone.style.setProperty('top', `${targetY + view.scrollY}px`);
+    // A transformed clone is drawn away from its left/top corner; one correction lines up what is seen.
+    const drawn = clone.getBoundingClientRect();
+    clone.style.setProperty('left', `${targetX + view.scrollX + targetX - drawn.left}px`);
+    clone.style.setProperty('top', `${targetY + view.scrollY + targetY - drawn.top}px`);
+  }
+}
+
+// The original element keeps its layout box (it is only hidden while the proposal is shown), so its
+// bounds are the original position either way.
+function measureMove(replayer: Replayer, move: ScreenEditMove): MoveBox {
+  const delta = getMoveDelta(move);
+  const element = findMarkedElement(replayer, move.nodeId);
+  const bounds = element?.getBoundingClientRect();
+  let original = { ...move.originalRect };
+  if (bounds && (bounds.width > 0 || bounds.height > 0)) {
+    original = { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height };
+  } else {
+    const view = replayer.iframe.contentWindow;
+    original = { ...original, x: original.x - (view?.scrollX ?? 0), y: original.y - (view?.scrollY ?? 0) };
+  }
+  return { move, original, proposed: { ...original, x: original.x + delta.x, y: original.y + delta.y } };
+}
+
+// Only the rebuilt page in the sandboxed iframe changes; the host page is never touched. The proposal
+// is drawn as a copy placed in document coordinates, so an ancestor's overflow cannot clip it.
+function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isShown: boolean): void {
+  const frameDocument = replayer.iframe.contentDocument;
+  const view = replayer.iframe.contentWindow;
+  frameDocument?.querySelectorAll(`[${MOVE_CLONE_ATTRIBUTE}]`).forEach((clone) => clone.remove());
+  const elements = moves.map((move) => findMarkedElement(replayer, move.nodeId));
+  elements.forEach((element) => element?.style.removeProperty('visibility'));
+  if (!isShown || !frameDocument || !view) {
+    return;
+  }
+  // Every clone is built before any original is hidden: an edited element inside another edited one
+  // would otherwise inherit the temporary hiding into its copied styles.
+  const clones = moves.map((move, index) => {
+    const element = elements[index];
+    if (!element) {
+      return null;
+    }
+    const bounds = element.getBoundingClientRect();
+    const clone = element.cloneNode(true) as HTMLElement;
+    clone.setAttribute(MOVE_CLONE_ATTRIBUTE, move.key);
+    copyResolvedStyles(element, clone, view, { remaining: MAX_STYLED_CLONE_ELEMENTS });
+    // The untransformed layout size is kept and the visible transform reapplied, so a scaled or rotated
+    // element looks the same at the proposed position.
+    Object.assign(clone.style, {
+      position: 'absolute',
+      width: `${element.offsetWidth || bounds.width}px`,
+      height: `${element.offsetHeight || bounds.height}px`,
+      margin: '0',
+      boxSizing: 'border-box',
+      transform: getVisualTransform(element, view as Window & typeof globalThis).toString(),
+      transformOrigin: '0 0',
+      visibility: 'visible',
+      zIndex: '2147483647',
+    });
+    frameDocument.documentElement.appendChild(clone);
+    copyScrollOffsets(element, clone, { remaining: MAX_STYLED_CLONE_ELEMENTS });
+    return clone;
+  });
+  // An edited element inside another edited one is shown only by its own clone; its copy inside the
+  // outer clone keeps its space but is hidden, so it does not appear twice.
+  elements.forEach((outer, outerIndex) => {
+    const outerClone = clones[outerIndex];
+    elements.forEach((inner, innerIndex) => {
+      if (!outer || !outerClone || !inner || innerIndex === outerIndex || !outer.contains(inner)) {
+        return;
+      }
+      const copy = findCopiedNode(outer, outerClone, inner) as HTMLElement | null;
+      copy?.style.setProperty('visibility', 'hidden');
+    });
+  });
+  elements.forEach((element) => element?.style.setProperty('visibility', 'hidden'));
+  positionProposedClones(replayer, moves);
+}
+
 function AdminTokenForm() {
   const [value, setValue] = useState('');
 
@@ -194,8 +387,35 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
   const { viewportWidth, viewportHeight } = snapshot.page;
   const pins = useMemo(() => findCommentPins(snapshot.events), [snapshot]);
+  const moves = useMemo(() => findEditMoves(snapshot.events), [snapshot]);
   const [pinBoxes, setPinBoxes] = useState<PinBox[]>([]);
+  const [moveBoxes, setMoveBoxes] = useState<MoveBox[]>([]);
   const [selectedPin, setSelectedPin] = useState<number | null>(null);
+  const [showsProposed, setShowsProposed] = useState(false);
+  const replayerRef = useRef<Replayer | null>(null);
+  const showsProposedRef = useRef(false);
+
+  const measureMarks = useCallback(() => {
+    const replayer = replayerRef.current;
+    if (!replayer) {
+      return;
+    }
+    setPinBoxes(pins.map((pin) => measurePin(replayer, pin)));
+    setMoveBoxes(moves.map((move) => measureMove(replayer, move)));
+    if (showsProposedRef.current) {
+      positionProposedClones(replayer, moves);
+    }
+  }, [pins, moves]);
+
+  function toggleProposed() {
+    const next = !showsProposedRef.current;
+    showsProposedRef.current = next;
+    if (replayerRef.current) {
+      showProposedPositions(replayerRef.current, moves, next);
+    }
+    setShowsProposed(next);
+    measureMarks();
+  }
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -218,16 +438,15 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
     let frameDocument: Document | null = null;
 
     function measurePins() {
-      if (replayer && !isCancelled) {
-        const current = replayer;
-        setPinBoxes(pins.map((pin) => measurePin(current, pin)));
+      if (!isCancelled) {
+        measureMarks();
       }
     }
 
-    // Pins follow the rebuilt page as it (or a scroll container inside it) is scrolled and once its
+    // Marks follow the rebuilt page as it (or a scroll container inside it) is scrolled and once its
     // fonts have changed the layout.
     // A rebuild reopens the same document object, which drops its listeners, so they are added again.
-    function followPins() {
+    function followMarks() {
       frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
       frameDocument = replayer?.iframe.contentDocument ?? null;
       frameDocument?.addEventListener('scroll', measurePins, { capture: true, passive: true });
@@ -264,13 +483,16 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
         showWarning: false,
         triggerFocus: false,
       });
-      if (pins.length > 0) {
+      const hasMarks = pins.length > 0 || moves.length > 0;
+      if (hasMarks) {
         // Rebuilding the page replaces its document, so the scroll watch is attached after each rebuild.
-        replayer.on('fullsnapshot-rebuilded', followPins);
+        replayer.on('fullsnapshot-rebuilded', followMarks);
       }
       replayer.pause(0);
-      if (pins.length > 0) {
-        followPins();
+      replayerRef.current = replayer;
+      showsProposedRef.current = false;
+      if (hasMarks) {
+        followMarks();
       }
     }
 
@@ -281,10 +503,11 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       stage.removeEventListener('wheel', handleWheel);
       frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
       replayer?.destroy();
+      replayerRef.current = null;
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [snapshot, projectKey, token, pins]);
+  }, [snapshot, projectKey, token, pins, moves, measureMarks]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -326,6 +549,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
               className="[&_.replayer-mouse]:hidden [&_.replayer-mouse-tail]:hidden"
               style={{ width: viewportWidth, height: viewportHeight }}
             />
+            <EditMoveOverlay boxes={moveBoxes} scale={scale} showsProposed={showsProposed} />
             <CommentPinOverlay
               boxes={pinBoxes}
               width={viewportWidth}
@@ -334,6 +558,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
           </div>
         </div>
       </div>
+      {moves.length > 0 && <EditMoveList moves={moves} showsProposed={showsProposed} onToggle={toggleProposed} />}
       {pins.length > 0 && <CommentPinList pins={pins} selectedNumber={selectedPin} onSelect={setSelectedPin} />}
     </div>
   );

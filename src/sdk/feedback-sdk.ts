@@ -259,7 +259,10 @@ export class FeedbackSdk {
     }
     this.activeScreenCaptures += 1;
     try {
-      const capture = await captureScreen(HOST_ELEMENT_TAG_NAME, this.captureController?.getCommentPinSources() ?? []);
+      const capture = await captureScreen(HOST_ELEMENT_TAG_NAME, {
+        comments: this.captureController?.getCommentPinSources() ?? [],
+        edits: this.captureController?.getEditMoveSources() ?? [],
+      });
       this.postToWidget(createHostToWidgetMessage('screen:captured', { ...capture, requestId }));
     } catch (error) {
       console.warn(`${LOG_PREFIX} Saving the screen failed.`, error);

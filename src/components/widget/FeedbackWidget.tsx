@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 import { useHostBridge } from '@/hooks/useHostBridge';
 import { useScreenSnapshots } from '@/hooks/useScreenSnapshots';
@@ -24,15 +24,27 @@ const FEEDBACK_TYPE_OPTIONS: { value: FeedbackType; label: string }[] = [
 export function FeedbackWidget() {
   const {
     config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, notifyClose, notifySubmitted,
-    captureState, sendCaptureCommand, subscribeToScreenCapture, requestScreenCapture,
+    captureState, sendCaptureCommand, subscribeToScreenCapture, subscribeToCaptureUpdate, requestScreenCapture,
   } = useHostBridge();
   const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture });
-  const { syncCommentKeys } = screens;
+  const { syncMarkKeys, captureForMarks } = screens;
   const commentKeys = captureState?.commentKeys;
+  const editKeys = captureState?.editKeys;
+  const editCount = useRef(0);
 
   useEffect(() => {
-    syncCommentKeys(commentKeys ?? []);
-  }, [commentKeys, syncCommentKeys]);
+    syncMarkKeys({ comments: commentKeys ?? [], edits: editKeys ?? [] });
+  }, [commentKeys, editKeys, syncMarkKeys]);
+
+  // A finished drag arrives as a new edit in the capture state; the screen is saved right away so the
+  // admin can compare the element's original and proposed position on it.
+  useEffect(() => subscribeToCaptureUpdate((state) => {
+    const count = state.attachments.edits.length;
+    if (count > editCount.current) {
+      captureForMarks();
+    }
+    editCount.current = count;
+  }), [subscribeToCaptureUpdate, captureForMarks]);
   const { submit, reset, status, errorMessage } = useSubmitFeedback();
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
@@ -107,7 +119,7 @@ export function FeedbackWidget() {
         {isInitialized && (
           <ScreenSnapshotControls
             snapshots={screens.snapshots}
-            commentScreenIds={screens.commentScreenIds}
+            markedScreenIds={screens.markedScreenIds}
             status={screens.status}
             errorMessage={screens.errorMessage}
             canCapture={screens.canCapture}
@@ -129,7 +141,7 @@ export function FeedbackWidget() {
             onAddComment={(comment) => {
               sendCaptureCommand(createCaptureCommand({ type: 'comment:add', payload: { comment } }));
               // Saved right away so the admin sees the comment pinned on the screen it was written on.
-              screens.captureForComment();
+              screens.captureForMarks();
             }}
             onRemove={(kind, index) => sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }))}
           />

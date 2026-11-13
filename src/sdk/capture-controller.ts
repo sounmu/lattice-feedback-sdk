@@ -1,6 +1,6 @@
 import { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, truncateText } from '@/lib/feedback-limits';
 import type { CapturePolicy } from '@/lib/capture-policy';
-import type { CommentPinSource } from '@/sdk/comment-pins';
+import type { CommentPinSource, EditMoveSource } from '@/sdk/screen-marks';
 import { findCaptureTarget, isCapturePageAllowed, type CaptureTarget } from '@/sdk/capture-policy';
 import { createCaptureStatus } from '@/sdk/capture-status';
 import { startElementDrag } from '@/sdk/element-drag';
@@ -40,10 +40,13 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let selectionPoint: SelectionPoint = { x: 0.5, y: 0.5 };
   // The live element of each comment, in the same order as attachments.comments, so saved screens can pin them.
   let commentElements: HTMLElement[] = [];
-  // A key per comment that never changes, unlike its number, so saved screens can tell comments apart.
+  // A key per comment and edit that never changes, unlike its number, so saved screens can tell them apart.
   let commentKeys: string[] = [];
+  let editKeys: string[] = [];
+  let nextMarkKey = 1;
+  // Likewise for the dragged element of each edit.
+  let editElements: HTMLElement[] = [];
   let commentPoints: SelectionPoint[] = [];
-  let nextCommentKey = 1;
   let isDragging = false;
   let transientHandle: { cancel(): void } | null = null;
   // Bumped whenever a transient run ends, so callbacks fired by our own cancel() (drag calls onCancel synchronously) are ignored.
@@ -61,6 +64,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
       enabled: isCapturePageAllowed(policy), activeMode, selection, flowEventCount,
       attachments: { comments: [...attachments.comments], edits: [...attachments.edits], flow: attachments.flow },
       commentKeys: [...commentKeys],
+      editKeys: [...editKeys],
       errorMessage: controllerErrorMessage ?? flowErrorMessage,
     };
   }
@@ -119,7 +123,12 @@ export function createCaptureController(options: CaptureControllerOptions) {
     emit();
     const handle = startElementDrag(target, {
       onComplete: (edit) => {
-        if (token === transientToken && attachments.edits.length < MAX_EDITS) attachments.edits.push(edit);
+        if (token === transientToken && attachments.edits.length < MAX_EDITS) {
+          attachments.edits.push(edit);
+          editElements.push(target.element);
+          editKeys.push(`edit-${nextMarkKey}`);
+          nextMarkKey += 1;
+        }
         finishTransientRun(token);
       },
       onCancel: () => finishTransientRun(token),
@@ -165,9 +174,9 @@ export function createCaptureController(options: CaptureControllerOptions) {
       if (attachments.comments.length < MAX_COMMENTS) {
         attachments.comments.push({ target: selection, comment: trimmedComment });
         commentElements.push(selectionElement);
-        commentKeys.push(`comment-${nextCommentKey}`);
+        commentKeys.push(`comment-${nextMarkKey}`);
         commentPoints.push(selectionPoint);
-        nextCommentKey += 1;
+        nextMarkKey += 1;
       }
       controllerErrorMessage = null;
       endTransientMode();
@@ -182,6 +191,10 @@ export function createCaptureController(options: CaptureControllerOptions) {
       commentElements.splice(index, 1);
       commentKeys.splice(index, 1);
       commentPoints.splice(index, 1);
+    }
+    if (kind === 'edits') {
+      editElements.splice(index, 1);
+      editKeys.splice(index, 1);
     }
     emit();
   }
@@ -203,7 +216,9 @@ export function createCaptureController(options: CaptureControllerOptions) {
     if (activeMode === 'flow') flowRecorder?.cancel();
     attachments = createEmptyAttachments();
     commentElements = [];
+    editElements = [];
     commentKeys = [];
+    editKeys = [];
     commentPoints = [];
     controllerErrorMessage = null;
     emit();
@@ -291,8 +306,19 @@ export function createCaptureController(options: CaptureControllerOptions) {
     });
   }
 
+  function getEditMoveSources(): EditMoveSource[] {
+    return attachments.edits.flatMap(({ target, originalRect, proposedRect }, index) => {
+      if (target.pagePath !== undefined && target.pagePath !== window.location.pathname) {
+        return [];
+      }
+      const label = target.feedbackId ?? target.tagName.toLowerCase();
+      return [{ number: index + 1, key: editKeys[index], label, originalRect, proposedRect, element: editElements[index] }];
+    });
+  }
+
   return {
     getCommentPinSources,
+    getEditMoveSources,
     handleCommand: unlessDestroyed(handleCommand),
     sync: emit,
     setPanelVisible: unlessDestroyed((visible: boolean) => {

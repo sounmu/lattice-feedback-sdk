@@ -13,6 +13,7 @@ import {
 } from '@/lib/feedback-limits';
 import {
   createCommentPinEvent,
+  createEditMoveEvent,
   RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
   RRWEB_META_EVENT_TYPE,
   SCREEN_SNAPSHOT_FORMAT,
@@ -22,8 +23,15 @@ import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError 
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
-import { createCommentPins, type CommentPinSource } from '@/sdk/comment-pins';
+import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
+
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
+
+/** Comments and proposed moves to mark on the saved screen. */
+export interface ScreenMarkSources {
+  comments: readonly CommentPinSource[];
+  edits: readonly EditMoveSource[];
+}
 
 const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
 const MASKED_SELECTOR = '[data-lattice-mask]';
@@ -96,7 +104,10 @@ function findUsedCssImageUrls(excludedSelector: string): Set<string> {
   return urls;
 }
 
-export async function captureScreen(sdkSelector: string, commentPins: readonly CommentPinSource[] = []): Promise<ScreenCapture> {
+export async function captureScreen(
+  sdkSelector: string,
+  marks: ScreenMarkSources = { comments: [], edits: [] },
+): Promise<ScreenCapture> {
   const capturedAt = Date.now();
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
   const mirror = createMirror();
@@ -129,7 +140,8 @@ export async function captureScreen(sdkSelector: string, commentPins: readonly C
     scrollX: window.scrollX,
     scrollY: window.scrollY,
   };
-  const pins = createCommentPins(commentPins, {
+  const moves = createEditMoves(marks.edits, (element) => mirror.getId(element));
+  const pins = createCommentPins(marks.comments, {
     findNodeId: (element) => mirror.getId(element),
     scrollX: page.scrollX,
     scrollY: page.scrollY,
@@ -175,6 +187,7 @@ export async function captureScreen(sdkSelector: string, commentPins: readonly C
         data: { node, initialOffset: { left: page.scrollX, top: page.scrollY } },
       },
       ...pins.map((pin) => createCommentPinEvent(pin, capturedAt)),
+      ...moves.map((move) => createEditMoveEvent(move, capturedAt)),
     ],
     missingAssets,
   };
