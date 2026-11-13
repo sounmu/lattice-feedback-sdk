@@ -40,9 +40,14 @@ export function createCommentPins(sources: readonly CommentPinSource[], position
 }
 
 // The rects were recorded in document coordinates when the drag ended, so only the node id is added here.
+// Like comments, an edited element removed or hidden since (a closed modal kept with display: none) is left
+// out, so the screen that showed it is not replaced by one where it cannot be seen.
 export function createEditMoves(sources: readonly EditMoveSource[], findNodeId: (element: Element) => number): ScreenEditMove[] {
   return sources
-    .filter(({ element }) => element.isConnected)
+    .filter(({ element }) => {
+      const bounds = element.getBoundingClientRect();
+      return element.isConnected && bounds.width > 0 && bounds.height > 0;
+    })
     .map(({ element, number, key, label, originalRect, proposedRect }) => {
       const nodeId = findNodeId(element);
       return { number, key, nodeId: nodeId >= 0 ? nodeId : null, originalRect, proposedRect, label: truncateText(label, MAX_LABEL_LENGTH) };
