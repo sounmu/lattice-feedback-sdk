@@ -1,4 +1,4 @@
-// The same exclusions as a saved screen apply to every node a Flow recording adds later:
+// The same exclusions as a saved screen apply to everything a Flow recording adds or changes later:
 // no script content or handlers, and no hidden input or token meta values (AGENTS.md section 5).
 import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_INCREMENTAL_EVENT_TYPE } from '@/lib/screen-snapshot';
 import type { SnapshotNode } from '@/sdk/snapshot-assets';
@@ -7,49 +7,71 @@ import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
 // rrweb IncrementalSource.Mutation.
-const MUTATION_SOURCE = 0;
+export const MUTATION_SOURCE = 0;
 
-interface MutationData {
+export interface AttributeChange {
+  id: number;
+  attributes: Record<string, unknown>;
+}
+
+export interface MutationData {
   source: number;
   adds?: { node: SnapshotNode }[];
-  attributes?: { id: number; attributes: Record<string, unknown> }[];
+  attributes?: AttributeChange[];
 }
 
-function collectHiddenInputIds(node: SnapshotNode, ids: Set<number>): void {
-  if (node.tagName === 'input' && String(node.attributes?.type ?? '').toLowerCase() === 'hidden' && node.id !== undefined) {
-    ids.add(node.id);
+/** Tag and current attributes of each recorded element, by rrweb node id. */
+export type RecordedElements = Map<number, Required<Pick<SnapshotNode, 'tagName' | 'attributes'>>>;
+
+export function isMutationEvent(event: ScreenSnapshotEvent): boolean {
+  return event.type === RRWEB_INCREMENTAL_EVENT_TYPE && (event.data as MutationData).source === MUTATION_SOURCE;
+}
+
+function trackElements(node: SnapshotNode, elements: RecordedElements): void {
+  if (node.id !== undefined && node.tagName) {
+    elements.set(node.id, { tagName: node.tagName, attributes: { ...node.attributes } });
   }
-  node.childNodes?.forEach((child) => collectHiddenInputIds(child, ids));
+  node.childNodes?.forEach((child) => trackElements(child, elements));
 }
 
-function sanitizeNode(node: SnapshotNode, hiddenInputIds: Set<number>): void {
-  collectHiddenInputIds(node, hiddenInputIds);
+function sanitizeNode(node: SnapshotNode, elements: RecordedElements): void {
   removeInlineScripts(node);
   removeHiddenValues(node);
+  trackElements(node, elements);
 }
 
-/** Cleans the recorded events in place, in order, so later value changes of a hidden input are dropped too. */
-export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[]): void {
-  const hiddenInputIds = new Set<number>();
+// The change is checked as if it were the element itself with its new attributes, so a token meta whose
+// content rotates, a later javascript: URL or srcdoc are removed like in the first snapshot.
+function sanitizeAttributeChange(change: AttributeChange, elements: RecordedElements): void {
+  const element = elements.get(change.id);
+  const merged = { ...element?.attributes, ...change.attributes };
+  const probe: SnapshotNode = { tagName: element?.tagName, attributes: merged };
+  removeHiddenValues(probe);
+  for (const name of Object.keys(change.attributes)) {
+    if (!(name in merged)) {
+      delete change.attributes[name];
+    }
+  }
+  removeInlineScripts({ attributes: change.attributes });
+  if (element) {
+    element.attributes = { ...element.attributes, ...change.attributes };
+  }
+}
+
+/** Cleans the recorded events in place, in order, and returns what is known about each recorded element. */
+export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[]): RecordedElements {
+  const elements: RecordedElements = new Map();
   for (const event of events) {
     if (event.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
-      sanitizeNode((event.data as { node: SnapshotNode }).node, hiddenInputIds);
+      sanitizeNode((event.data as { node: SnapshotNode }).node, elements);
+      continue;
+    }
+    if (!isMutationEvent(event)) {
       continue;
     }
     const data = event.data as MutationData;
-    if (event.type !== RRWEB_INCREMENTAL_EVENT_TYPE || data.source !== MUTATION_SOURCE) {
-      continue;
-    }
-    data.adds?.forEach((add) => sanitizeNode(add.node, hiddenInputIds));
-    for (const change of data.attributes ?? []) {
-      if (hiddenInputIds.has(change.id)) {
-        delete change.attributes.value;
-      }
-      for (const name of Object.keys(change.attributes)) {
-        if (/^on/i.test(name)) {
-          delete change.attributes[name];
-        }
-      }
-    }
+    data.adds?.forEach((add) => sanitizeNode(add.node, elements));
+    data.attributes?.forEach((change) => sanitizeAttributeChange(change, elements));
   }
+  return elements;
 }

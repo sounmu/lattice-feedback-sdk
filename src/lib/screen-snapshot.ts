@@ -29,6 +29,8 @@ export const RRWEB_META_EVENT_TYPE = 4;
 export const RRWEB_CUSTOM_EVENT_TYPE = 5;
 export const COMMENT_PIN_EVENT_TAG = 'lattice-comment-pin';
 export const EDIT_MOVE_EVENT_TAG = 'lattice-edit-move';
+/** Marks a Flow replay whose later events were dropped by the count, duration or page limits. */
+export const REPLAY_TRUNCATED_EVENT_TAG = 'lattice-replay-truncated';
 export const MAX_SCREEN_MARK_EVENTS = MAX_COMMENTS + MAX_EDITS;
 export const MAX_LABEL_LENGTH = 200;
 const MAX_MARK_KEY_LENGTH = 40;
@@ -180,6 +182,19 @@ export function findCommentPins(events: readonly ScreenSnapshotEvent[]): ScreenC
 }
 
 /** True for a recorded Flow, which the viewer plays instead of showing a still screen. */
+function isReplayTruncatedEvent(value: unknown): boolean {
+  return isRecord(findMarkPayload(value, REPLAY_TRUNCATED_EVENT_TAG));
+}
+
+export function createReplayTruncatedEvent(timestamp: number): ScreenSnapshotEvent {
+  return { type: RRWEB_CUSTOM_EVENT_TYPE, timestamp, data: { tag: REPLAY_TRUNCATED_EVENT_TAG, payload: {} } };
+}
+
+/** Whether a saved replay is missing its later part. */
+export function isReplayTruncated(events: readonly ScreenSnapshotEvent[]): boolean {
+  return events.some(isReplayTruncatedEvent);
+}
+
 export function hasReplayEvents(events: readonly ScreenSnapshotEvent[]): boolean {
   return events.some((event) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE);
 }
@@ -211,13 +226,14 @@ export function isCapturedScreen(value: unknown): value is CapturedScreen {
   if (![page.viewportWidth, page.viewportHeight, page.scrollX, page.scrollY].every(isFiniteNumber)) {
     return false;
   }
-  if (!Array.isArray(events) || events.length < 2 || events.length > 2 + MAX_SCREEN_MARK_EVENTS + MAX_REPLAY_EVENTS) {
+  if (!Array.isArray(events) || events.length < 2 || events.length > 2 + MAX_SCREEN_MARK_EVENTS + MAX_REPLAY_EVENTS + 1) {
     return false;
   }
   if (!isSnapshotEvent(events[0], RRWEB_META_EVENT_TYPE) || !isSnapshotEvent(events[1], RRWEB_FULL_SNAPSHOT_EVENT_TYPE)) {
     return false;
   }
-  if (!events.slice(2).every((event) => isCommentPinEvent(event) || isEditMoveEvent(event) || isSnapshotEvent(event, RRWEB_INCREMENTAL_EVENT_TYPE))) {
+  if (!events.slice(2).every((event) => isCommentPinEvent(event) || isEditMoveEvent(event) || isReplayTruncatedEvent(event) ||
+    isSnapshotEvent(event, RRWEB_INCREMENTAL_EVENT_TYPE))) {
     return false;
   }
   return (
