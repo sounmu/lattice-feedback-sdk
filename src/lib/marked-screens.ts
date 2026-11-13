@@ -1,24 +1,36 @@
 import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
-interface CommentScreens {
+export interface MarkedScreens {
   snapshots: ScreenSnapshotSummary[];
-  markedScreenIds: ReadonlySet<string>;
+  /** Comments and edits marked on each screen saved for them (keys like "comment:1"), by screen id. */
+  marksByScreen: ReadonlyMap<string, readonly string[]>;
 }
 
 /**
- * Adds a screen saved after a comment or edit. Every such screen marks all comments and edits on its
- * page, so it replaces the earlier marked screen of the same page instead of piling up.
+ * Adds a screen saved after a comment or edit. An earlier marked screen of the same page is replaced
+ * only when the new one still shows every mark it had, so a mark made in another UI state (an open
+ * modal, for example) keeps its own screen. Returns null when the result would exceed the screen limit.
  */
-export function addMarkedScreen(current: CommentScreens, created: ScreenSnapshotSummary): CommentScreens {
+export function addMarkedScreen(
+  current: MarkedScreens,
+  created: ScreenSnapshotSummary,
+  markKeys: readonly string[],
+  maxSnapshots: number,
+): MarkedScreens | null {
   const replaced = new Set(
     current.snapshots
-      .filter((snapshot) => current.markedScreenIds.has(snapshot.id) && snapshot.page.url === created.page.url)
+      .filter((snapshot) => {
+        const earlierMarks = current.marksByScreen.get(snapshot.id);
+        return earlierMarks !== undefined && snapshot.page.url === created.page.url &&
+          earlierMarks.every((key) => markKeys.includes(key));
+      })
       .map((snapshot) => snapshot.id),
   );
-  const markedScreenIds = new Set([...current.markedScreenIds].filter((id) => !replaced.has(id)));
-  markedScreenIds.add(created.id);
-  return {
-    snapshots: [...current.snapshots.filter((snapshot) => !replaced.has(snapshot.id)), created],
-    markedScreenIds,
-  };
+  const snapshots = [...current.snapshots.filter((snapshot) => !replaced.has(snapshot.id)), created];
+  if (snapshots.length > maxSnapshots) {
+    return null;
+  }
+  const marksByScreen = new Map([...current.marksByScreen].filter(([id]) => !replaced.has(id)));
+  marksByScreen.set(created.id, markKeys);
+  return { snapshots, marksByScreen };
 }

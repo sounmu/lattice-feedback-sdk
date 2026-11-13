@@ -270,23 +270,26 @@ export function createCaptureController(options: CaptureControllerOptions) {
     return (...args) => { if (!isDestroyed) action(...args); };
   }
 
+  // Only comments written on the current page are pinned: a persistent header element is still
+  // connected after an SPA navigation, but its comment belongs to the earlier page.
   function getCommentPinSources(): CommentPinSource[] {
-    return attachments.comments.map(({ target, comment }, index) => ({
-      number: index + 1,
-      label: target.feedbackId ?? target.tagName.toLowerCase(),
-      comment,
-      element: commentElements[index],
-    }));
+    return attachments.comments.flatMap(({ target, comment }, index) => {
+      if (target.pagePath !== undefined && target.pagePath !== window.location.pathname) {
+        return [];
+      }
+      const label = target.feedbackId ?? target.tagName.toLowerCase();
+      return [{ number: index + 1, label, comment, element: commentElements[index] }];
+    });
   }
 
   function getEditMoveSources(): EditMoveSource[] {
-    return attachments.edits.map(({ target, originalRect, proposedRect }, index) => ({
-      number: index + 1,
-      label: target.feedbackId ?? target.tagName.toLowerCase(),
-      originalRect,
-      proposedRect,
-      element: editElements[index],
-    }));
+    return attachments.edits.flatMap(({ target, originalRect, proposedRect }, index) => {
+      if (target.pagePath !== undefined && target.pagePath !== window.location.pathname) {
+        return [];
+      }
+      const label = target.feedbackId ?? target.tagName.toLowerCase();
+      return [{ number: index + 1, label, originalRect, proposedRect, element: editElements[index] }];
+    });
   }
 
   return {

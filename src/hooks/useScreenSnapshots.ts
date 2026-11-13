@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
-import { addMarkedScreen } from '@/lib/marked-screens';
+import { addMarkedScreen, type MarkedScreens } from '@/lib/marked-screens';
+import { findCommentPins, findEditMoves } from '@/lib/screen-snapshot';
 import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
 import type {
   CreateScreenSnapshotInput,
@@ -12,7 +13,6 @@ import type {
   FindMissingScreenSnapshotAssetsResponse,
   ScreenCapture,
   ScreenCaptureFailureReason,
-  ScreenSnapshotSummary,
 } from '@/types/screen-snapshot';
 
 export type ScreenSaveStatus = 'idle' | 'capturing' | 'uploading';
@@ -101,11 +101,11 @@ function getUploadErrorMessage(status: number): string {
 }
 
 export function useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture }: UseScreenSnapshotsOptions) {
-  const [screens, setScreens] = useState<{ snapshots: ScreenSnapshotSummary[]; markedScreenIds: ReadonlySet<string> }>({
-    snapshots: [],
-    markedScreenIds: new Set(),
-  });
-  const { snapshots, markedScreenIds } = screens;
+  const [screens, setScreens] = useState<MarkedScreens>({ snapshots: [], marksByScreen: new Map() });
+  const { snapshots, marksByScreen } = screens;
+  const markedScreenIds = useMemo(() => new Set(marksByScreen.keys()), [marksByScreen]);
+  // Uploads finish asynchronously, so the limit check reads the latest screens from here.
+  const screensRef = useRef(screens);
   const [status, setStatus] = useState<ScreenSaveStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const captureTimer = useRef<number | null>(null);
@@ -136,11 +136,19 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
           body,
         });
         const created = (await response.json()) as CreateScreenSnapshotResponse;
-        if (source === 'marks') {
-          setScreens((current) => addMarkedScreen(current, created.snapshot));
-        } else {
-          setScreens((current) => ({ ...current, snapshots: [...current.snapshots, created.snapshot] }));
+        const markKeys = [
+          ...findCommentPins(screen.events).map((pin) => `comment:${pin.number}`),
+          ...findEditMoves(screen.events).map((move) => `edit:${move.number}`),
+        ];
+        const next = source === 'marks'
+          ? addMarkedScreen(screensRef.current, created.snapshot, markKeys, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
+          : { ...screensRef.current, snapshots: [...screensRef.current.snapshots, created.snapshot] };
+        if (!next) {
+          setErrorMessage(MARKED_SCREEN_FULL_MESSAGE);
+          return;
         }
+        screensRef.current = next;
+        setScreens(next);
       } catch (error) {
         if (error instanceof UploadFailedError) {
           setErrorMessage(getUploadErrorMessage(error.status));
@@ -185,8 +193,8 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
   }, [config, subscribeToScreenCapture]);
 
   const canCapture = status === 'idle' && snapshots.length < MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK;
-  // A marked screen may replace an earlier one, so it is allowed at the limit when one exists.
-  const canCaptureMarks = canCapture || (status === 'idle' && snapshots.some((snapshot) => markedScreenIds.has(snapshot.id)));
+  // A marked screen may replace an earlier one; whether it fits is checked once it is uploaded.
+  const canCaptureMarks = canCapture || (status === 'idle' && marksByScreen.size > 0);
 
   const startCapture = useCallback((source: CaptureSource) => {
     pendingSource.current = source;
@@ -223,11 +231,18 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
   }, [startCapture]);
 
   const remove = useCallback((id: string) => {
-    setScreens((current) => ({ ...current, snapshots: current.snapshots.filter((snapshot) => snapshot.id !== id) }));
+    const next = {
+      snapshots: screensRef.current.snapshots.filter((snapshot) => snapshot.id !== id),
+      marksByScreen: new Map([...screensRef.current.marksByScreen].filter(([screenId]) => screenId !== id)),
+    };
+    screensRef.current = next;
+    setScreens(next);
   }, []);
 
   const reset = useCallback(() => {
-    setScreens({ snapshots: [], markedScreenIds: new Set() });
+    const empty: MarkedScreens = { snapshots: [], marksByScreen: new Map() };
+    screensRef.current = empty;
+    setScreens(empty);
     isMarksCaptureQueued.current = false;
     setErrorMessage(null);
   }, []);
