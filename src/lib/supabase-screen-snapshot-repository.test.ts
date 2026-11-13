@@ -108,18 +108,22 @@ describe('Supabase saved screen repository', () => {
     expect(received).toHaveLength(1);
   });
 
-  it('attaches only unlinked screens of the project, and reports a missing one as not attachable', async () => {
+  it('claims only unlinked screens of the project, and releases a partial claim', async () => {
     const repository = createSupabaseScreenSnapshotRepository();
     responseBodies = [[{ id: SNAPSHOT_ID }], [{ id: SNAPSHOT_ID }]];
 
-    expect(await repository.isAttachable('demo', [SNAPSHOT_ID, OTHER_SNAPSHOT_ID])).toBe(false);
-    await repository.attachToFeedback('demo', [SNAPSHOT_ID], FEEDBACK_ID);
+    expect(await repository.claimForFeedback('demo', [SNAPSHOT_ID, OTHER_SNAPSHOT_ID], FEEDBACK_ID)).toBe(false);
 
-    const unlinkedFilter = { project_key: 'eq.demo', feedback_id: 'is.null' };
-    expect(getSearch(received[0])).toMatchObject({ ...unlinkedFilter, id: `in.(${SNAPSHOT_ID},${OTHER_SNAPSHOT_ID})` });
+    expect(received[0].method).toBe('PATCH');
+    expect(getSearch(received[0])).toMatchObject({
+      project_key: 'eq.demo',
+      feedback_id: 'is.null',
+      id: `in.(${SNAPSHOT_ID},${OTHER_SNAPSHOT_ID})`,
+    });
+    expect(JSON.parse(received[0].body)).toEqual({ feedback_id: FEEDBACK_ID });
     expect(received[1].method).toBe('PATCH');
-    expect(getSearch(received[1])).toMatchObject({ ...unlinkedFilter, id: `in.(${SNAPSHOT_ID})` });
-    expect(JSON.parse(received[1].body)).toEqual({ feedback_id: FEEDBACK_ID });
+    expect(getSearch(received[1])).toMatchObject({ project_key: 'eq.demo', feedback_id: `eq.${FEEDBACK_ID}` });
+    expect(JSON.parse(received[1].body)).toEqual({ feedback_id: null });
   });
 
   it('lists the screens of one feedback oldest first', async () => {

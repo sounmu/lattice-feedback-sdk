@@ -22,7 +22,7 @@ export function resetMemoryFeedbackStore(): void {
 
 export function createMemoryFeedbackRepository(): FeedbackRepository {
   return {
-    async create(input) {
+    async create(input, id = crypto.randomUUID()) {
       const store = getStore();
       const items = store.get(input.projectKey) ?? [];
       // Refuse new items instead of evicting old ones, so a flood cannot erase existing feedback.
@@ -31,7 +31,7 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
       }
       const now = new Date().toISOString();
       const feedback: Feedback = {
-        id: crypto.randomUUID(),
+        id,
         projectKey: input.projectKey,
         message: input.message,
         type: input.type,

@@ -78,15 +78,23 @@ export function createMemoryScreenSnapshotRepository(): ScreenSnapshotRepository
       return items.filter((item) => item.feedbackId === feedbackId).map(toSummary);
     },
 
-    async isAttachable(projectKey, ids) {
+    // Checked and linked without an await in between, so no other request can interleave.
+    async claimForFeedback(projectKey, ids, feedbackId) {
       const items = getStore().get(projectKey) ?? [];
-      return ids.every((id) => items.some((item) => item.id === id && item.feedbackId === null));
+      const claimable = items.filter((item) => ids.includes(item.id) && item.feedbackId === null);
+      if (claimable.length !== new Set(ids).size) {
+        return false;
+      }
+      for (const item of claimable) {
+        item.feedbackId = feedbackId;
+      }
+      return true;
     },
 
-    async attachToFeedback(projectKey, ids, feedbackId) {
+    async releaseFromFeedback(projectKey, feedbackId) {
       for (const item of getStore().get(projectKey) ?? []) {
-        if (ids.includes(item.id)) {
-          item.feedbackId = feedbackId;
+        if (item.feedbackId === feedbackId) {
+          item.feedbackId = null;
         }
       }
     },

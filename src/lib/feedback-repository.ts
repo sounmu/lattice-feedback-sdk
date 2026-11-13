@@ -4,7 +4,8 @@ import { createSupabaseFeedbackRepository } from '@/lib/supabase-feedback-reposi
 import type { CreateFeedbackInput, Feedback, UpdateFeedbackInput } from '@/types/feedback';
 
 export interface FeedbackRepository {
-  create(input: CreateFeedbackInput): Promise<Feedback>;
+  /** Uses the given id when present, so related records can be claimed for it before it exists. */
+  create(input: CreateFeedbackInput, id?: string): Promise<Feedback>;
   /** Newest first. */
   findMany(projectKey: string): Promise<Feedback[]>;
   find(projectKey: string, id: string): Promise<Feedback | null>;

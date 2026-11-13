@@ -9,9 +9,13 @@ export interface ScreenSnapshotRepository {
   find(projectKey: string, id: string): Promise<ScreenSnapshot | null>;
   /** Oldest first. */
   findManyByFeedback(projectKey: string, feedbackId: string): Promise<ScreenSnapshotSummary[]>;
-  /** True when every id exists in the project and is not linked to a feedback yet. */
-  isAttachable(projectKey: string, ids: readonly string[]): Promise<boolean>;
-  attachToFeedback(projectKey: string, ids: readonly string[], feedbackId: string): Promise<void>;
+  /**
+   * Links every screen to the feedback id if all of them exist in the project and are still unlinked.
+   * Otherwise links none (releasing any it took) and returns false.
+   */
+  claimForFeedback(projectKey: string, ids: readonly string[], feedbackId: string): Promise<boolean>;
+  /** Unlinks the screens claimed for a feedback that was never stored. */
+  releaseFromFeedback(projectKey: string, feedbackId: string): Promise<void>;
 }
 
 const memoryScreenSnapshotRepository = createMemoryScreenSnapshotRepository();

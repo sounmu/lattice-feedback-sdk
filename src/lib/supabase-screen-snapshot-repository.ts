@@ -46,6 +46,17 @@ function toIdList(ids: readonly string[]): string {
 export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotRepository {
   const configuration = getSupabaseConfiguration();
 
+  async function releaseFromFeedback(projectKey: string, feedbackId: string): Promise<void> {
+    await requestSupabaseRows(configuration, TABLE, {
+      select: 'id',
+      project_key: `eq.${projectKey}`,
+      feedback_id: `eq.${feedbackId}`,
+    }, {
+      method: 'PATCH',
+      body: JSON.stringify({ feedback_id: null }),
+    });
+  }
+
   return {
     async create(input) {
       const rows = await requestSupabaseRows(configuration, TABLE, { select: SUMMARY_SELECT }, {
@@ -91,7 +102,7 @@ export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotReposito
       return parseRows(summaryRowsSchema, rows);
     },
 
-    async isAttachable(projectKey, ids) {
+    async claimForFeedback(projectKey, ids, feedbackId) {
       const uniqueIds = [...new Set(ids)];
       if (uniqueIds.length === 0) {
         return true;
@@ -99,29 +110,23 @@ export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotReposito
       if (!uniqueIds.every(isUuid)) {
         return false;
       }
+      // One conditional UPDATE: a screen another request already claimed is not matched, so it never moves.
       const rows = await requestSupabaseRows(configuration, TABLE, {
         select: 'id',
         project_key: `eq.${projectKey}`,
         id: toIdList(uniqueIds),
         feedback_id: 'is.null',
-      });
-      return parseRows(idRowsSchema, rows).length === uniqueIds.length;
-    },
-
-    async attachToFeedback(projectKey, ids, feedbackId) {
-      if (ids.length === 0) {
-        return;
-      }
-      // Only screens that are still unlinked are claimed, so a screen never moves between feedbacks.
-      await requestSupabaseRows(configuration, TABLE, {
-        select: 'id',
-        project_key: `eq.${projectKey}`,
-        id: toIdList(ids),
-        feedback_id: 'is.null',
       }, {
         method: 'PATCH',
         body: JSON.stringify({ feedback_id: feedbackId }),
       });
+      if (parseRows(idRowsSchema, rows).length === uniqueIds.length) {
+        return true;
+      }
+      await releaseFromFeedback(projectKey, feedbackId);
+      return false;
     },
+
+    releaseFromFeedback,
   };
 }
