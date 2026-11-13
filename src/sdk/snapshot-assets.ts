@@ -201,13 +201,23 @@ export async function extractSnapshotAssets(
       }
       const sources = (picture?.childNodes ?? []).filter((candidate) => candidate.tagName === 'source');
       // Like the browser: the first <source> whose media matches is the active one; the <img> only applies when none does.
+      // A source whose type the browser cannot show is skipped, and its candidates never include the shown file,
+      // so only a media-matching source that lists the shown file counts.
       const activeSource = sources.find(({ attributes: sourceAttributes }) => {
         const media = sourceAttributes?.media;
-        return typeof media !== 'string' || !options.matchesMedia || options.matchesMedia(media);
+        const matchesMedia = typeof media !== 'string' || !options.matchesMedia || options.matchesMedia(media);
+        return matchesMedia && findSrcsetDescriptor(sourceAttributes?.srcset, source) !== null;
       });
       const candidateAttributes = activeSource?.attributes ?? attributes;
       const descriptor = findSrcsetDescriptor(candidateAttributes.srcset, source);
       const chosen = descriptor === null ? undefined : { candidateAttributes, descriptor };
+      // Dimension attributes on the active source override the img's; they stop applying once its srcset is gone.
+      for (const dimension of ['width', 'height']) {
+        const value = activeSource?.attributes?.[dimension];
+        if (value !== undefined) {
+          attributes[dimension] = value;
+        }
+      }
       for (const candidate of sources) {
         if (candidate.attributes) {
           delete candidate.attributes.srcset;

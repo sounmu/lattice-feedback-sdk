@@ -240,3 +240,25 @@ it('takes the descriptor from the picture source the browser activated, even whe
 
   expect(fallback.attributes).toEqual({ srcset: `${createAssetReference(0)} 800w`, sizes: '100vw' });
 });
+
+it('skips a source that does not list the shown file and keeps the active source dimensions', async () => {
+  const unsupported: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/photo.avif 2x`, type: 'image/avif' }, childNodes: [] };
+  const square: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/square.png 1x`, width: '100', height: '100' }, childNodes: [] };
+  const fallback: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 1,
+    attributes: { src: `${ORIGIN}/wide.png`, srcset: `${ORIGIN}/large.jpg 2x`, width: '300', height: '150' },
+    childNodes: [],
+  };
+  const options = (shown: string) =>
+    createOptions({ fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })), findLiveImage: () => shown });
+
+  const first = structuredClone(fallback);
+  await extractSnapshotAssets(createDocument({ type: 2, tagName: 'picture', attributes: {}, childNodes: [structuredClone(unsupported), first] }), options(`${ORIGIN}/large.jpg`));
+  expect(first.attributes).toEqual({ srcset: `${createAssetReference(0)} 2x`, width: '300', height: '150' });
+
+  const second = structuredClone(fallback);
+  await extractSnapshotAssets(createDocument({ type: 2, tagName: 'picture', attributes: {}, childNodes: [square, second] }), options(`${ORIGIN}/square.png`));
+  expect(second.attributes).toEqual({ srcset: `${createAssetReference(0)} 1x`, width: '100', height: '100' });
+});
