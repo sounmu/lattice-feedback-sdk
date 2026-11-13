@@ -136,9 +136,9 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
           body,
         });
         const created = (await response.json()) as CreateScreenSnapshotResponse;
-        const pinNumbers = findCommentPins(screen.events).map((pin) => pin.number);
+        const pinKeys = findCommentPins(screen.events).map((pin) => pin.key);
         const next = source === 'comment'
-          ? addCommentScreen(screensRef.current, created.snapshot, pinNumbers, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
+          ? addCommentScreen(screensRef.current, created.snapshot, pinKeys, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
           : { ...screensRef.current, snapshots: [...screensRef.current.snapshots, created.snapshot] };
         if (!next) {
           setErrorMessage(COMMENT_SCREEN_FULL_MESSAGE);

@@ -3,7 +3,7 @@ import { MAX_LABEL_LENGTH } from '@/lib/screen-snapshot';
 import type { ScreenCommentPin } from '@/types/screen-snapshot';
 
 /** A comment to pin on the saved screen, with the live element it was written for. */
-export interface CommentPinSource extends Pick<ScreenCommentPin, 'number' | 'label' | 'comment'> {
+export interface CommentPinSource extends Pick<ScreenCommentPin, 'number' | 'key' | 'label' | 'comment'> {
   element: Element;
 }
 
@@ -18,11 +18,12 @@ interface PinPosition {
 export function createCommentPins(sources: readonly CommentPinSource[], position: PinPosition): ScreenCommentPin[] {
   return sources
     .filter(({ element }) => element.isConnected)
-    .map(({ element, number, label, comment }) => {
+    .map(({ element, number, key, label, comment }) => {
       const bounds = element.getBoundingClientRect();
       const nodeId = position.findNodeId(element);
       return {
         number,
+        key,
         nodeId: nodeId >= 0 ? nodeId : null,
         rect: { x: bounds.left + position.scrollX, y: bounds.top + position.scrollY, width: bounds.width, height: bounds.height },
         label: truncateText(label, MAX_LABEL_LENGTH),

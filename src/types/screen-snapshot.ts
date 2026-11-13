@@ -36,6 +36,8 @@ export interface ScreenSnapshotEvent {
 export interface ScreenCommentPin {
   /** 1-based position of the comment in the feedback. */
   number: number;
+  /** Stays the same for a comment even when earlier comments are removed and numbers shift. */
+  key: string;
   /** rrweb node id of the element, or null when it was not serialized. */
   nodeId: number | null;
   /** Document coordinates at capture time, used when the node cannot be found. */

@@ -24,6 +24,7 @@ export const RRWEB_META_EVENT_TYPE = 4;
 export const RRWEB_CUSTOM_EVENT_TYPE = 5;
 export const COMMENT_PIN_EVENT_TAG = 'lattice-comment-pin';
 export const MAX_LABEL_LENGTH = 200;
+const MAX_PIN_KEY_LENGTH = 40;
 const MAX_RECT_COORDINATE = 10_000_000;
 
 const MISSING_SNAPSHOT_ASSET_REASONS: readonly MissingSnapshotAssetReason[] = [
@@ -55,8 +56,9 @@ export function isScreenCommentPin(value: unknown): value is ScreenCommentPin {
   if (!isRecord(value) || !isRecord(value.rect)) {
     return false;
   }
-  const { number, nodeId, rect, label, comment } = value;
+  const { number, key, nodeId, rect, label, comment } = value;
   return (
+    typeof key === 'string' && key.length > 0 && key.length <= MAX_PIN_KEY_LENGTH &&
     Number.isInteger(number) && Number(number) >= 1 && Number(number) <= MAX_COMMENTS &&
     (nodeId === null || (Number.isInteger(nodeId) && Number(nodeId) >= 0)) &&
     isRectValue(rect.x, -MAX_RECT_COORDINATE) && isRectValue(rect.y, -MAX_RECT_COORDINATE) &&

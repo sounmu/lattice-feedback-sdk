@@ -105,7 +105,7 @@ it('keeps the live element of each comment for pinning on saved screens', () => 
   controller.handleCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind: 'comments', index: 0 } }));
 
   const sources = controller.getCommentPinSources();
-  expect(sources).toEqual([{ number: 1, label: 'save', comment: 'second', element: expect.anything() }]);
+  expect(sources).toEqual([{ number: 1, key: 'comment-2', label: 'save', comment: 'second', element: expect.anything() }]);
   controller.reset();
   expect(controller.getCommentPinSources()).toEqual([]);
   controller.destroy();

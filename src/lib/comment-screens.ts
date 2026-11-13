@@ -2,8 +2,8 @@ import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
 export interface CommentScreens {
   snapshots: ScreenSnapshotSummary[];
-  /** Comment numbers pinned on each screen saved for comments, by screen id. */
-  commentPinsByScreen: ReadonlyMap<string, readonly number[]>;
+  /** Keys of the comments pinned on each screen saved for comments, by screen id. */
+  commentPinsByScreen: ReadonlyMap<string, readonly string[]>;
 }
 
 /**
@@ -15,7 +15,7 @@ export interface CommentScreens {
 export function addCommentScreen(
   current: CommentScreens,
   created: ScreenSnapshotSummary,
-  pinNumbers: readonly number[],
+  pinKeys: readonly string[],
   maxSnapshots: number,
 ): CommentScreens | null {
   const replaced = new Set(
@@ -23,7 +23,7 @@ export function addCommentScreen(
       .filter((snapshot) => {
         const earlierPins = current.commentPinsByScreen.get(snapshot.id);
         return earlierPins !== undefined && snapshot.page.url === created.page.url &&
-          earlierPins.every((number) => pinNumbers.includes(number));
+          earlierPins.every((key) => pinKeys.includes(key));
       })
       .map((snapshot) => snapshot.id),
   );
@@ -32,6 +32,6 @@ export function addCommentScreen(
     return null;
   }
   const commentPinsByScreen = new Map([...current.commentPinsByScreen].filter(([id]) => !replaced.has(id)));
-  commentPinsByScreen.set(created.id, pinNumbers);
+  commentPinsByScreen.set(created.id, pinKeys);
   return { snapshots, commentPinsByScreen };
 }

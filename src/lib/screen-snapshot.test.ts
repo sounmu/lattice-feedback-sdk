@@ -3,7 +3,7 @@ import { createScreenSnapshotBody } from '@/app/api/snapshots/screen-snapshot-te
 import { createCommentPinEvent, findCommentPins, isCapturedScreen } from '@/lib/screen-snapshot';
 import type { ScreenCommentPin, ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
-const PIN: ScreenCommentPin = { number: 1, nodeId: 7, rect: { x: 10, y: 20, width: 80, height: 30 }, label: 'save', comment: '버튼이 안 보여요' };
+const PIN: ScreenCommentPin = { number: 1, key: 'comment-1', nodeId: 7, rect: { x: 10, y: 20, width: 80, height: 30 }, label: 'save', comment: '버튼이 안 보여요' };
 
 function createScreen(extraEvents: unknown[]) {
   const screen = createScreenSnapshotBody();
