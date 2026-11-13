@@ -11,7 +11,8 @@ import { GET as getAsset, PUT as putAsset } from '@/app/api/snapshots/assets/[ha
 import { POST as findMissingAssets } from '@/app/api/snapshots/assets/route';
 import { POST } from '@/app/api/snapshots/route';
 import { createScreenSnapshotBody } from '@/app/api/snapshots/screen-snapshot-test-fixtures';
-import { MAX_SCREEN_SNAPSHOT_BYTES } from '@/lib/feedback-limits';
+import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES } from '@/lib/feedback-limits';
+import { gunzipBytesWithLimit, gzipBytes } from '@/lib/gzip';
 import { RATE_LIMIT_MAX_REQUESTS, resetRateLimit } from '@/lib/http/rate-limit';
 import { resetMemoryFeedbackStore } from '@/lib/memory-feedback-repository';
 import { resetMemoryScreenSnapshotStore } from '@/lib/memory-screen-snapshot-repository';
@@ -45,6 +46,13 @@ function createContext(id: string) {
 
 function postSnapshot(overrides: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
   return POST(createJsonRequest(SNAPSHOTS_URL, 'POST', createScreenSnapshotBody(overrides), headers));
+}
+
+const GZIP_HEADERS = { 'content-type': 'application/gzip', 'sec-fetch-site': 'same-origin' };
+
+async function postGzipSnapshot(payload: unknown) {
+  const body = await gzipBytes(new TextEncoder().encode(JSON.stringify(payload)));
+  return POST(new Request(SNAPSHOTS_URL, { method: 'POST', headers: GZIP_HEADERS, body }));
 }
 
 async function createSnapshotId(): Promise<string> {
@@ -153,6 +161,25 @@ describe('POST /api/snapshots', () => {
     expect(await getErrorCode(response)).toBe(code);
   });
 
+  it('saves the unpacked screen from a gzip upload', async () => {
+    const response = await postGzipSnapshot(createScreenSnapshotBody());
+    const created = (await response.json()) as CreateScreenSnapshotResponse;
+    const detail = await requestSnapshot(created.snapshot.id, { authorization: ADMIN_AUTHORIZATION });
+
+    expect(response.status).toBe(201);
+    expect(((await detail.json()) as ScreenSnapshotDetailResponse).snapshot.events).toEqual(createScreenSnapshotBody().events);
+  });
+
+  it('rejects a gzip upload that unpacks past the screen limit, and one that is not gzip', async () => {
+    const oversized = await postGzipSnapshot({ padding: 'x'.repeat(MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES) });
+    const broken = await POST(new Request(SNAPSHOTS_URL, { method: 'POST', headers: GZIP_HEADERS, body: '{"plain":true}' }));
+
+    expect(oversized.status).toBe(413);
+    expect(await getErrorCode(oversized)).toBe('payload_too_large');
+    expect(broken.status).toBe(400);
+    expect(await getErrorCode(broken)).toBe('invalid_body');
+  });
+
   it('allows every page by default and only the listed paths once the project sets a policy', async () => {
     expect((await postSnapshot()).status).toBe(201);
 
@@ -197,6 +224,17 @@ describe('GET /api/snapshots/[id]', () => {
     expect((await requestSnapshot(id, { authorization: 'Bearer wrong-token' })).status).toBe(401);
     expect((await requestSnapshot(id, { authorization: ADMIN_AUTHORIZATION }, 'other')).status).toBe(404);
     expect((await requestSnapshot(crypto.randomUUID(), { authorization: ADMIN_AUTHORIZATION })).status).toBe(404);
+  });
+
+  it('sends the screen as a gzip file to a viewer that asks for one', async () => {
+    const id = await createSnapshotId();
+
+    const response = await requestSnapshot(id, { authorization: ADMIN_AUTHORIZATION, accept: 'application/gzip' });
+    const unpacked = await gunzipBytesWithLimit(new Uint8Array(await response.arrayBuffer()), MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES);
+    const body = JSON.parse(new TextDecoder().decode(unpacked)) as ScreenSnapshotDetailResponse;
+
+    expect(response.headers.get('content-type')).toBe('application/gzip');
+    expect(body.snapshot.events).toEqual(createScreenSnapshotBody().events);
   });
 });
 

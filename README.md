@@ -162,7 +162,7 @@ http://localhost:3000/admin/snapshots/{화면 ID}?projectKey=demo
 
 | 메서드 | 경로 | 기능 |
 | --- | --- | --- |
-| POST | `/api/snapshots` | 위젯이 저장한 화면 업로드(최대 4 MB, 글꼴·이미지 제외) |
+| POST | `/api/snapshots` | 위젯이 저장한 화면 업로드(전송 최대 4 MB, gzip으로 보내면 풀린 크기 최대 16 MB, 글꼴·이미지 제외) |
 | POST | `/api/snapshots/assets` | 프로젝트에 아직 없는 글꼴·이미지 해시 확인 |
 | PUT | `/api/snapshots/assets/{sha256}` | 글꼴·이미지 파일 업로드(파일당 최대 3 MB) |
 | GET | `/api/snapshots/assets/{sha256}?projectKey=demo` | 저장된 파일 조회(관리자 토큰 필요) |
