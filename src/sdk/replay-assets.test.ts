@@ -33,7 +33,12 @@ function extractReplayAssets(events: ScreenSnapshotEvent[], overrides: Partial<E
     maxDurationMs: 15_000,
     ...overrides,
   };
-  return { options, result: extractSnapshotAssets(createReplayAssetRoot(events, sanitizeReplayEvents(events)), options) };
+  const assetRoot = createReplayAssetRoot(events, sanitizeReplayEvents(events));
+  const result = extractSnapshotAssets(assetRoot.root, options).then((extracted) => {
+    assetRoot.applyStyleChanges();
+    return extracted;
+  });
+  return { options, result };
 }
 
 it('replaces the images and styles added or changed after the first snapshot, numbering files across the whole recording', async () => {
@@ -71,4 +76,22 @@ it('counts files that appear later against the same budget as the first snapshot
   expect(assetFiles).toHaveLength(1);
   expect(swapped.attributes.src).toBe(`${ORIGIN}/second.png`);
   expect(missingAssets).toEqual([{ url: `${ORIGIN}/second.png`, reason: 'budget_exceeded' }]);
+});
+
+it('rewrites images inside style changes recorded as property dictionaries, keeping their priority', async () => {
+  const full = element(1, 'html', {}, [element(2, 'div', {})]);
+  const restyled: AttributeChange = {
+    id: 2,
+    attributes: { style: { 'background-image': [`url("${ORIGIN}/box.png")`, 'important'], color: 'red', 'border-image': false } },
+  };
+  const { result } = extractReplayAssets(createRecording(full, [], [restyled]));
+
+  const { assetFiles } = await result;
+
+  expect(assetFiles).toHaveLength(1);
+  expect(restyled.attributes.style).toEqual({
+    'background-image': [`url("${createAssetReference(0)}")`, 'important'],
+    color: 'red',
+    'border-image': false,
+  });
 });

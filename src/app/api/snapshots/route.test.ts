@@ -83,6 +83,16 @@ describe('POST /api/snapshots', () => {
     expect(malformed.status).toBe(400);
   });
 
+  it('stores a cut-off replay that ends with the truncation marker', async () => {
+    const events = [
+      ...(createScreenSnapshotBody().events as unknown[]),
+      { type: 3, timestamp: 2, data: { source: 2, type: 2, id: 5, x: 10, y: 20 } },
+      { type: 5, timestamp: 2, data: { tag: 'lattice-replay-truncated', payload: {} } },
+    ];
+
+    expect((await postSnapshot({ events })).status).toBe(201);
+  });
+
   it('stores a screen from an allowed origin and answers without the event payload', async () => {
     const response = await postSnapshot();
     const body = (await response.json()) as CreateScreenSnapshotResponse;

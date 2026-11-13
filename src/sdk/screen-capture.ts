@@ -224,7 +224,8 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
   const events = [meta, full, ...rest.filter((event) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE)];
   const elements = sanitizeReplayEvents(events);
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
-  const { assetFiles, missingAssets } = await extractSnapshotAssets(createReplayAssetRoot(events, elements), {
+  const assetRoot = createReplayAssetRoot(events, elements);
+  const { assetFiles, missingAssets } = await extractSnapshotAssets(assetRoot.root, {
     pageOrigin: window.location.origin,
     loadedFontFamilies: findLoadedFontFamilies(),
     usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
@@ -235,6 +236,7 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
     maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
     maxAssetCount: MAX_SNAPSHOT_ASSETS,
   });
+  assetRoot.applyStyleChanges();
   if (recording.truncated) {
     events.push(createReplayTruncatedEvent(events[events.length - 1].timestamp));
   }
