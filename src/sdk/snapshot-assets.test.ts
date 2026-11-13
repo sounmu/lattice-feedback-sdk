@@ -200,3 +200,19 @@ it('saves the responsive image the browser picked with its own descriptor, and d
   expect(source.attributes).toEqual({ sizes: '100vw', media: '(min-width: 800px)' });
   expect(blocked.attributes).toEqual({ rr_width: '100px', rr_height: '50px' });
 });
+
+it('keeps the default sizes of a picture source that has none instead of borrowing the img sizes', async () => {
+  const source: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/wide.png 800w` }, childNodes: [] };
+  const fallback: SnapshotNode = { type: 2, tagName: 'img', id: 1, attributes: { src: `${ORIGIN}/fallback.png`, sizes: '50vw' }, childNodes: [] };
+  const options = createOptions({
+    fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })),
+    findLiveImage: () => `${ORIGIN}/wide.png`,
+  });
+
+  await extractSnapshotAssets(
+    createDocument({ type: 2, tagName: 'picture', attributes: {}, childNodes: [source, fallback] }),
+    options,
+  );
+
+  expect(fallback.attributes).toEqual({ srcset: `${createAssetReference(0)} 800w` });
+});

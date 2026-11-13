@@ -210,9 +210,12 @@ export async function extractSnapshotAssets(
         // src would count as an extra 1x candidate and win on a 1x viewer, so the single candidate stands alone.
         delete attributes.src;
         attributes.srcset = `${reference} ${chosen.descriptor}`;
-        const sizes = chosen.candidateAttributes.sizes ?? attributes.sizes;
+        // A candidate's sizes never comes from another element: without its own, the default is 100vw.
+        const sizes = chosen.candidateAttributes.sizes;
         if (typeof sizes === 'string') {
           attributes.sizes = sizes;
+        } else {
+          delete attributes.sizes;
         }
       } else {
         attributes.src = reference;
