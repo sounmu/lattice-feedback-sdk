@@ -239,7 +239,7 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
     maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
     maxAssetCount: MAX_SNAPSHOT_ASSETS,
   });
-  assetRoot.applyStyleChanges();
+  assetRoot.applyRewrites();
   if (recording.truncated) {
     events.push(createReplayTruncatedEvent(events[events.length - 1].timestamp));
   }

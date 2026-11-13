@@ -35,7 +35,7 @@ function extractReplayAssets(events: ScreenSnapshotEvent[], overrides: Partial<E
   };
   const assetRoot = createReplayAssetRoot(events, sanitizeReplayEvents(events));
   const result = extractSnapshotAssets(assetRoot.root, options).then((extracted) => {
-    assetRoot.applyStyleChanges();
+    assetRoot.applyRewrites();
     return extracted;
   });
   return { options, result };
@@ -94,4 +94,26 @@ it('rewrites images inside style changes recorded as property dictionaries, keep
     color: 'red',
     'border-image': false,
   });
+});
+
+it('saves every candidate of a srcset changed later and leaves other sources alone', async () => {
+  const full = element(1, 'html', {}, [element(2, 'img', { src: `${ORIGIN}/first.png` }), element(3, 'video', {}, [element(4, 'source', {})])]);
+  const responsive: AttributeChange = {
+    id: 2,
+    attributes: { srcset: `${ORIGIN}/after.png 1x, ${ORIGIN}/after-2x.png 2x, https://cdn.example.com/after-3x.png 3x`, src: `${ORIGIN}/fallback.png` },
+  };
+  const clip: AttributeChange = { id: 4, attributes: { src: `${ORIGIN}/clip.mp4` } };
+  const { options, result } = extractReplayAssets(createRecording(full, [], [responsive, clip]));
+
+  const { assetFiles } = await result;
+
+  expect(await Promise.all(assetFiles.map((file) => file.text()))).toEqual(
+    ['first.png', 'after.png', 'after-2x.png', 'fallback.png'].map((name) => `${ORIGIN}/${name}`),
+  );
+  expect(options.fetchAsset).toHaveBeenCalledTimes(4);
+  expect(responsive.attributes).toEqual({
+    srcset: `${createAssetReference(1)} 1x, ${createAssetReference(2)} 2x, https://cdn.example.com/after-3x.png 3x`,
+    src: createAssetReference(3),
+  });
+  expect(clip.attributes.src).toBe(`${ORIGIN}/clip.mp4`);
 });
