@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { SnapshotNode } from '@/sdk/snapshot-assets';
-import { sanitizeReplayEvents, type AttributeChange } from '@/sdk/replay-sanitize';
+import { sanitizeReplayEvents, trimReplayStart, type AttributeChange } from '@/sdk/replay-sanitize';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
 function element(id: number, tagName: string, attributes: Record<string, string>, childNodes: SnapshotNode[] = []): SnapshotNode {
@@ -92,4 +92,21 @@ it('clears input events of hidden inputs and keeps the masked ones of visible in
   sanitizeReplayEvents(events);
 
   expect(events.slice(2).map((event) => (event.data as { text: string }).text)).toEqual(['', '****']);
+});
+
+it('starts a recording at its first Meta and FullSnapshot pair and gives the Meta event the stripped page URL', () => {
+  const recorded: ScreenSnapshotEvent[] = [
+    { type: 0, timestamp: 1, data: {} },
+    { type: 1, timestamp: 2, data: {} },
+    { type: 4, timestamp: 3, data: { href: 'https://host.example.com/orders?token=SECRET#t', width: 1440, height: 900 } },
+    { type: 2, timestamp: 3, data: { node: { type: 0, childNodes: [] } } },
+    { type: 3, timestamp: 4, data: { source: 2, type: 2, id: 1, x: 1, y: 1 } },
+  ];
+
+  const trimmed = trimReplayStart(recorded, 'https://host.example.com/orders');
+
+  expect(trimmed.map((event) => event.type)).toEqual([4, 2, 3]);
+  expect(trimmed[0].data).toEqual({ href: 'https://host.example.com/orders', width: 1440, height: 900 });
+  expect(JSON.stringify(trimmed)).not.toContain('SECRET');
+  expect(trimReplayStart(recorded.slice(0, 2), 'https://host.example.com/orders')).toEqual([]);
 });

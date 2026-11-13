@@ -4,9 +4,13 @@ import { record } from '@rrweb/record';
 
 import { MAX_PAGE_TITLE_LENGTH, MAX_REPLAY_DURATION_MS, MAX_REPLAY_EVENTS, truncateText } from '@/lib/feedback-limits';
 import { getPageUrl } from '@/sdk/page-context';
-import { BLOCKED_SELECTOR, MASKED_SELECTOR } from '@/sdk/screen-capture';
+import { BLOCKED_SELECTOR, findUsedCssImageUrls, MASKED_SELECTOR } from '@/sdk/screen-capture';
 import type { ScreenSnapshotEvent, ScreenSnapshotPage } from '@/types/screen-snapshot';
 
+// Reading every element's computed style is costly, so page changes are sampled at most once per second.
+const CSS_USAGE_SAMPLE_INTERVAL_MS = 1000;
+// rrweb EventType.IncrementalSnapshot.
+const INCREMENTAL_EVENT_TYPE = 3;
 
 export interface ReplayRecording {
   /** ISO timestamp of the first event. */
@@ -15,6 +19,8 @@ export interface ReplayRecording {
   events: ScreenSnapshotEvent[];
   /** True when the later part is missing: the count or duration limit was reached, or the recording was cut off. */
   truncated: boolean;
+  /** Same-origin CSS image URLs the page showed at some point while recording, not only at the end. */
+  usedCssImageUrls: ReadonlySet<string>;
 }
 
 export interface ReplayRecorder {
@@ -36,6 +42,16 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
   };
   const events: ScreenSnapshotEvent[] = [];
   let truncated = false;
+  const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
+  const usedCssImageUrls = new Set<string>();
+  let lastSampledAt = Number.NEGATIVE_INFINITY;
+
+  function sampleCssImageUsage(at: number): void {
+    lastSampledAt = at;
+    findUsedCssImageUrls(excludedSelector).forEach((url) => usedCssImageUrls.add(url));
+  }
+
+  sampleCssImageUsage(startedAtMs);
   let stopRecording: (() => void) | undefined = record({
     emit: (event) => {
       const recorded = event as ScreenSnapshotEvent;
@@ -44,8 +60,11 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
         return;
       }
       events.push(recorded);
+      if (recorded.type === INCREMENTAL_EVENT_TYPE && recorded.timestamp - lastSampledAt >= CSS_USAGE_SAMPLE_INTERVAL_MS) {
+        sampleCssImageUsage(recorded.timestamp);
+      }
     },
-    blockSelector: `${sdkSelector}, ${BLOCKED_SELECTOR}`,
+    blockSelector: excludedSelector,
     maskTextSelector: MASKED_SELECTOR,
     maskAllInputs: true,
     slimDOMOptions: { script: true },
@@ -66,7 +85,13 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
     if (events.length < 2) {
       return null;
     }
-    return { startedAt: new Date(events[0].timestamp).toISOString(), page, events: [...events], truncated };
+    return {
+      startedAt: new Date(events[0].timestamp).toISOString(),
+      page,
+      events: [...events],
+      truncated,
+      usedCssImageUrls: new Set(usedCssImageUrls),
+    };
   }
 
   return {

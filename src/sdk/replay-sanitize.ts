@@ -1,6 +1,6 @@
 // The same exclusions as a saved screen apply to everything a Flow recording adds or changes later:
 // no script content or handlers, and no hidden input or token meta values (AGENTS.md section 5).
-import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_INCREMENTAL_EVENT_TYPE } from '@/lib/screen-snapshot';
+import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_INCREMENTAL_EVENT_TYPE, RRWEB_META_EVENT_TYPE } from '@/lib/screen-snapshot';
 import type { SnapshotAttributes, SnapshotNode } from '@/sdk/snapshot-assets';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
@@ -71,6 +71,22 @@ function isHiddenInputEvent(event: ScreenSnapshotEvent, elements: RecordedElemen
   }
   const element = elements.get(data.id);
   return element?.tagName === 'input' && String(element.attributes.type ?? '').toLowerCase() === 'hidden';
+}
+
+/**
+ * The recording from its first Meta and FullSnapshot pair on. rrweb emits DOMContentLoaded and Load events
+ * first when recording starts while the page is loading; those are dropped. The Meta event carries
+ * window.location.href, so it gets the page URL already stripped of its query and fragment.
+ */
+export function trimReplayStart(events: readonly ScreenSnapshotEvent[], pageUrl: string): ScreenSnapshotEvent[] {
+  const start = events.findIndex(
+    (event, index) => event.type === RRWEB_META_EVENT_TYPE && events[index + 1]?.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
+  );
+  if (start === -1) {
+    return [];
+  }
+  const [meta, ...rest] = events.slice(start);
+  return [{ ...meta, data: { ...(meta.data as Record<string, unknown>), href: pageUrl } }, ...rest];
 }
 
 /** Cleans the recorded events in place, in order, and returns what is known about each recorded element. */

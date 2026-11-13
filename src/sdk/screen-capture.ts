@@ -27,7 +27,7 @@ import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { ReplayRecording } from '@/sdk/flow-replay-recorder';
 import { createReplayAssetRoot } from '@/sdk/replay-assets';
-import { sanitizeReplayEvents } from '@/sdk/replay-sanitize';
+import { sanitizeReplayEvents, trimReplayStart } from '@/sdk/replay-sanitize';
 import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
 
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
@@ -91,7 +91,7 @@ async function fetchSameOriginAsset(url: string, maxBytes: number, timeoutMs: nu
 
 // CSS images that captured elements actually show. Elements in a blocked region are skipped, so a
 // stylesheet shared with them cannot carry their images into the saved screen.
-function findUsedCssImageUrls(excludedSelector: string): Set<string> {
+export function findUsedCssImageUrls(excludedSelector: string): Set<string> {
   const urls = new Set<string>();
   for (const element of document.querySelectorAll('*')) {
     if (element.closest(excludedSelector)) {
@@ -216,7 +216,7 @@ function findLoadedFontFamilies(): Set<string> {
  * marker event.
  */
 export async function captureRecording(recording: ReplayRecording, sdkSelector: string): Promise<ScreenCapture> {
-  const [meta, full, ...rest] = recording.events;
+  const [meta, full, ...rest] = trimReplayStart(recording.events, recording.page.url);
   if (meta?.type !== RRWEB_META_EVENT_TYPE || full?.type !== RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
     throw new Error('The recording does not start with a full snapshot.');
   }
@@ -228,7 +228,8 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
   const { assetFiles, missingAssets } = await extractSnapshotAssets(assetRoot.root, {
     pageOrigin: window.location.origin,
     loadedFontFamilies: findLoadedFontFamilies(),
-    usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
+    // Images the page showed while recording count too, not only those still shown at the end.
+    usedCssImageUrls: new Set([...recording.usedCssImageUrls, ...findUsedCssImageUrls(excludedSelector)]),
     fetchAsset: fetchSameOriginAsset,
     maxDurationMs: ASSET_COLLECTION_DURATION_MS,
     matchesMedia: (query) => window.matchMedia(query).matches,
