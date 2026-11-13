@@ -12,6 +12,7 @@ type SnapshotAttributes = Record<string, string | number | boolean | null>;
 /** The part of an rrweb serialized node this module reads and rewrites. */
 export interface SnapshotNode {
   type: number;
+  id?: number;
   tagName?: string;
   attributes?: SnapshotAttributes;
   childNodes?: SnapshotNode[];
@@ -31,6 +32,8 @@ export interface ExtractSnapshotAssetsOptions {
   /** Downloads stop at this deadline so the capture answers the widget in time; the rest are reported as timed out. */
   maxDurationMs: number;
   now?: () => number;
+  /** The image URL the browser actually picked from srcset or <picture>, when it differs from src. */
+  findCurrentImageSource?: (node: SnapshotNode) => string | null;
   maxAssetBytes: number;
   maxTotalBytes: number;
   maxAssetCount: number;
@@ -73,7 +76,7 @@ export async function extractSnapshotAssets(
   const isSameOrigin = (url: string): boolean => url.startsWith(`${options.pageOrigin}/`);
   // Each entry is an attribute holding CSS text: a serialized stylesheet (_cssText) or an inline style.
   const cssAttributes: { attributes: SnapshotAttributes; name: string }[] = [];
-  const imageAttributes: SnapshotAttributes[] = [];
+  const images: { attributes: SnapshotAttributes; source: string; picture: SnapshotNode | null }[] = [];
   const urls = new Set<string>();
 
   function collectCssImages(attributes: SnapshotAttributes, name: string, cssText: string): void {
@@ -85,7 +88,7 @@ export async function extractSnapshotAssets(
     }
   }
 
-  function visit(node: SnapshotNode): void {
+  function visit(node: SnapshotNode, parent: SnapshotNode | null): void {
     const attributes = node.attributes;
     if (attributes) {
       if (typeof attributes.style === 'string') {
@@ -106,15 +109,15 @@ export async function extractSnapshotAssets(
           }
         }
       }
-      const source = attributes.src;
-      if (node.tagName === 'img' && typeof source === 'string' && isSameOrigin(source)) {
-        imageAttributes.push(attributes);
+      const source = node.tagName === 'img' ? (options.findCurrentImageSource?.(node) ?? attributes.src) : null;
+      if (typeof source === 'string' && isSameOrigin(source)) {
+        images.push({ attributes, source, picture: parent?.tagName === 'picture' ? parent : null });
         urls.add(source);
       }
     }
-    node.childNodes?.forEach(visit);
+    node.childNodes?.forEach((child) => visit(child, node));
   }
-  visit(root);
+  visit(root, null);
 
   // One download at a time, each capped by the remaining budget, so the live page never buffers more than the budget.
   const assetFiles: Blob[] = [];
@@ -167,11 +170,19 @@ export async function extractSnapshotAssets(
         },
       );
     }
-    for (const attributes of imageAttributes) {
-      const reference = references.get(String(attributes.src));
-      if (reference) {
-        attributes.src = reference;
-        delete attributes.srcset;
+    // The saved file is the one the browser showed, so responsive candidates that could pick another are dropped.
+    for (const { attributes, source, picture } of images) {
+      const reference = references.get(source);
+      if (!reference) {
+        continue;
+      }
+      attributes.src = reference;
+      delete attributes.srcset;
+      delete attributes.sizes;
+      for (const candidate of picture?.childNodes ?? []) {
+        if (candidate.tagName === 'source' && candidate.attributes) {
+          delete candidate.attributes.srcset;
+        }
       }
     }
   }

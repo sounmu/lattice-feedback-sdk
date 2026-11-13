@@ -157,3 +157,30 @@ it('stops downloading at the deadline and reports the rest as timed out', async 
   ]);
   expect(fetchAsset).toHaveBeenCalledTimes(2);
 });
+
+it('saves the responsive image the browser picked and drops candidates that could pick another', async () => {
+  const plain: SnapshotNode = {
+    type: 2,
+    tagName: 'img',
+    id: 1,
+    attributes: { src: `${ORIGIN}/small.png`, srcset: `${ORIGIN}/large.png 2x`, sizes: '100vw' },
+    childNodes: [],
+  };
+  const source: SnapshotNode = { type: 2, tagName: 'source', attributes: { srcset: `${ORIGIN}/wide.webp`, media: '(min-width: 800px)' }, childNodes: [] };
+  const fallback: SnapshotNode = { type: 2, tagName: 'img', id: 2, attributes: { src: `${ORIGIN}/fallback.png` }, childNodes: [] };
+  const picture: SnapshotNode = { type: 2, tagName: 'picture', attributes: {}, childNodes: [source, fallback] };
+  const picked: Record<number, string> = { 1: `${ORIGIN}/large.png`, 2: `${ORIGIN}/wide.webp` };
+  const options = createOptions({
+    fetchAsset: vi.fn(async () => new Blob(['img'], { type: 'image/png' })),
+    findCurrentImageSource: (node) => (node.id === undefined ? null : picked[node.id]),
+  });
+
+  await extractSnapshotAssets(createDocument(plain, picture), options);
+
+  expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/large.png`, expect.any(Number), expect.any(Number));
+  expect(options.fetchAsset).toHaveBeenCalledWith(`${ORIGIN}/wide.webp`, expect.any(Number), expect.any(Number));
+  expect(options.fetchAsset).not.toHaveBeenCalledWith(`${ORIGIN}/small.png`, expect.any(Number), expect.any(Number));
+  expect(plain.attributes).toEqual({ src: createAssetReference(0) });
+  expect(fallback.attributes).toEqual({ src: createAssetReference(1) });
+  expect(source.attributes).toEqual({ media: '(min-width: 800px)' });
+});
