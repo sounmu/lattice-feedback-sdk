@@ -5,7 +5,6 @@
 // Cross-origin URLs stay as they are. Works on the serialized snapshot only; the host DOM is never touched.
 import { MAX_MISSING_SNAPSHOT_ASSETS } from '@/lib/feedback-limits';
 import { createAssetReference } from '@/lib/snapshot-asset-references';
-import type { LiveImageSource } from '@/sdk/live-image-source';
 import type { MissingSnapshotAsset } from '@/types/screen-snapshot';
 
 type SnapshotAttributes = Record<string, string | number | boolean | null>;
@@ -34,7 +33,7 @@ export interface ExtractSnapshotAssetsOptions {
   maxDurationMs: number;
   now?: () => number;
   /** The image the browser actually shows for an <img>, picked from srcset or <picture>. Null for excluded images. */
-  findLiveImage?: (node: SnapshotNode) => LiveImageSource | null;
+  findLiveImage?: (node: SnapshotNode) => string | null;
   maxAssetBytes: number;
   maxTotalBytes: number;
   maxAssetCount: number;
@@ -56,6 +55,20 @@ export class SnapshotAssetTooLargeError extends Error {
 const FONT_FACE_PATTERN = /@font-face\s*\{[^}]*\}/g;
 const FONT_FAMILY_PATTERN = /font-family\s*:\s*([^;}]+)/i;
 const CSS_URL_PATTERN = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/g;
+
+// The descriptor ("2x", "800w") of the srcset candidate for url, '' for a candidate without one, null when absent.
+function findSrcsetDescriptor(srcset: unknown, url: string): string | null {
+  if (typeof srcset !== 'string') {
+    return null;
+  }
+  for (const candidate of srcset.split(',')) {
+    const [candidateUrl, descriptor = ''] = candidate.trim().split(/\s+/);
+    if (candidateUrl === url) {
+      return descriptor;
+    }
+  }
+  return null;
+}
 
 export function normalizeFontFamily(value: string): string {
   return value.trim().replace(/^["']|["']$/g, '').toLowerCase();
@@ -80,7 +93,6 @@ export async function extractSnapshotAssets(
   const images: {
     attributes: SnapshotAttributes;
     source: string;
-    live: LiveImageSource | null;
     picture: SnapshotNode | null;
   }[] = [];
   const urls = new Set<string>();
@@ -116,10 +128,9 @@ export async function extractSnapshotAssets(
         }
       }
       if (node.tagName === 'img') {
-        const live = options.findLiveImage?.(node) ?? null;
-        const source = live?.url ?? attributes.src;
+        const source = options.findLiveImage?.(node) ?? attributes.src;
         if (typeof source === 'string' && isSameOrigin(source)) {
-          images.push({ attributes, source, live, picture: parent?.tagName === 'picture' ? parent : null });
+          images.push({ attributes, source, picture: parent?.tagName === 'picture' ? parent : null });
           urls.add(source);
         }
       }
@@ -179,25 +190,34 @@ export async function extractSnapshotAssets(
         },
       );
     }
-    // The saved file is the one the browser showed, so responsive candidates that could pick another are dropped.
-    for (const { attributes, source, live, picture } of images) {
+    // The saved file is the one the browser showed. It keeps its own srcset descriptor (2x, 800w), so the
+    // browser applies the same density and the page's CSS sizes it exactly as before; other candidates are dropped.
+    for (const { attributes, source, picture } of images) {
       const reference = references.get(source);
       if (!reference) {
         continue;
       }
-      // Without srcset the browser no longer applies the candidate's density, so its laid-out size is kept explicitly.
-      const isResponsive = attributes.srcset !== undefined || picture !== null;
-      if (isResponsive && live && attributes.width === undefined && attributes.height === undefined) {
-        attributes.width = live.width;
-        attributes.height = live.height;
-      }
-      attributes.src = reference;
-      delete attributes.srcset;
-      delete attributes.sizes;
-      for (const candidate of picture?.childNodes ?? []) {
-        if (candidate.tagName === 'source' && candidate.attributes) {
+      const sources = (picture?.childNodes ?? []).filter((candidate) => candidate.tagName === 'source');
+      const chosen = [attributes, ...sources.map((candidate) => candidate.attributes ?? {})]
+        .map((candidateAttributes) => ({ candidateAttributes, descriptor: findSrcsetDescriptor(candidateAttributes.srcset, source) }))
+        .find(({ descriptor }) => descriptor !== null);
+      for (const candidate of sources) {
+        if (candidate.attributes) {
           delete candidate.attributes.srcset;
         }
+      }
+      if (chosen?.descriptor) {
+        // src would count as an extra 1x candidate and win on a 1x viewer, so the single candidate stands alone.
+        delete attributes.src;
+        attributes.srcset = `${reference} ${chosen.descriptor}`;
+        const sizes = chosen.candidateAttributes.sizes ?? attributes.sizes;
+        if (typeof sizes === 'string') {
+          attributes.sizes = sizes;
+        }
+      } else {
+        attributes.src = reference;
+        delete attributes.srcset;
+        delete attributes.sizes;
       }
     }
   }
