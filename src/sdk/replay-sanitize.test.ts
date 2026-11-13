@@ -80,3 +80,16 @@ it('removes script-carrying attributes from later changes and passes other value
   expect(box.attributes).toEqual({ style: { color: 'blue', width: ['10px', 'important'], height: false }, class: null });
   expect(untracked.attributes).toEqual({ hidden: null });
 });
+
+it('clears input events of hidden inputs and keeps the masked ones of visible inputs', () => {
+  const full = element(1, 'html', {}, [element(2, 'input', { type: 'hidden' }), element(3, 'input', { type: 'text' })]);
+  const events = [
+    ...createRecording(full),
+    { type: 3, timestamp: 5, data: { source: 5, id: 2, text: 'CSRF-3', isChecked: false } },
+    { type: 3, timestamp: 6, data: { source: 5, id: 3, text: '****', isChecked: false } },
+  ];
+
+  sanitizeReplayEvents(events);
+
+  expect(events.slice(2).map((event) => (event.data as { text: string }).text)).toEqual(['', '****']);
+});

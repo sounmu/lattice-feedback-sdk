@@ -6,8 +6,9 @@ import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
-// rrweb IncrementalSource.Mutation.
+// rrweb IncrementalSource.Mutation and IncrementalSource.Input.
 export const MUTATION_SOURCE = 0;
+const INPUT_SOURCE = 5;
 // rrweb NodeType.Element.
 export const ELEMENT_NODE_TYPE = 2;
 
@@ -63,12 +64,26 @@ function sanitizeAttributeChange(change: AttributeChange, elements: RecordedElem
   }
 }
 
+function isHiddenInputEvent(event: ScreenSnapshotEvent, elements: RecordedElements): boolean {
+  const data = event.data as { source?: unknown; id?: unknown };
+  if (event.type !== RRWEB_INCREMENTAL_EVENT_TYPE || data.source !== INPUT_SOURCE || typeof data.id !== 'number') {
+    return false;
+  }
+  const element = elements.get(data.id);
+  return element?.tagName === 'input' && String(element.attributes.type ?? '').toLowerCase() === 'hidden';
+}
+
 /** Cleans the recorded events in place, in order, and returns what is known about each recorded element. */
 export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[]): RecordedElements {
   const elements: RecordedElements = new Map();
   for (const event of events) {
     if (event.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
       sanitizeNode((event.data as { node: SnapshotNode }).node, elements);
+      continue;
+    }
+    if (isHiddenInputEvent(event, elements)) {
+      // rrweb masks typed values but not those of hidden inputs, which a script may set.
+      (event.data as { text?: unknown }).text = '';
       continue;
     }
     if (!isMutationEvent(event)) {
