@@ -101,6 +101,7 @@ describe('isWidgetToHostMessage', () => {
     expect(isWidgetToHostMessage(createWidgetToHostMessage('ready', {}))).toBe(true);
     expect(isWidgetToHostMessage(createWidgetToHostMessage('close', {}))).toBe(true);
     expect(isWidgetToHostMessage(createWidgetToHostMessage('screen:capture', { requestId: 'request-1' }))).toBe(true);
+    expect(isWidgetToHostMessage(createWidgetToHostMessage('flow:capture', { requestId: 'request-2' }))).toBe(true);
     expect(isWidgetToHostMessage(SUBMITTED_MESSAGE)).toBe(true);
   });
 

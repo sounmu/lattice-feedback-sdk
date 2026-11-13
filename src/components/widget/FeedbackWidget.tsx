@@ -24,13 +24,14 @@ const FEEDBACK_TYPE_OPTIONS: { value: FeedbackType; label: string }[] = [
 export function FeedbackWidget() {
   const {
     config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, notifyClose, notifySubmitted,
-    captureState, sendCaptureCommand, subscribeToScreenCapture, subscribeToCaptureUpdate, requestScreenCapture,
+    captureState, sendCaptureCommand, subscribeToScreenCapture, subscribeToCaptureUpdate, requestScreenCapture, requestFlowCapture,
   } = useHostBridge();
-  const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture });
-  const { syncMarkKeys, captureForMarks } = screens;
+  const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture, requestFlowCapture });
+  const { syncMarkKeys, captureForMarks, captureFlow } = screens;
   const commentKeys = captureState?.commentKeys;
   const editKeys = captureState?.editKeys;
   const editCount = useRef(0);
+  const hasFlow = useRef(false);
 
   useEffect(() => {
     syncMarkKeys({ comments: commentKeys ?? [], edits: editKeys ?? [] });
@@ -44,7 +45,13 @@ export function FeedbackWidget() {
       captureForMarks();
     }
     editCount.current = count;
-  }), [subscribeToCaptureUpdate, captureForMarks]);
+    // A newly attached Flow brings a replay of the page, saved as its own screen.
+    const flowAttached = state.attachments.flow !== null;
+    if (flowAttached && !hasFlow.current) {
+      captureFlow();
+    }
+    hasFlow.current = flowAttached;
+  }), [subscribeToCaptureUpdate, captureForMarks, captureFlow]);
   const { submit, reset, status, errorMessage } = useSubmitFeedback();
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
@@ -120,6 +127,8 @@ export function FeedbackWidget() {
           <ScreenSnapshotControls
             snapshots={screens.snapshots}
             markedScreenIds={screens.markedScreenIds}
+            flowScreenIds={screens.flowScreenIds}
+            truncatedFlowScreenIds={screens.truncatedFlowScreenIds}
             status={screens.status}
             errorMessage={screens.errorMessage}
             canCapture={screens.canCapture}
@@ -143,7 +152,12 @@ export function FeedbackWidget() {
               // Saved right away so the admin sees the comment pinned on the screen it was written on.
               screens.captureForMarks();
             }}
-            onRemove={(kind, index) => sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }))}
+            onRemove={(kind, index) => {
+              sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }));
+              if (kind === 'flow') {
+                screens.removeFlowScreens();
+              }
+            }}
           />
         )}
         {captureState?.errorMessage && <p role="alert" className="text-sm text-red-600">{captureState.errorMessage}</p>}

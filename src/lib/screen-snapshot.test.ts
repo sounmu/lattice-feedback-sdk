@@ -3,10 +3,14 @@ import { createScreenSnapshotBody } from '@/app/api/snapshots/screen-snapshot-te
 import {
   createCommentPinEvent,
   createEditMoveEvent,
+  createReplayTruncatedEvent,
   findCommentPins,
   findEditMoves,
+  hasReplayEvents,
   isCapturedScreen,
+  isReplayTruncated,
   reconcileScreenMarks,
+  REPLAY_TRUNCATED_EVENT_TAG,
 } from '@/lib/screen-snapshot';
 import type { ScreenCommentPin, ScreenEditMove, ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
@@ -40,7 +44,7 @@ it('rejects malformed pins and other trailing events', () => {
     createCommentPinEvent({ ...PIN, rect: { ...PIN.rect, width: -1 } }, 1),
     createCommentPinEvent({ ...PIN, offset: { x: 1.5, y: 0 } }, 1),
     { type: 5, timestamp: 1, data: { tag: 'other', payload: PIN } },
-    { type: 3, timestamp: 1, data: {} },
+    { type: 1, timestamp: 1, data: {} },
   ];
   for (const event of malformed) {
     expect(isCapturedScreen(createScreen([event]))).toBe(false);
@@ -77,4 +81,26 @@ it('drops the marks of deleted comments and edits from a saved screen and renumb
   expect(findEditMoves(updated).map(({ key, number }) => [key, number])).toEqual([['edit-3', 1]]);
   expect(updated.slice(0, 2)).toEqual(events.slice(0, 2));
   expect(reconcileScreenMarks(events, { comments: ['comment-9'], edits: [] })).toBeNull();
+});
+
+it('accepts the page changes of a recorded Flow and tells a replay apart from a still screen', () => {
+  const replay = createScreen([{ type: 3, timestamp: 2, data: { source: 2, type: 2, id: 5, x: 10, y: 20 } }]);
+  const still = createScreen([]);
+
+  expect(isCapturedScreen(replay)).toBe(true);
+  expect(hasReplayEvents(replay.events as ScreenSnapshotEvent[])).toBe(true);
+  expect(hasReplayEvents(still.events as ScreenSnapshotEvent[])).toBe(false);
+  expect(isCapturedScreen(createScreen([{ type: 3, timestamp: 2, data: 'not an object' }]))).toBe(false);
+});
+
+it('accepts the marker of a replay that lost its later part and tells such a replay from a whole one', () => {
+  const change = { type: 3, timestamp: 2, data: { source: 2, type: 2, id: 5, x: 10, y: 20 } };
+  const truncated = createScreen([change, createReplayTruncatedEvent(2)]);
+  const malformed = createScreen([change, { type: 5, timestamp: 2, data: { tag: REPLAY_TRUNCATED_EVENT_TAG, payload: null } }]);
+
+  expect(isCapturedScreen(truncated)).toBe(true);
+  expect(isReplayTruncated(truncated.events as ScreenSnapshotEvent[])).toBe(true);
+  expect(isReplayTruncated(createScreen([change]).events as ScreenSnapshotEvent[])).toBe(false);
+  expect(isCapturedScreen(malformed)).toBe(false);
+  expect(isReplayTruncated(malformed.events as ScreenSnapshotEvent[])).toBe(false);
 });

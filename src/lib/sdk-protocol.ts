@@ -91,6 +91,7 @@ export function isWidgetToHostMessage(value: unknown): value is WidgetToHostMess
     case 'close':
       return true;
     case 'screen:capture':
+    case 'flow:capture':
       return isRequestId(value.payload.requestId);
     case 'submitted':
       return typeof value.payload.feedbackId === 'string' && value.payload.feedbackId.length > 0;

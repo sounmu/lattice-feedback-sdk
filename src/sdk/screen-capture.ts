@@ -14,7 +14,9 @@ import {
 import {
   createCommentPinEvent,
   createEditMoveEvent,
+  createReplayTruncatedEvent,
   RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
+  RRWEB_INCREMENTAL_EVENT_TYPE,
   RRWEB_META_EVENT_TYPE,
   SCREEN_SNAPSHOT_FORMAT,
 } from '@/lib/screen-snapshot';
@@ -23,6 +25,9 @@ import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError 
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
+import type { ReplayRecording } from '@/sdk/flow-replay-recorder';
+import { createReplayAssetRoot } from '@/sdk/replay-assets';
+import { sanitizeReplayEvents, trimReplayStart } from '@/sdk/replay-sanitize';
 import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
 
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
@@ -33,8 +38,8 @@ export interface ScreenMarkSources {
   edits: readonly EditMoveSource[];
 }
 
-const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
-const MASKED_SELECTOR = '[data-lattice-mask]';
+export const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
+export const MASKED_SELECTOR = '[data-lattice-mask]';
 const ASSET_FETCH_TIMEOUT_MS = 10_000;
 // The widget waits 30 s for the capture; this leaves time to serialize and answer.
 const ASSET_COLLECTION_DURATION_MS = 15_000;
@@ -86,7 +91,7 @@ async function fetchSameOriginAsset(url: string, maxBytes: number, timeoutMs: nu
 
 // CSS images that captured elements actually show. Elements in a blocked region are skipped, so a
 // stylesheet shared with them cannot carry their images into the saved screen.
-function findUsedCssImageUrls(excludedSelector: string): Set<string> {
+export function findUsedCssImageUrls(excludedSelector: string): Set<string> {
   const urls = new Set<string>();
   for (const element of document.querySelectorAll('*')) {
     if (element.closest(excludedSelector)) {
@@ -189,6 +194,60 @@ export async function captureScreen(
       ...pins.map((pin) => createCommentPinEvent(pin, capturedAt)),
       ...moves.map((move) => createEditMoveEvent(move, capturedAt)),
     ],
+    missingAssets,
+  };
+  return { screen, assetFiles };
+}
+
+function findLoadedFontFamilies(): Set<string> {
+  const families = new Set<string>();
+  document.fonts.forEach((fontFace) => {
+    if (fontFace.status === 'loaded') {
+      families.add(normalizeFontFamily(fontFace.family));
+    }
+  });
+  return families;
+}
+
+/**
+ * Turns a recorded Flow into a saved screen: its first full snapshot plus the page changes after it.
+ * The same exclusions as a still screen are applied to every recorded node and attribute change, and the
+ * fonts and images they refer to are pulled out as files. A recording that lost its later part ends with a
+ * marker event.
+ */
+export async function captureRecording(recording: ReplayRecording, sdkSelector: string): Promise<ScreenCapture> {
+  const [meta, full, ...rest] = trimReplayStart(recording.events, recording.page.url);
+  if (meta?.type !== RRWEB_META_EVENT_TYPE || full?.type !== RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
+    throw new Error('The recording does not start with a full snapshot.');
+  }
+  // A later Meta or FullSnapshot (a checkout) is not expected; only the changes are kept after the first pair.
+  const events = [meta, full, ...rest.filter((event) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE)];
+  const elements = sanitizeReplayEvents(events);
+  const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
+  const assetRoot = createReplayAssetRoot(events, elements);
+  const { assetFiles, missingAssets } = await extractSnapshotAssets(assetRoot.root, {
+    pageOrigin: window.location.origin,
+    loadedFontFamilies: findLoadedFontFamilies(),
+    // Images the page showed while recording count too, not only those still shown at the end.
+    usedCssImageUrls: new Set([...recording.usedCssImageUrls, ...findUsedCssImageUrls(excludedSelector)]),
+    // As for a saved screen, the file the browser chose from srcset or <picture> is the one kept.
+    findLiveImage: (serialized) => (serialized.id === undefined ? null : recording.liveImageSources.get(serialized.id) ?? null),
+    fetchAsset: fetchSameOriginAsset,
+    maxDurationMs: ASSET_COLLECTION_DURATION_MS,
+    matchesMedia: (query) => window.matchMedia(query).matches,
+    maxAssetBytes: MAX_SNAPSHOT_ASSET_BYTES,
+    maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
+    maxAssetCount: MAX_SNAPSHOT_ASSETS,
+  });
+  assetRoot.applyRewrites();
+  if (recording.truncated) {
+    events.push(createReplayTruncatedEvent(events[events.length - 1].timestamp));
+  }
+  const screen: CapturedScreen = {
+    format: SCREEN_SNAPSHOT_FORMAT,
+    capturedAt: recording.startedAt,
+    page: recording.page,
+    events,
     missingAssets,
   };
   return { screen, assetFiles };

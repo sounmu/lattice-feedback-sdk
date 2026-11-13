@@ -81,8 +81,10 @@ export type CaptureCommand = CaptureStartMessage | CaptureCancelMessage | FlowSt
   CommentAddMessage | AttachmentRemoveMessage | DraftResetMessage;
 
 export type ScreenCaptureMessage = ProtocolMessage<'screen:capture', ScreenCaptureRequest>;
+// After a Flow is attached, the widget asks for its replay; the SDK answers with 'screen:captured' once.
+export type FlowCaptureMessage = ProtocolMessage<'flow:capture', ScreenCaptureRequest>;
 
-export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage | ScreenCaptureMessage;
+export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage | ScreenCaptureMessage | FlowCaptureMessage;
 
 export type HostToWidgetMessageType = HostToWidgetMessage['type'];
 export type WidgetToHostMessageType = WidgetToHostMessage['type'];

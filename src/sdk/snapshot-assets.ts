@@ -7,7 +7,11 @@ import { MAX_MISSING_SNAPSHOT_ASSETS } from '@/lib/feedback-limits';
 import { createAssetReference } from '@/lib/snapshot-asset-references';
 import type { MissingSnapshotAsset } from '@/types/screen-snapshot';
 
-type SnapshotAttributes = Record<string, string | number | boolean | null>;
+/** How rrweb records a style attribute that changed during a Flow: property by property instead of as text. */
+export type SnapshotStyleChange = Record<string, string | false | [string, string]>;
+
+/** Attribute values of a serialized node. Only a recorded attribute change carries a style as an object. */
+export type SnapshotAttributes = Record<string, string | number | boolean | null | SnapshotStyleChange>;
 
 /** The part of an rrweb serialized node this module reads and rewrites. */
 export interface SnapshotNode {
@@ -58,13 +62,16 @@ const FONT_FACE_PATTERN = /@font-face\s*\{[^}]*\}/g;
 const FONT_FAMILY_PATTERN = /font-family\s*:\s*([^;}]+)/i;
 const CSS_URL_PATTERN = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/g;
 
-// The descriptor ("2x", "800w") of the srcset candidate for url, '' for a candidate without one, null when absent.
+export interface SrcsetCandidate {
+  url: string;
+  /** "2x" or "800w"; '' when the candidate has none. */
+  descriptor: string;
+}
+
 // Follows the HTML srcset parser: a URL is a run of non-whitespace and may contain commas; only a comma
 // after the URL (or trailing it) separates candidates.
-function findSrcsetDescriptor(srcset: unknown, url: string): string | null {
-  if (typeof srcset !== 'string') {
-    return null;
-  }
+export function parseSrcset(srcset: string): SrcsetCandidate[] {
+  const candidates: SrcsetCandidate[] = [];
   let position = 0;
   while (position < srcset.length) {
     position += /^[\s,]*/.exec(srcset.slice(position))?.[0].length ?? 0;
@@ -82,11 +89,17 @@ function findSrcsetDescriptor(srcset: unknown, url: string): string | null {
       descriptor = srcset.slice(position, end).trim();
       position = end + 1;
     }
-    if (candidateUrl === url) {
-      return descriptor;
-    }
+    candidates.push({ url: candidateUrl, descriptor });
   }
-  return null;
+  return candidates;
+}
+
+// The descriptor of the srcset candidate for url, null when the srcset does not list it.
+function findSrcsetDescriptor(srcset: unknown, url: string): string | null {
+  if (typeof srcset !== 'string') {
+    return null;
+  }
+  return parseSrcset(srcset).find((candidate) => candidate.url === url)?.descriptor ?? null;
 }
 
 export function normalizeFontFamily(value: string): string {

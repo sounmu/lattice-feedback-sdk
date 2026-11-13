@@ -13,7 +13,8 @@ import {
   type MoveBox,
   type PinBox,
 } from '@/components/admin/ScreenMarkOverlay';
-import { findCommentPins, findEditMoves } from '@/lib/screen-snapshot';
+import { MAX_REPLAY_DURATION_MS } from '@/lib/feedback-limits';
+import { findCommentPins, findEditMoves, hasReplayEvents, isReplayTruncated } from '@/lib/screen-snapshot';
 import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
 import type {
   MissingSnapshotAssetReason,
@@ -32,6 +33,8 @@ const UNAUTHORIZED_STATUS = 401;
 const ADMIN_TOKEN_STORAGE_KEY = 'lattice-feedback:admin-token';
 const ADMIN_TOKEN_EVENT = 'lattice-feedback:admin-token-change';
 const BUTTON_CLASS = 'min-h-11 rounded border bg-white px-3 py-2 text-sm aria-pressed:bg-gray-900 aria-pressed:text-white';
+const REPLAY_TRUNCATED_MESSAGE =
+  `기록 한도(${MAX_REPLAY_DURATION_MS / 60_000}분·이벤트 수)를 넘었거나 허용되지 않은 페이지로 이동해 뒷부분이 재생에 포함되지 않았습니다.`;
 
 const MISSING_ASSET_REASON_LABELS: Record<MissingSnapshotAssetReason, string> = {
   fetch_failed: '가져오지 못함',
@@ -328,6 +331,49 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
   positionProposedClones(replayer, moves);
 }
 
+function formatPlaybackTime(milliseconds: number): string {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
+}
+
+interface ReplayControlsProps {
+  isPlaying: boolean;
+  currentMs: number;
+  totalMs: number;
+  onPlay: () => void;
+  onPause: () => void;
+  onSeek: (milliseconds: number) => void;
+}
+
+function ReplayControls({ isPlaying, currentMs, totalMs, onPlay, onPause, onSeek }: ReplayControlsProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-2" aria-label="흐름 재생">
+      <button type="button" className={BUTTON_CLASS} onClick={isPlaying ? onPause : onPlay}>
+        {isPlaying ? '일시정지' : '재생'}
+      </button>
+      <button type="button" className={BUTTON_CLASS} onClick={() => onSeek(0)}>
+        처음부터
+      </button>
+      <input
+        type="range"
+        aria-label="재생 위치"
+        className="min-w-48 flex-1"
+        min={0}
+        max={Math.max(totalMs, 1)}
+        step={100}
+        value={Math.min(currentMs, totalMs)}
+        onChange={(event) => onSeek(Number(event.target.value))}
+      />
+      <span className="text-xs tabular-nums text-gray-600">
+        {formatPlaybackTime(currentMs)} / {formatPlaybackTime(totalMs)}
+      </span>
+      <span className="w-full text-xs text-gray-600">
+        흐름 기록 동안의 화면 변화를 재생합니다. 입력값은 가려져 있으며, 새로고침·페이지 이동 전의 구간은 포함되지 않습니다.
+      </span>
+    </div>
+  );
+}
+
 function AdminTokenForm() {
   const [value, setValue] = useState('');
 
@@ -393,6 +439,12 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
   const [selectedPin, setSelectedPin] = useState<number | null>(null);
   const [showsProposed, setShowsProposed] = useState(false);
   const replayerRef = useRef<Replayer | null>(null);
+  const isReplay = useMemo(() => hasReplayEvents(snapshot.events), [snapshot]);
+  const isTruncated = useMemo(() => isReplayTruncated(snapshot.events), [snapshot]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentMs, setCurrentMs] = useState(0);
+  const [totalMs, setTotalMs] = useState(0);
+  const progressFrame = useRef<number | null>(null);
   const showsProposedRef = useRef(false);
 
   const measureMarks = useCallback(() => {
@@ -406,6 +458,56 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       positionProposedClones(replayer, moves);
     }
   }, [pins, moves]);
+
+  function stopProgress() {
+    if (progressFrame.current !== null) {
+      window.cancelAnimationFrame(progressFrame.current);
+      progressFrame.current = null;
+    }
+  }
+
+  // Follows the replayer's clock while playing; the replayer itself keeps the time.
+  function followProgress() {
+    stopProgress();
+    const tick = () => {
+      const replayer = replayerRef.current;
+      if (!replayer) {
+        return;
+      }
+      setCurrentMs(replayer.getCurrentTime());
+      progressFrame.current = window.requestAnimationFrame(tick);
+    };
+    progressFrame.current = window.requestAnimationFrame(tick);
+  }
+
+  function play() {
+    const replayer = replayerRef.current;
+    if (!replayer) {
+      return;
+    }
+    replayer.play(currentMs >= totalMs ? 0 : currentMs);
+    setIsPlaying(true);
+    followProgress();
+  }
+
+  function pause() {
+    replayerRef.current?.pause();
+    stopProgress();
+    setIsPlaying(false);
+  }
+
+  function seek(milliseconds: number) {
+    const replayer = replayerRef.current;
+    if (!replayer) {
+      return;
+    }
+    if (isPlaying) {
+      replayer.play(milliseconds);
+    } else {
+      replayer.pause(milliseconds);
+    }
+    setCurrentMs(milliseconds);
+  }
 
   function toggleProposed() {
     const next = !showsProposedRef.current;
@@ -490,6 +592,17 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       }
       replayer.pause(0);
       replayerRef.current = replayer;
+      if (isReplay) {
+        const finished = replayer;
+        finished.on('finish', () => {
+          stopProgress();
+          setIsPlaying(false);
+          setCurrentMs(finished.getMetaData().totalTime);
+        });
+        setTotalMs(replayer.getMetaData().totalTime);
+        setCurrentMs(0);
+        setIsPlaying(false);
+      }
       showsProposedRef.current = false;
       if (hasMarks) {
         followMarks();
@@ -502,12 +615,13 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       isCancelled = true;
       stage.removeEventListener('wheel', handleWheel);
       frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
+      stopProgress();
       replayer?.destroy();
       replayerRef.current = null;
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [snapshot, projectKey, token, pins, moves, measureMarks]);
+  }, [snapshot, projectKey, token, pins, moves, measureMarks, isReplay]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -517,6 +631,14 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
 
   return (
     <div className="flex flex-col gap-2">
+      {isReplay && (
+        <ReplayControls isPlaying={isPlaying} currentMs={currentMs} totalMs={totalMs} onPlay={play} onPause={pause} onSeek={seek} />
+      )}
+      {isTruncated && (
+        <p role="alert" className="text-xs text-amber-700">
+          {REPLAY_TRUNCATED_MESSAGE}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={BUTTON_CLASS} aria-pressed={zoomMode === 'fit'} onClick={() => setZoomMode('fit')}>
           화면에 맞춤
@@ -546,7 +668,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
               ref={stageRef}
               role="img"
               aria-label="저장된 화면"
-              className="[&_.replayer-mouse]:hidden [&_.replayer-mouse-tail]:hidden"
+              className={isReplay ? '[&_.replayer-mouse-tail]:hidden' : '[&_.replayer-mouse]:hidden [&_.replayer-mouse-tail]:hidden'}
               style={{ width: viewportWidth, height: viewportHeight }}
             />
             <EditMoveOverlay boxes={moveBoxes} scale={scale} showsProposed={showsProposed} />
