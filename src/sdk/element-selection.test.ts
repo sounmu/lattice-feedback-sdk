@@ -47,8 +47,8 @@ let overlay: { attributes: Record<string, string>; style: Record<string, string>
 let appended: unknown[];
 let hostButton: FakeElement;
 
-function dispatch(type: string, target: unknown, key?: string): FakeEvent {
-  const event = createEvent(type, target, key);
+function dispatch(type: string, target: unknown, key?: string, point?: { clientX: number; clientY: number }): FakeEvent {
+  const event = Object.assign(createEvent(type, target, key), point);
   for (const listener of listeners.get(type) ?? []) {
     listener(event);
   }
@@ -186,6 +186,14 @@ describe('element selection', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith(selection, { x: expect.any(Number), y: expect.any(Number) });
+  });
+
+  it('keeps where the element was pressed when the host fires its own click at 0,0', () => {
+    const { allowed, selection, onSelect } = createHarness();
+    dispatch('pointerdown', allowed, undefined, { clientX: 35, clientY: 30 });
+    dispatch('click', allowed, undefined, { clientX: 0, clientY: 0 });
+
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(selection, { x: 0.25, y: 0.25 });
   });
 
   it('selects on touchend without allowing the host touch action', () => {

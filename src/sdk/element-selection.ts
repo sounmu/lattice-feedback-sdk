@@ -13,20 +13,41 @@ export interface SelectionPoint {
   y: number;
 }
 
-function clampFraction(value: number): number {
-  return Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0.5;
+interface ClientPoint {
+  clientX: number;
+  clientY: number;
 }
 
-function findSelectionPoint(element: HTMLElement, event: Event): SelectionPoint {
-  const bounds = element.getBoundingClientRect();
-  const source = 'changedTouches' in event ? (event as TouchEvent).changedTouches[0] : (event as MouseEvent);
-  if (!source || bounds.width <= 0 || bounds.height <= 0) {
-    return { x: 0.5, y: 0.5 };
+const CENTER_POINT: SelectionPoint = { x: 0.5, y: 0.5 };
+
+function findClientPoint(event: Event): ClientPoint | null {
+  if ('changedTouches' in event) {
+    return (event as TouchEvent).changedTouches[0] ?? null;
   }
-  return {
-    x: clampFraction((source.clientX - bounds.left) / bounds.width),
-    y: clampFraction((source.clientY - bounds.top) / bounds.height),
-  };
+  const { clientX, clientY } = event as MouseEvent;
+  return Number.isFinite(clientX) && Number.isFinite(clientY) ? { clientX, clientY } : null;
+}
+
+/**
+ * The first candidate that lies inside the element, as fractions of its size. A click the host fires
+ * itself (a label or widget calling input.click()) reports 0,0, so the earlier press is tried next.
+ */
+function findSelectionPoint(element: HTMLElement, candidates: ReadonlyArray<ClientPoint | null>): SelectionPoint {
+  const bounds = element.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    return CENTER_POINT;
+  }
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    const x = (candidate.clientX - bounds.left) / bounds.width;
+    const y = (candidate.clientY - bounds.top) / bounds.height;
+    if (x >= 0 && x <= 1 && y >= 0 && y <= 1) {
+      return { x, y };
+    }
+  }
+  return CENTER_POINT;
 }
 
 export interface ElementSelection {
@@ -63,6 +84,7 @@ export function startElementSelection(options: ElementSelectionOptions): Element
   overlay.setAttribute('aria-hidden', 'true');
   overlay.style.cssText = OVERLAY_STYLE;
   let highlightedElement: HTMLElement | null = null;
+  let lastPress: ClientPoint | null = null;
   let isActive = true;
 
   const hideOutline = (): void => {
@@ -101,6 +123,7 @@ export function startElementSelection(options: ElementSelectionOptions): Element
     event.preventDefault();
     event.stopImmediatePropagation();
     if (event.type === 'pointerdown' || event.type === 'touchstart') {
+      lastPress = findClientPoint(event);
       // Touch has no hover, so show the outline as soon as the finger lands.
       highlight(event.target);
       return;
@@ -112,7 +135,7 @@ export function startElementSelection(options: ElementSelectionOptions): Element
     if (!selection) {
       return;
     }
-    const point = findSelectionPoint(selection.element, event);
+    const point = findSelectionPoint(selection.element, [findClientPoint(event), lastPress]);
     cleanup();
     options.onSelect(selection, point);
   };
