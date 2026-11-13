@@ -5,6 +5,7 @@ import {
   MAX_COMMENTS,
   MAX_EDITS,
   MAX_MISSING_SNAPSHOT_ASSETS,
+  MAX_REPLAY_EVENTS,
   MAX_SNAPSHOT_ASSETS,
 } from '@/lib/feedback-limits';
 import type {
@@ -22,6 +23,8 @@ export const SCREEN_SNAPSHOT_FORMAT: ScreenSnapshotFormat = 'rrweb-2';
 // rrweb EventType values. A saved screen is one Meta event followed by one FullSnapshot event,
 // then one Custom event per comment pinned or element moved on the screen.
 export const RRWEB_FULL_SNAPSHOT_EVENT_TYPE = 2;
+// A recorded Flow also carries the page's changes after the full snapshot as Incremental events.
+export const RRWEB_INCREMENTAL_EVENT_TYPE = 3;
 export const RRWEB_META_EVENT_TYPE = 4;
 export const RRWEB_CUSTOM_EVENT_TYPE = 5;
 export const COMMENT_PIN_EVENT_TAG = 'lattice-comment-pin';
@@ -121,6 +124,11 @@ export function findCommentPins(events: readonly ScreenSnapshotEvent[]): ScreenC
   return events.filter(isCommentPinEvent).map((event) => (event.data as { payload: ScreenCommentPin }).payload);
 }
 
+/** True for a recorded Flow, which the viewer plays instead of showing a still screen. */
+export function hasReplayEvents(events: readonly ScreenSnapshotEvent[]): boolean {
+  return events.some((event) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE);
+}
+
 function isMissingAsset(value: unknown): boolean {
   return (
     isRecord(value) &&
@@ -148,13 +156,13 @@ export function isCapturedScreen(value: unknown): value is CapturedScreen {
   if (![page.viewportWidth, page.viewportHeight, page.scrollX, page.scrollY].every(isFiniteNumber)) {
     return false;
   }
-  if (!Array.isArray(events) || events.length < 2 || events.length > 2 + MAX_SCREEN_MARK_EVENTS) {
+  if (!Array.isArray(events) || events.length < 2 || events.length > 2 + MAX_SCREEN_MARK_EVENTS + MAX_REPLAY_EVENTS) {
     return false;
   }
   if (!isSnapshotEvent(events[0], RRWEB_META_EVENT_TYPE) || !isSnapshotEvent(events[1], RRWEB_FULL_SNAPSHOT_EVENT_TYPE)) {
     return false;
   }
-  if (!events.slice(2).every((event) => isCommentPinEvent(event) || isEditMoveEvent(event))) {
+  if (!events.slice(2).every((event) => isCommentPinEvent(event) || isEditMoveEvent(event) || isSnapshotEvent(event, RRWEB_INCREMENTAL_EVENT_TYPE))) {
     return false;
   }
   return (

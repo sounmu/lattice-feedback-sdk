@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   MAX_MISSING_SNAPSHOT_ASSETS,
   MAX_PAGE_TITLE_LENGTH,
+  MAX_REPLAY_EVENTS,
   MAX_SNAPSHOT_ASSETS,
   truncateText,
 } from '@/lib/feedback-limits';
@@ -13,6 +14,7 @@ import {
   MAX_SCREEN_MARK_EVENTS,
   RRWEB_CUSTOM_EVENT_TYPE,
   RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
+  RRWEB_INCREMENTAL_EVENT_TYPE,
   RRWEB_META_EVENT_TYPE,
   SCREEN_SNAPSHOT_FORMAT,
 } from '@/lib/screen-snapshot';
@@ -77,8 +79,8 @@ export const createScreenSnapshotInputSchema = z.object({
   }),
   events: z
     .tuple([createEventSchema(RRWEB_META_EVENT_TYPE), createEventSchema(RRWEB_FULL_SNAPSHOT_EVENT_TYPE)])
-    .rest(z.union([commentPinEventSchema, editMoveEventSchema]))
-    .refine((events) => events.length <= 2 + MAX_SCREEN_MARK_EVENTS, { message: 'too many screen marks' }),
+    .rest(z.union([commentPinEventSchema, editMoveEventSchema, createEventSchema(RRWEB_INCREMENTAL_EVENT_TYPE)]))
+    .refine((events) => events.length <= 2 + MAX_SCREEN_MARK_EVENTS + MAX_REPLAY_EVENTS, { message: 'too many events' }),
   missingAssets: z
     .array(
       z.object({

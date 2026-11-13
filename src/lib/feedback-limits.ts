@@ -5,6 +5,9 @@ export const MAX_COMMENT_LENGTH = 1000;
 export const MAX_COMMENTS = 20;
 export const MAX_EDITS = 10;
 export const MAX_FLOW_EVENTS = 200;
+// rrweb events kept for replaying a Flow, and how long they are collected.
+export const MAX_REPLAY_EVENTS = 3000;
+export const MAX_REPLAY_DURATION_MS = 5 * 60 * 1000;
 export const MAX_FEEDBACK_BYTES = 65536;
 
 // Saved screens carry the page's DOM, CSS, and same-origin fonts/images, so they have their own budgets.
