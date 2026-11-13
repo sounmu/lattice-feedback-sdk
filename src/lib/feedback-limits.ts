@@ -13,6 +13,9 @@ export const MAX_FEEDBACK_BYTES = 65536;
 // Saved screens carry the page's DOM, CSS, and same-origin fonts/images, so they have their own budgets.
 // Fonts and images are uploaded separately, so the screen itself stays under Vercel's 4.5 MB request limit.
 export const MAX_SCREEN_SNAPSHOT_BYTES = 4 * 1024 * 1024;
+// A Flow replay stops collecting below the screen limit, leaving room for the rest of the upload
+// (page details, file hashes, missing-file list).
+export const MAX_REPLAY_BYTES = MAX_SCREEN_SNAPSHOT_BYTES - 256 * 1024;
 export const MAX_SNAPSHOT_ASSET_BYTES = 3 * 1024 * 1024;
 export const MAX_SNAPSHOT_ASSETS_TOTAL_BYTES = 6 * 1024 * 1024;
 export const MAX_MISSING_SNAPSHOT_ASSETS = 50;

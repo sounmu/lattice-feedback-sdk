@@ -13,7 +13,15 @@ vi.mock('@rrweb/record', () => ({
         recorder.stops += 1;
       };
     },
-    { mirror: { getId: (image: { id: number }) => image.id } },
+    {
+      mirror: {
+        getId: (image: { id: number }) => image.id,
+        getNode: (id: number) => {
+          const image = page.images.find((candidate) => candidate.id === id);
+          return image ? { ...image, closest: () => null } : null;
+        },
+      },
+    },
   ),
 }));
 vi.mock('@/sdk/screen-capture', () => ({
@@ -23,7 +31,7 @@ vi.mock('@/sdk/screen-capture', () => ({
 }));
 
 const { startReplayRecording } = await import('@/sdk/flow-replay-recorder');
-const { MAX_REPLAY_EVENTS } = await import('@/lib/feedback-limits');
+const { MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS } = await import('@/lib/feedback-limits');
 
 const START = 1_000_000;
 
@@ -42,19 +50,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('keeps the file each image showed first, from the start or, for later images, from the end', () => {
+it('keeps the file each image showed when it was recorded: at the start, or when it was added later', () => {
   page.images = [{ id: 7, currentSrc: 'https://host.example.com/actual-2x.png' }];
   const recording = startReplayRecording('lattice-feedback-root');
   recorder.emit({ type: 4, timestamp: START, data: {} });
   recorder.emit({ type: 2, timestamp: START, data: {} });
   page.images = [
     { id: 7, currentSrc: 'https://host.example.com/actual-1x.png' },
-    { id: 9, currentSrc: 'https://host.example.com/added.png' },
+    { id: 9, currentSrc: 'https://host.example.com/added-first.png' },
   ];
+  const added = { type: 2, tagName: 'div', childNodes: [{ type: 2, id: 9, tagName: 'img', attributes: {} }] };
+  recorder.emit({ type: 3, timestamp: START + 10, data: { source: 0, adds: [{ node: added }] } });
+  page.images = [{ id: 9, currentSrc: 'https://host.example.com/added-later.png' }];
 
   expect([...(recording.stop()?.liveImageSources ?? [])]).toEqual([
     [7, 'https://host.example.com/actual-2x.png'],
-    [9, 'https://host.example.com/added.png'],
+    [9, 'https://host.example.com/added-first.png'],
   ]);
 });
 
@@ -91,5 +102,25 @@ it('stops observing the page once the event limit is reached and keeps what was 
 
   expect(recorder.stops).toBe(1);
   expect(result?.events).toHaveLength(MAX_REPLAY_EVENTS);
+  expect(result?.truncated).toBe(true);
+});
+
+it('stops before page changes outgrow an upload, keeping the first snapshot and the changes that fit', async () => {
+  page.images = [];
+  recorder.stops = 0;
+  // Three of these fit the budget; the fourth does not.
+  const text = 'x'.repeat(Math.floor(MAX_REPLAY_BYTES / 3.5));
+  const recording = startReplayRecording('lattice-feedback-root');
+  recorder.emit({ type: 4, timestamp: START, data: {} });
+  recorder.emit({ type: 2, timestamp: START, data: {} });
+  for (let index = 0; index < 5; index += 1) {
+    recorder.emit({ type: 3, timestamp: START + 1, data: { source: 0, texts: [{ id: 1, value: text }] } });
+  }
+  await Promise.resolve();
+
+  const result = recording.stop();
+
+  expect(recorder.stops).toBe(1);
+  expect(result?.events.map((event) => event.type)).toEqual([4, 2, 3, 3, 3]);
   expect(result?.truncated).toBe(true);
 });
