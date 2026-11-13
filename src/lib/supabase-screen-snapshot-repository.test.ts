@@ -32,6 +32,7 @@ const summaryRow = {
 const received: ReceivedRequest[] = [];
 let responseBodies: unknown[] = [];
 let responseStatus = 200;
+let responseStatuses: number[] = [];
 let serverUrl = '';
 const server = createServer(async (request, response) => {
   let body = '';
@@ -39,7 +40,7 @@ const server = createServer(async (request, response) => {
     body += chunk;
   }
   received.push({ method: request.method, url: new URL(request.url ?? '/', serverUrl), headers: request.headers, body });
-  response.writeHead(responseStatus, { 'Content-Type': 'application/json' });
+  response.writeHead(responseStatuses.shift() ?? responseStatus, { 'Content-Type': 'application/json' });
   response.end(JSON.stringify(responseBodies.shift() ?? []));
 });
 
@@ -63,11 +64,15 @@ beforeEach(() => {
   received.length = 0;
   responseBodies = [];
   responseStatus = 200;
+  responseStatuses = [];
   vi.stubEnv('SUPABASE_URL', serverUrl);
   vi.stubEnv('SUPABASE_SECRET_KEY', 'sb_secret_local-test-only');
 });
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
 function getSearch(request: ReceivedRequest): Record<string, string> {
   return Object.fromEntries(request.url.searchParams);
@@ -124,6 +129,21 @@ describe('Supabase saved screen repository', () => {
     expect(received[1].method).toBe('PATCH');
     expect(getSearch(received[1])).toMatchObject({ project_key: 'eq.demo', feedback_id: `eq.${FEEDBACK_ID}` });
     expect(JSON.parse(received[1].body)).toEqual({ feedback_id: null });
+  });
+
+  it('undoes a claim whose request failed, because the update may have committed anyway', async () => {
+    const repository = createSupabaseScreenSnapshotRepository();
+    responseStatuses = [504, 200];
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(repository.claimForFeedback('demo', [SNAPSHOT_ID], FEEDBACK_ID)).rejects.toBeInstanceOf(
+      FeedbackStorageUnavailableError,
+    );
+
+    expect(received).toHaveLength(2);
+    expect(getSearch(received[1])).toMatchObject({ project_key: 'eq.demo', feedback_id: `eq.${FEEDBACK_ID}` });
+    expect(JSON.parse(received[1].body)).toEqual({ feedback_id: null });
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it('lists the screens of one feedback oldest first', async () => {
