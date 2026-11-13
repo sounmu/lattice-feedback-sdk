@@ -72,6 +72,11 @@ export function startReplayRecording(sdkSelector: string): ReplayRecorder {
     emit: (event) => {
       const recorded = event as ScreenSnapshotEvent;
       if (events.length >= MAX_REPLAY_EVENTS || recorded.timestamp - startedAtMs > MAX_REPLAY_DURATION_MS) {
+        // Nothing more can be saved, so rrweb stops observing the page; the events so far are kept.
+        // Stopped after this callback returns, since rrweb may still be inside its own emit loop.
+        if (!truncated) {
+          queueMicrotask(end);
+        }
         truncated = true;
         return;
       }

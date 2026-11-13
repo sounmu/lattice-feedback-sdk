@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
-const recorder = vi.hoisted(() => ({ emit: (() => undefined) as (event: ScreenSnapshotEvent) => void }));
+const recorder = vi.hoisted(() => ({ emit: (() => undefined) as (event: ScreenSnapshotEvent) => void, stops: 0 }));
 const usedNow = vi.hoisted(() => ({ urls: [] as string[] }));
 const page = vi.hoisted(() => ({ images: [] as { id: number; currentSrc: string }[] }));
 
@@ -9,7 +9,9 @@ vi.mock('@rrweb/record', () => ({
   record: Object.assign(
     (options: { emit: (event: ScreenSnapshotEvent) => void }) => {
       recorder.emit = options.emit;
-      return () => undefined;
+      return () => {
+        recorder.stops += 1;
+      };
     },
     { mirror: { getId: (image: { id: number }) => image.id } },
   ),
@@ -21,6 +23,7 @@ vi.mock('@/sdk/screen-capture', () => ({
 }));
 
 const { startReplayRecording } = await import('@/sdk/flow-replay-recorder');
+const { MAX_REPLAY_EVENTS } = await import('@/lib/feedback-limits');
 
 const START = 1_000_000;
 
@@ -71,4 +74,22 @@ it('keeps CSS images shown at the start or after a later change even when they a
     'https://host.example.com/start.png',
     'https://host.example.com/banner.png',
   ]);
+});
+
+it('stops observing the page once the event limit is reached and keeps what was recorded as truncated', async () => {
+  page.images = [];
+  recorder.stops = 0;
+  const recording = startReplayRecording('lattice-feedback-root');
+  recorder.emit({ type: 4, timestamp: START, data: {} });
+  recorder.emit({ type: 2, timestamp: START, data: {} });
+  for (let index = 0; index < MAX_REPLAY_EVENTS; index += 1) {
+    recorder.emit({ type: 3, timestamp: START + 1, data: { source: 1 } });
+  }
+  await Promise.resolve();
+
+  const result = recording.stop();
+
+  expect(recorder.stops).toBe(1);
+  expect(result?.events).toHaveLength(MAX_REPLAY_EVENTS);
+  expect(result?.truncated).toBe(true);
 });
