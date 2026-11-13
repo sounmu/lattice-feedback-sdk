@@ -119,17 +119,27 @@ export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotReposito
       if (!uniqueIds.every(isUuid)) {
         return false;
       }
-      // One conditional UPDATE: a screen another request already claimed is not matched, so it never moves.
-      const rows = await requestSupabaseRows(configuration, TABLE, {
-        select: 'id',
-        project_key: `eq.${projectKey}`,
-        id: toIdList(uniqueIds),
-        feedback_id: 'is.null',
-      }, {
-        method: 'PATCH',
-        body: JSON.stringify({ feedback_id: feedbackId }),
-      });
-      if (parseRows(idRowsSchema, rows).length === uniqueIds.length) {
+      let claimedCount: number;
+      try {
+        // One conditional UPDATE: a screen another request already claimed is not matched, so it never moves.
+        const rows = await requestSupabaseRows(configuration, TABLE, {
+          select: 'id',
+          project_key: `eq.${projectKey}`,
+          id: toIdList(uniqueIds),
+          feedback_id: 'is.null',
+        }, {
+          method: 'PATCH',
+          body: JSON.stringify({ feedback_id: feedbackId }),
+        });
+        claimedCount = parseRows(idRowsSchema, rows).length;
+      } catch (error) {
+        // The UPDATE may have committed even though its response was lost, so the claim is undone before failing.
+        await releaseFromFeedback(projectKey, feedbackId).catch((releaseError: unknown) =>
+          console.error('Releasing saved screens after a failed claim failed.', releaseError),
+        );
+        throw error;
+      }
+      if (claimedCount === uniqueIds.length) {
         return true;
       }
       await releaseFromFeedback(projectKey, feedbackId);
