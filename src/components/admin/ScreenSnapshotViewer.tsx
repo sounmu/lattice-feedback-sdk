@@ -154,8 +154,49 @@ function getMoveDelta(move: ScreenEditMove): { x: number; y: number } {
 }
 
 const MOVE_CLONE_ATTRIBUTE = 'data-lattice-move-clone';
-// Inherited text styles are copied because the clone leaves the element's ancestors.
-const INHERITED_STYLE_PROPERTIES = ['color', 'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing'];
+// Styling a very large subtree element by element would stall the viewer; the rest keeps its own rules.
+const MAX_STYLED_CLONE_ELEMENTS = 500;
+
+// The clone leaves the element's ancestors, so rules such as ".toolbar button" and inherited values no
+// longer reach it. Each element's resolved styles are written onto its copy before it is moved.
+function copyResolvedStyles(source: Element, target: Element, view: Window, budget: { remaining: number }): void {
+  const style = (target as Partial<ElementCSSInlineStyle>).style;
+  if (budget.remaining <= 0 || !style) {
+    return;
+  }
+  budget.remaining -= 1;
+  const computed = view.getComputedStyle(source);
+  for (const property of Array.from(computed)) {
+    style.setProperty(property, computed.getPropertyValue(property));
+  }
+  Array.from(source.children).forEach((child, index) => {
+    const copy = target.children[index];
+    if (copy) {
+      copyResolvedStyles(child, copy, view, budget);
+    }
+  });
+}
+
+// The clone sits in document coordinates; it is placed again whenever the page or a container scrolls,
+// because the original (kept in place, only hidden) moves with its scroll container.
+function positionProposedClones(replayer: Replayer, moves: ScreenEditMove[]): void {
+  const frameDocument = replayer.iframe.contentDocument;
+  const view = replayer.iframe.contentWindow;
+  if (!frameDocument || !view) {
+    return;
+  }
+  for (const move of moves) {
+    const element = findMarkedElement(replayer, move.nodeId);
+    const clone = frameDocument.querySelector<HTMLElement>(`[${MOVE_CLONE_ATTRIBUTE}="${move.key}"]`);
+    if (!element || !clone) {
+      continue;
+    }
+    const bounds = element.getBoundingClientRect();
+    const delta = getMoveDelta(move);
+    clone.style.setProperty('left', `${bounds.left + view.scrollX + delta.x}px`);
+    clone.style.setProperty('top', `${bounds.top + view.scrollY + delta.y}px`);
+  }
+}
 
 // The original element keeps its layout box (it is only hidden while the proposal is shown), so its
 // bounds are the original position either way.
@@ -189,26 +230,23 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
       continue;
     }
     const bounds = element.getBoundingClientRect();
-    const computed = view.getComputedStyle(element);
-    const delta = getMoveDelta(move);
     const clone = element.cloneNode(true) as HTMLElement;
-    clone.setAttribute(MOVE_CLONE_ATTRIBUTE, '');
-    for (const property of INHERITED_STYLE_PROPERTIES) {
-      clone.style.setProperty(property, computed.getPropertyValue(property));
-    }
+    clone.setAttribute(MOVE_CLONE_ATTRIBUTE, move.key);
+    copyResolvedStyles(element, clone, view, { remaining: MAX_STYLED_CLONE_ELEMENTS });
     Object.assign(clone.style, {
       position: 'absolute',
-      left: `${bounds.left + view.scrollX + delta.x}px`,
-      top: `${bounds.top + view.scrollY + delta.y}px`,
       width: `${bounds.width}px`,
       height: `${bounds.height}px`,
       margin: '0',
       boxSizing: 'border-box',
+      transform: 'none',
+      visibility: 'visible',
       zIndex: '2147483647',
     });
     frameDocument.documentElement.appendChild(clone);
     element.style.setProperty('visibility', 'hidden');
   }
+  positionProposedClones(replayer, moves);
 }
 
 function AdminTokenForm() {
@@ -285,6 +323,9 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
     }
     setPinBoxes(pins.map((pin) => measurePin(replayer, pin)));
     setMoveBoxes(moves.map((move) => measureMove(replayer, move)));
+    if (showsProposedRef.current) {
+      positionProposedClones(replayer, moves);
+    }
   }, [pins, moves]);
 
   function toggleProposed() {

@@ -33,6 +33,7 @@ it('keeps the recorded rects of a move and adds the node id of the dragged eleme
     [
       { number: 1, key: 'edit-1', label: 'save', element: dragged, ...rects },
       { number: 2, key: 'edit-2', label: 'gone', element: createElement(false), ...rects },
+      { number: 3, key: 'edit-3', label: 'modal', element: createElement(true, 0, 0, 0), ...rects },
     ],
     (element) => (element === dragged ? 4 : -1),
   );
