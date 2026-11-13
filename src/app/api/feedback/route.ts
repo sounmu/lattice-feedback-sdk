@@ -5,22 +5,15 @@ import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
-import { BodyTooLargeError, readBodyTextWithLimit } from '@/lib/http/read-body';
+import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyTextWithLimit } from '@/lib/http/read-body';
 import { consumeRateLimit, getClientAddress, RATE_LIMIT_RETRY_AFTER_SECONDS } from '@/lib/http/rate-limit';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
+import { findScreenSnapshotRepository, type ScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import type { CreateFeedbackResponse, FeedbackListResponse } from '@/types/feedback';
 
 const MAX_BODY_BYTES = 65536;
-
-function isDeclaredBodyTooLarge(request: Request): boolean {
-  const contentLength = request.headers.get('content-length');
-  if (contentLength === null) {
-    return false;
-  }
-  return Number(contentLength) > MAX_BODY_BYTES;
-}
 
 function createPayloadTooLargeResponse() {
   return createApiErrorResponse(413, 'payload_too_large', 'Request body is too large.');
@@ -35,7 +28,7 @@ export async function POST(request: Request) {
     response.headers.set('Retry-After', String(RATE_LIMIT_RETRY_AFTER_SECONDS));
     return response;
   }
-  if (isDeclaredBodyTooLarge(request)) {
+  if (isDeclaredBodyTooLarge(request, MAX_BODY_BYTES)) {
     return createPayloadTooLargeResponse();
   }
 
@@ -73,8 +66,21 @@ export async function POST(request: Request) {
     return createApiErrorResponse(403, 'capture_not_allowed', 'Captured context is not allowed for this project.');
   }
 
+  const { screenSnapshotIds, ...feedbackInput } = parsed.data;
+  let screenSnapshotRepository: ScreenSnapshotRepository | null = null;
+  if (screenSnapshotIds.length > 0) {
+    screenSnapshotRepository = findScreenSnapshotRepository();
+    if (!screenSnapshotRepository) {
+      return createApiErrorResponse(503, 'storage_unavailable', 'Screen storage is unavailable.');
+    }
+    if (!(await screenSnapshotRepository.isAttachable(project.projectKey, screenSnapshotIds))) {
+      return createApiErrorResponse(400, 'screen_snapshot_not_found', 'A saved screen is missing or already submitted.');
+    }
+  }
+
   try {
-    const feedback = await getFeedbackRepository().create(parsed.data);
+    const feedback = await getFeedbackRepository().create(feedbackInput);
+    await screenSnapshotRepository?.attachToFeedback(project.projectKey, screenSnapshotIds, feedback.id);
     const body: CreateFeedbackResponse = { feedback };
     return NextResponse.json(body, { status: 201 });
   } catch (error) {

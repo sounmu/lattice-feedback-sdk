@@ -16,6 +16,7 @@
  * Anything else is ignored silently.
  */
 import type { ElementTarget, FeedbackAttachments, FeedbackReporter, PageContext } from '@/types/feedback';
+import type { CapturedScreen, ScreenCaptureFailureReason } from '@/types/screen-snapshot';
 
 export const MESSAGE_SOURCE = 'lattice-feedback' as const;
 export const PROTOCOL_VERSION = 1 as const;
@@ -48,7 +49,16 @@ export interface CaptureState {
 }
 export type CaptureUpdateMessage = ProtocolMessage<'capture:update', CaptureState>;
 
-export type HostToWidgetMessage = InitMessage | ReporterUpdateMessage | PageUpdateMessage;
+// Saved screens: the widget asks with 'screen:capture', the SDK serializes the host page and answers once.
+export type ScreenCapturedMessage = ProtocolMessage<'screen:captured', { screen: CapturedScreen }>;
+export type ScreenCaptureFailedMessage = ProtocolMessage<'screen:capture-failed', { reason: ScreenCaptureFailureReason }>;
+
+export type HostToWidgetMessage =
+  | InitMessage
+  | ReporterUpdateMessage
+  | PageUpdateMessage
+  | ScreenCapturedMessage
+  | ScreenCaptureFailedMessage;
 
 export type ReadyMessage = ProtocolMessage<'ready', EmptyPayload>;
 export type CloseMessage = ProtocolMessage<'close', EmptyPayload>;
@@ -62,7 +72,9 @@ export type DraftResetMessage = ProtocolMessage<'draft:reset', EmptyPayload>;
 export type CaptureCommand = CaptureStartMessage | CaptureCancelMessage | FlowStopMessage |
   CommentAddMessage | AttachmentRemoveMessage | DraftResetMessage;
 
-export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage;
+export type ScreenCaptureMessage = ProtocolMessage<'screen:capture', EmptyPayload>;
+
+export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage | ScreenCaptureMessage;
 
 export type HostToWidgetMessageType = HostToWidgetMessage['type'];
 export type WidgetToHostMessageType = WidgetToHostMessage['type'];

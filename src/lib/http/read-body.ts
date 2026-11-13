@@ -5,6 +5,14 @@ export class BodyTooLargeError extends Error {
   }
 }
 
+export function isDeclaredBodyTooLarge(request: Request, maxBytes: number): boolean {
+  const contentLength = request.headers.get('content-length');
+  if (contentLength === null) {
+    return false;
+  }
+  return Number(contentLength) > maxBytes;
+}
+
 // Reads at most maxBytes and cancels the stream as soon as the limit is crossed,
 // so an oversized body (with or without content-length) is never fully buffered.
 export async function readBodyTextWithLimit(request: Request, maxBytes: number): Promise<string> {
