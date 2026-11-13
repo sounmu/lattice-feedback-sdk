@@ -29,6 +29,22 @@ export interface ScreenSnapshotEvent {
   data: unknown;
 }
 
+/**
+ * A comment the reporter attached to an element on this screen. Stored as an rrweb custom event
+ * after the full snapshot, so the admin viewer can pin it to the same rebuilt element.
+ */
+export interface ScreenCommentPin {
+  /** 1-based position of the comment in the feedback. */
+  number: number;
+  /** rrweb node id of the element, or null when it was not serialized. */
+  nodeId: number | null;
+  /** Document coordinates at capture time, used when the node cannot be found. */
+  rect: { x: number; y: number; width: number; height: number };
+  /** data-feedback-id or tag name of the element. */
+  label: string;
+  comment: string;
+}
+
 export interface CapturedScreen {
   format: ScreenSnapshotFormat;
   /** ISO timestamp. */

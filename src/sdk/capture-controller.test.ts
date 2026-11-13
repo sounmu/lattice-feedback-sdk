@@ -95,6 +95,22 @@ it('attaches a selected comment and preserves it across mode cancellation', () =
   controller.destroy();
 });
 
+it('keeps the live element of each comment for pinning on saved screens', () => {
+  const { controller } = createHarness();
+  for (const comment of ['first', 'second']) {
+    controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'comment' } }));
+    selectTarget();
+    controller.handleCommand(createCaptureCommand({ type: 'comment:add', payload: { comment } }));
+  }
+  controller.handleCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind: 'comments', index: 0 } }));
+
+  const sources = controller.getCommentPinSources();
+  expect(sources).toEqual([{ number: 1, label: 'save', comment: 'second', element: expect.anything() }]);
+  controller.reset();
+  expect(controller.getCommentPinSources()).toEqual([]);
+  controller.destroy();
+});
+
 it('does not reopen the panel when cancelling a drag programmatically', () => {
   const { controller, show } = createHarness();
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'edit' } }));

@@ -1,6 +1,19 @@
 import { z } from 'zod';
-import { MAX_MISSING_SNAPSHOT_ASSETS, MAX_PAGE_TITLE_LENGTH, MAX_SNAPSHOT_ASSETS, truncateText } from '@/lib/feedback-limits';
-import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_META_EVENT_TYPE, SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
+import {
+  MAX_COMMENTS,
+  MAX_MISSING_SNAPSHOT_ASSETS,
+  MAX_PAGE_TITLE_LENGTH,
+  MAX_SNAPSHOT_ASSETS,
+  truncateText,
+} from '@/lib/feedback-limits';
+import {
+  COMMENT_PIN_EVENT_TAG,
+  isScreenCommentPin,
+  RRWEB_CUSTOM_EVENT_TYPE,
+  RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
+  RRWEB_META_EVENT_TYPE,
+  SCREEN_SNAPSHOT_FORMAT,
+} from '@/lib/screen-snapshot';
 import { SNAPSHOT_ASSET_HASH_PATTERN } from '@/lib/snapshot-asset-references';
 import { isHttpOrigin, pageUrlSchema } from '@/lib/validation/feedback-schema';
 import type { CreateScreenSnapshotInput, FindMissingScreenSnapshotAssetsInput } from '@/types/screen-snapshot';
@@ -18,6 +31,15 @@ function createEventSchema(type: number) {
     data: z.record(z.string(), z.unknown()),
   });
 }
+
+const commentPinEventSchema = z.object({
+  type: z.literal(RRWEB_CUSTOM_EVENT_TYPE),
+  timestamp: z.number().nonnegative(),
+  data: z.object({
+    tag: z.literal(COMMENT_PIN_EVENT_TAG),
+    payload: z.unknown().refine(isScreenCommentPin, { message: 'invalid comment pin' }),
+  }),
+});
 
 export const snapshotAssetHashSchema = z.string().regex(SNAPSHOT_ASSET_HASH_PATTERN);
 const projectKeySchema = z.string().min(1).max(MAX_SHORT_TEXT_LENGTH);
@@ -42,7 +64,10 @@ export const createScreenSnapshotInputSchema = z.object({
     scrollX: scrollOffsetSchema,
     scrollY: scrollOffsetSchema,
   }),
-  events: z.tuple([createEventSchema(RRWEB_META_EVENT_TYPE), createEventSchema(RRWEB_FULL_SNAPSHOT_EVENT_TYPE)]),
+  events: z
+    .tuple([createEventSchema(RRWEB_META_EVENT_TYPE), createEventSchema(RRWEB_FULL_SNAPSHOT_EVENT_TYPE)])
+    .rest(commentPinEventSchema)
+    .refine((events) => events.length <= 2 + MAX_COMMENTS, { message: 'too many comment pins' }),
   missingAssets: z
     .array(
       z.object({

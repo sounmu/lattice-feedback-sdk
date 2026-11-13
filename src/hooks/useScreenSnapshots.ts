@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
+import { addCommentScreen } from '@/lib/comment-screens';
 import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
 import type {
   CreateScreenSnapshotInput,
@@ -27,6 +28,9 @@ const CAPTURE_TIMEOUT_MS = 30_000;
 const SAVE_FAILED_MESSAGE = '화면을 저장하지 못했습니다. 다시 시도해 주세요.';
 const PAGE_NOT_ALLOWED_MESSAGE = '이 페이지에서는 화면을 저장할 수 없습니다.';
 const PAYLOAD_TOO_LARGE_STATUS = 413;
+const COMMENT_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 코멘트 위치를 화면에 표시하지 못했습니다.';
+
+type CaptureSource = 'manual' | 'comment';
 
 const CAPTURE_FAILURE_MESSAGES: Record<ScreenCaptureFailureReason, string> = {
   page_not_allowed: PAGE_NOT_ALLOWED_MESSAGE,
@@ -97,10 +101,18 @@ function getUploadErrorMessage(status: number): string {
 }
 
 export function useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture }: UseScreenSnapshotsOptions) {
-  const [snapshots, setSnapshots] = useState<ScreenSnapshotSummary[]>([]);
+  const [screens, setScreens] = useState<{ snapshots: ScreenSnapshotSummary[]; commentScreenIds: ReadonlySet<string> }>({
+    snapshots: [],
+    commentScreenIds: new Set(),
+  });
+  const { snapshots, commentScreenIds } = screens;
   const [status, setStatus] = useState<ScreenSaveStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const captureTimer = useRef<number | null>(null);
+  const pendingSource = useRef<CaptureSource>('manual');
+  // A comment attached while another screen is being saved gets its own save afterwards.
+  const isCommentCaptureQueued = useRef(false);
+  const startCaptureRef = useRef<(source: CaptureSource) => void>(() => undefined);
 
   useEffect(() => {
     if (!config) {
@@ -108,7 +120,7 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
     }
     const { projectKey, hostOrigin } = config;
 
-    async function upload({ screen, assetFiles }: ScreenCapture) {
+    async function upload({ screen, assetFiles }: ScreenCapture, source: CaptureSource) {
       setStatus('uploading');
       try {
         const assetHashes = await uploadAssetFiles({ projectKey, hostOrigin, pageUrl: screen.page.url }, assetFiles);
@@ -124,7 +136,11 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
           body,
         });
         const created = (await response.json()) as CreateScreenSnapshotResponse;
-        setSnapshots((current) => [...current, created.snapshot]);
+        if (source === 'comment') {
+          setScreens((current) => addCommentScreen(current, created.snapshot));
+        } else {
+          setScreens((current) => ({ ...current, snapshots: [...current.snapshots, created.snapshot] }));
+        }
       } catch (error) {
         if (error instanceof UploadFailedError) {
           setErrorMessage(getUploadErrorMessage(error.status));
@@ -133,6 +149,14 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
         }
       } finally {
         setStatus('idle');
+        runQueuedCommentCapture();
+      }
+    }
+
+    function runQueuedCommentCapture() {
+      if (isCommentCaptureQueued.current) {
+        isCommentCaptureQueued.current = false;
+        startCaptureRef.current('comment');
       }
     }
 
@@ -146,9 +170,10 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
       if (result.type === 'screen:capture-failed') {
         setStatus('idle');
         setErrorMessage(CAPTURE_FAILURE_MESSAGES[result.payload.reason]);
+        runQueuedCommentCapture();
         return;
       }
-      void upload(result.payload);
+      void upload(result.payload, pendingSource.current);
     });
     return () => {
       unsubscribe();
@@ -160,11 +185,11 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
   }, [config, subscribeToScreenCapture]);
 
   const canCapture = status === 'idle' && snapshots.length < MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK;
+  // A comment screen may replace an earlier one, so it is allowed at the limit when one exists.
+  const canCaptureComment = canCapture || (status === 'idle' && snapshots.some((snapshot) => commentScreenIds.has(snapshot.id)));
 
-  const capture = useCallback(() => {
-    if (!canCapture) {
-      return;
-    }
+  const startCapture = useCallback((source: CaptureSource) => {
+    pendingSource.current = source;
     setErrorMessage(null);
     setStatus('capturing');
     captureTimer.current = window.setTimeout(() => {
@@ -173,16 +198,39 @@ export function useScreenSnapshots({ config, subscribeToScreenCapture, requestSc
       setErrorMessage(SAVE_FAILED_MESSAGE);
     }, CAPTURE_TIMEOUT_MS);
     requestScreenCapture();
-  }, [canCapture, requestScreenCapture]);
+  }, [requestScreenCapture]);
+
+  const capture = useCallback(() => {
+    if (canCapture) {
+      startCapture('manual');
+    }
+  }, [canCapture, startCapture]);
+
+  const captureForComment = useCallback(() => {
+    if (status !== 'idle') {
+      isCommentCaptureQueued.current = true;
+      return;
+    }
+    if (!canCaptureComment) {
+      setErrorMessage(COMMENT_SCREEN_FULL_MESSAGE);
+      return;
+    }
+    startCapture('comment');
+  }, [status, canCaptureComment, startCapture]);
+
+  useEffect(() => {
+    startCaptureRef.current = startCapture;
+  }, [startCapture]);
 
   const remove = useCallback((id: string) => {
-    setSnapshots((current) => current.filter((snapshot) => snapshot.id !== id));
+    setScreens((current) => ({ ...current, snapshots: current.snapshots.filter((snapshot) => snapshot.id !== id) }));
   }, []);
 
   const reset = useCallback(() => {
-    setSnapshots([]);
+    setScreens({ snapshots: [], commentScreenIds: new Set() });
+    isCommentCaptureQueued.current = false;
     setErrorMessage(null);
   }, []);
 
-  return { snapshots, status, errorMessage, canCapture, capture, remove, reset };
+  return { snapshots, commentScreenIds, status, errorMessage, canCapture, capture, captureForComment, remove, reset };
 }

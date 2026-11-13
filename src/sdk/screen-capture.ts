@@ -11,12 +11,18 @@ import {
   MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
   truncateText,
 } from '@/lib/feedback-limits';
-import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_META_EVENT_TYPE, SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
+import {
+  createCommentPinEvent,
+  RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
+  RRWEB_META_EVENT_TYPE,
+  SCREEN_SNAPSHOT_FORMAT,
+} from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
 import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError } from '@/sdk/snapshot-assets';
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
+import { createCommentPins, type CommentPinSource } from '@/sdk/comment-pins';
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
 
 const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
@@ -90,7 +96,7 @@ function findUsedCssImageUrls(excludedSelector: string): Set<string> {
   return urls;
 }
 
-export async function captureScreen(sdkSelector: string): Promise<ScreenCapture> {
+export async function captureScreen(sdkSelector: string, commentPins: readonly CommentPinSource[] = []): Promise<ScreenCapture> {
   const capturedAt = Date.now();
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
   const mirror = createMirror();
@@ -123,6 +129,11 @@ export async function captureScreen(sdkSelector: string): Promise<ScreenCapture>
     scrollX: window.scrollX,
     scrollY: window.scrollY,
   };
+  const pins = createCommentPins(commentPins, {
+    findNodeId: (element) => mirror.getId(element),
+    scrollX: page.scrollX,
+    scrollY: page.scrollY,
+  });
   const loadedFontFamilies = new Set<string>();
   document.fonts.forEach((fontFace) => {
     if (fontFace.status === 'loaded') {
@@ -163,6 +174,7 @@ export async function captureScreen(sdkSelector: string): Promise<ScreenCapture>
         timestamp: capturedAt,
         data: { node, initialOffset: { left: page.scrollX, top: page.scrollY } },
       },
+      ...pins.map((pin) => createCommentPinEvent(pin, capturedAt)),
     ],
     missingAssets,
   };

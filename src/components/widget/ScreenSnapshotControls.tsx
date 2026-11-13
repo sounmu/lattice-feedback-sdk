@@ -6,6 +6,8 @@ import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
 interface ScreenSnapshotControlsProps {
   snapshots: ScreenSnapshotSummary[];
+  /** Screens saved automatically for comments; they show the comment pins. */
+  commentScreenIds: ReadonlySet<string>;
   status: ScreenSaveStatus;
   errorMessage: string | null;
   canCapture: boolean;
@@ -20,10 +22,11 @@ const STATUS_MESSAGES: Record<ScreenSaveStatus, string> = {
   uploading: '저장한 화면을 올리는 중입니다…',
 };
 
-function getSnapshotSummary(snapshot: ScreenSnapshotSummary, index: number): string {
+function getSnapshotSummary(snapshot: ScreenSnapshotSummary, index: number, isCommentScreen: boolean): string {
   const { viewportWidth, viewportHeight } = snapshot.page;
   const time = new Date(snapshot.capturedAt).toLocaleTimeString('ko-KR');
-  const summary = `화면 ${index + 1} · ${viewportWidth}×${viewportHeight} · ${time}`;
+  const kind = isCommentScreen ? ' · 코멘트 위치 포함' : '';
+  const summary = `화면 ${index + 1}${kind} · ${viewportWidth}×${viewportHeight} · ${time}`;
   if (snapshot.missingAssets.length === 0) {
     return summary;
   }
@@ -32,6 +35,7 @@ function getSnapshotSummary(snapshot: ScreenSnapshotSummary, index: number): str
 
 export function ScreenSnapshotControls({
   snapshots,
+  commentScreenIds,
   status,
   errorMessage,
   canCapture,
@@ -61,7 +65,7 @@ export function ScreenSnapshotControls({
         <ul className="flex flex-col gap-2" aria-label={`저장된 화면 ${snapshots.length}/${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}`}>
           {snapshots.map((snapshot, index) => (
             <li key={snapshot.id} className="flex items-start justify-between gap-2 rounded border p-2">
-              <span className="min-w-0 break-words text-xs">{getSnapshotSummary(snapshot, index)}</span>
+              <span className="min-w-0 break-words text-xs">{getSnapshotSummary(snapshot, index, commentScreenIds.has(snapshot.id))}</span>
               <button
                 type="button"
                 aria-label={`화면 ${index + 1} 삭제`}

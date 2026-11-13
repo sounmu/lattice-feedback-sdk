@@ -1,18 +1,30 @@
 // Dependency-free runtime for saved screens. The SDK bundle imports this file,
 // so it must not pull in zod or any other package.
-import { MAX_MISSING_SNAPSHOT_ASSETS, MAX_SNAPSHOT_ASSETS } from '@/lib/feedback-limits';
+import {
+  MAX_COMMENT_LENGTH,
+  MAX_COMMENTS,
+  MAX_MISSING_SNAPSHOT_ASSETS,
+  MAX_SNAPSHOT_ASSETS,
+} from '@/lib/feedback-limits';
 import type {
   CapturedScreen,
   MissingSnapshotAssetReason,
   ScreenCaptureFailureReason,
+  ScreenCommentPin,
+  ScreenSnapshotEvent,
   ScreenSnapshotFormat,
 } from '@/types/screen-snapshot';
 
 export const SCREEN_SNAPSHOT_FORMAT: ScreenSnapshotFormat = 'rrweb-2';
 
-// rrweb EventType values. A saved screen is one Meta event followed by one FullSnapshot event.
+// rrweb EventType values. A saved screen is one Meta event followed by one FullSnapshot event,
+// then one Custom event per comment pinned on the screen.
 export const RRWEB_FULL_SNAPSHOT_EVENT_TYPE = 2;
 export const RRWEB_META_EVENT_TYPE = 4;
+export const RRWEB_CUSTOM_EVENT_TYPE = 5;
+export const COMMENT_PIN_EVENT_TAG = 'lattice-comment-pin';
+export const MAX_LABEL_LENGTH = 200;
+const MAX_RECT_COORDINATE = 10_000_000;
 
 const MISSING_SNAPSHOT_ASSET_REASONS: readonly MissingSnapshotAssetReason[] = [
   'fetch_failed',
@@ -33,6 +45,43 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isSnapshotEvent(value: unknown, type: number): boolean {
   return isRecord(value) && value.type === type && isFiniteNumber(value.timestamp) && isRecord(value.data);
+}
+
+function isRectValue(value: unknown, minimum: number): boolean {
+  return isFiniteNumber(value) && value >= minimum && value <= MAX_RECT_COORDINATE;
+}
+
+export function isScreenCommentPin(value: unknown): value is ScreenCommentPin {
+  if (!isRecord(value) || !isRecord(value.rect)) {
+    return false;
+  }
+  const { number, nodeId, rect, label, comment } = value;
+  return (
+    Number.isInteger(number) && Number(number) >= 1 && Number(number) <= MAX_COMMENTS &&
+    (nodeId === null || (Number.isInteger(nodeId) && Number(nodeId) >= 0)) &&
+    isRectValue(rect.x, -MAX_RECT_COORDINATE) && isRectValue(rect.y, -MAX_RECT_COORDINATE) &&
+    isRectValue(rect.width, 0) && isRectValue(rect.height, 0) &&
+    typeof label === 'string' && label.length <= MAX_LABEL_LENGTH &&
+    typeof comment === 'string' && comment.length > 0 && comment.length <= MAX_COMMENT_LENGTH
+  );
+}
+
+function isCommentPinEvent(value: unknown): boolean {
+  return (
+    isSnapshotEvent(value, RRWEB_CUSTOM_EVENT_TYPE) &&
+    isRecord((value as ScreenSnapshotEvent).data) &&
+    ((value as { data: Record<string, unknown> }).data.tag === COMMENT_PIN_EVENT_TAG) &&
+    isScreenCommentPin((value as { data: Record<string, unknown> }).data.payload)
+  );
+}
+
+export function createCommentPinEvent(pin: ScreenCommentPin, timestamp: number): ScreenSnapshotEvent {
+  return { type: RRWEB_CUSTOM_EVENT_TYPE, timestamp, data: { tag: COMMENT_PIN_EVENT_TAG, payload: pin } };
+}
+
+/** The comment pins of a saved screen, in event order. Malformed events are skipped. */
+export function findCommentPins(events: readonly ScreenSnapshotEvent[]): ScreenCommentPin[] {
+  return events.filter(isCommentPinEvent).map((event) => (event.data as { payload: ScreenCommentPin }).payload);
 }
 
 function isMissingAsset(value: unknown): boolean {
@@ -62,10 +111,13 @@ export function isCapturedScreen(value: unknown): value is CapturedScreen {
   if (![page.viewportWidth, page.viewportHeight, page.scrollX, page.scrollY].every(isFiniteNumber)) {
     return false;
   }
-  if (!Array.isArray(events) || events.length !== 2) {
+  if (!Array.isArray(events) || events.length < 2 || events.length > 2 + MAX_COMMENTS) {
     return false;
   }
   if (!isSnapshotEvent(events[0], RRWEB_META_EVENT_TYPE) || !isSnapshotEvent(events[1], RRWEB_FULL_SNAPSHOT_EVENT_TYPE)) {
+    return false;
+  }
+  if (!events.slice(2).every(isCommentPinEvent)) {
     return false;
   }
   return (
