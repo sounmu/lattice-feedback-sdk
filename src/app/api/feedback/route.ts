@@ -11,12 +11,25 @@ import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
-import type { CreateFeedbackResponse, FeedbackListResponse } from '@/types/feedback';
+import type { CreateFeedbackInput, CreateFeedbackResponse, FeedbackListResponse } from '@/types/feedback';
 
 const MAX_BODY_BYTES = 65536;
 
 function createPayloadTooLargeResponse() {
   return createApiErrorResponse(413, 'payload_too_large', 'Request body is too large.');
+}
+
+async function createFeedbackOrReleaseScreens(input: CreateFeedbackInput, id: string, hasScreens: boolean) {
+  try {
+    return await getFeedbackRepository().create(input, id);
+  } catch (error) {
+    if (hasScreens) {
+      await getScreenSnapshotRepository()
+        .releaseFromFeedback(input.projectKey, id)
+        .catch((releaseError: unknown) => console.error('Releasing saved screens of unsaved feedback failed.', releaseError));
+    }
+    throw error;
+  }
 }
 
 export async function POST(request: Request) {
@@ -68,14 +81,16 @@ export async function POST(request: Request) {
 
   const { screenSnapshotIds, ...feedbackInput } = parsed.data;
   try {
-    const hasScreens = screenSnapshotIds.length > 0;
-    if (hasScreens && !(await getScreenSnapshotRepository().isAttachable(project.projectKey, screenSnapshotIds))) {
-      return createApiErrorResponse(400, 'screen_snapshot_not_found', 'A saved screen is missing or already submitted.');
+    // Screens are claimed for the new id before the feedback is stored, so two submissions can never
+    // both report success for the same screen.
+    const feedbackId = crypto.randomUUID();
+    if (screenSnapshotIds.length > 0) {
+      const screens = getScreenSnapshotRepository();
+      if (!(await screens.claimForFeedback(project.projectKey, screenSnapshotIds, feedbackId))) {
+        return createApiErrorResponse(400, 'screen_snapshot_not_found', 'A saved screen is missing or already submitted.');
+      }
     }
-    const feedback = await getFeedbackRepository().create(feedbackInput);
-    if (hasScreens) {
-      await getScreenSnapshotRepository().attachToFeedback(project.projectKey, screenSnapshotIds, feedback.id);
-    }
+    const feedback = await createFeedbackOrReleaseScreens(feedbackInput, feedbackId, screenSnapshotIds.length > 0);
     const body: CreateFeedbackResponse = { feedback };
     return NextResponse.json(body, { status: 201 });
   } catch (error) {

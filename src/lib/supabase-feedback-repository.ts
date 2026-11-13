@@ -62,10 +62,11 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
   }
 
   return {
-    async create(input) {
+    async create(input, id) {
       const rows = await requestRows({}, {
         method: 'POST',
         body: JSON.stringify({
+          ...(id === undefined ? {} : { id }),
           project_key: input.projectKey,
           message: input.message,
           type: input.type,
