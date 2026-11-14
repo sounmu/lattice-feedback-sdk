@@ -184,6 +184,11 @@ export function reconcileScreenMarks(
   return isChanged ? next : events;
 }
 
+/** The events of a saved screen without its comment pins and proposed moves. */
+export function removeScreenMarks(events: readonly ScreenSnapshotEvent[]): ScreenSnapshotEvent[] {
+  return events.filter((event) => !isCommentPinEvent(event) && !isEditMoveEvent(event));
+}
+
 /** The comment pins of a saved screen, in event order. Malformed events are skipped. */
 export function findCommentPins(events: readonly ScreenSnapshotEvent[]): ScreenCommentPin[] {
   return events.filter(isCommentPinEvent).map((event) => (event.data as { payload: ScreenCommentPin }).payload);

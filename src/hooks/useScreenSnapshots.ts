@@ -6,7 +6,14 @@ import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
 import { addMarkedScreen, type MarkedScreens } from '@/lib/marked-screens';
 import { isCaptureCurrent, type CaptureSource } from '@/lib/screen-capture-generation';
 import { keepListedCaptures } from '@/lib/screen-preview';
-import { findCommentPins, findEditMoves, isReplayTruncated, reconcileScreenMarks, type LiveMarkKeys } from '@/lib/screen-snapshot';
+import {
+  findCommentPins,
+  findEditMoves,
+  isReplayTruncated,
+  reconcileScreenMarks,
+  removeScreenMarks,
+  type LiveMarkKeys,
+} from '@/lib/screen-snapshot';
 import {
   MAX_SCREEN_SNAPSHOT_BYTES,
   MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES,
@@ -228,8 +235,15 @@ export function useScreenSnapshots({
 
   async function runCapture(owner: UploadOwner, job: CaptureJob, jobGeneration: number) {
     const { source, capture: { screen, assetFiles } } = job;
-    // A comment or edit deleted while its screen was being captured must not be saved with it.
-    const events = source === 'marks' ? reconcileScreenMarks(screen.events, liveMarkKeys.current) : screen.events;
+    let events: readonly ScreenSnapshotEvent[] | null = screen.events;
+    if (source === 'marks') {
+      // A comment or edit deleted while its screen was being captured must not be saved with it.
+      events = reconcileScreenMarks(screen.events, liveMarkKeys.current);
+    } else if (source === 'manual') {
+      // Pins and moves live only on the automatically saved screen, which follows later deletions. A
+      // manually saved screen is not saved again, so it would keep a deleted comment's text.
+      events = removeScreenMarks(screen.events);
+    }
     if (!events) {
       return;
     }
@@ -421,7 +435,9 @@ export function useScreenSnapshots({
     const isDeleted = previous.comments.some((key) => !keys.comments.includes(key)) ||
       previous.edits.some((key) => !keys.edits.includes(key));
     liveMarkKeys.current = keys;
-    if (isDeleted && savedMarkedScreens.current.size > 0) {
+    // A screen that is uploading right now was read before this deletion; the job queued here runs once
+    // it is listed and takes the deleted mark out of it.
+    if (isDeleted && (savedMarkedScreens.current.size > 0 || isDraining.current)) {
       jobs.current.push({ type: 'reconcile' });
       drainRef.current();
     }

@@ -11,6 +11,7 @@ import {
   isCapturedScreen,
   isReplayTruncated,
   reconcileScreenMarks,
+  removeScreenMarks,
   REPLAY_TRUNCATED_EVENT_TAG,
 } from '@/lib/screen-snapshot';
 import { createScreenSnapshotInputSchema } from '@/lib/validation/screen-snapshot-schema';
@@ -83,6 +84,15 @@ it('drops the marks of deleted comments and edits from a saved screen and renumb
   expect(findEditMoves(updated).map(({ key, number }) => [key, number])).toEqual([['edit-3', 1]]);
   expect(updated.slice(0, 2)).toEqual(events.slice(0, 2));
   expect(reconcileScreenMarks(events, { comments: ['comment-9'], edits: [] })).toBeNull();
+});
+
+it('takes every pin and move out of a screen saved by hand and keeps the page itself', () => {
+  const events = createScreen([createCommentPinEvent(PIN, 1), createEditMoveEvent(MOVE, 1)]).events as ScreenSnapshotEvent[];
+
+  const cleaned = removeScreenMarks(events);
+
+  expect(cleaned).toEqual(events.slice(0, 2));
+  expect(isCapturedScreen({ ...createScreen([]), events: cleaned })).toBe(true);
 });
 
 it('lists the edits a saved screen does not show, by their position in the feedback', () => {
