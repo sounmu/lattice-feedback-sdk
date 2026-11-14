@@ -16,6 +16,7 @@ export type SnapshotAttributes = Record<string, string | number | boolean | null
 /** The part of an rrweb serialized node this module reads and rewrites. */
 export interface SnapshotNode {
   type: number;
+  textContent?: string;
   id?: number;
   tagName?: string;
   attributes?: SnapshotAttributes;
