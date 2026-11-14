@@ -7,8 +7,10 @@ import { AdminFrame } from '@/components/admin/AdminFrame';
 import { AdminStatusGate } from '@/components/admin/AdminStatusGate';
 import { FeedbackDetailPane } from '@/components/admin/FeedbackDetailPane';
 import { FeedbackListView } from '@/components/admin/FeedbackListView';
+import { SidePaneToggle } from '@/components/admin/SidePaneToggle';
 import { useAdminProjectKey } from '@/hooks/useAdminProjectKey';
 import { useAdminToken } from '@/hooks/useAdminToken';
+import { useCollapsedSection } from '@/hooks/useCollapsedSection';
 import { useFeedbackList } from '@/hooks/useFeedbackList';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { saveAdminToken } from '@/lib/admin-token';
@@ -28,6 +30,10 @@ export function FeedbackListPage() {
   // On a wide screen the chosen feedback opens next to the list. On a narrow one the list links to its own page.
   const isSplitView = useMediaQuery(SPLIT_VIEW_MEDIA_QUERY);
   const selectedId = isSplitView ? searchParams.get(SELECTED_FEEDBACK_PARAMETER) : null;
+  const listPane = useCollapsedSection('list-pane');
+  // Folded to a narrow strip, the list stays mounted, so J and K keep moving through it.
+  const isListCollapsed = isSplitView && listPane.isCollapsed;
+  const columnsClassName = isListCollapsed ? 'xl:grid-cols-[48px_minmax(0,1fr)]' : 'xl:grid-cols-[380px_minmax(0,1fr)]';
 
   function handleSelect(id: string) {
     const parameters = new URLSearchParams(searchParams);
@@ -39,16 +45,20 @@ export function FeedbackListPage() {
   return (
     <AdminFrame projectKey={projectKey} hasToken={token !== ''} onSignOut={() => saveAdminToken('')} isWide>
       <AdminStatusGate status={status} errorMessage={errorMessage} onRetry={reload}>
-        <div className="xl:grid xl:grid-cols-[380px_minmax(0,1fr)] xl:gap-6">
+        <div className={`xl:grid xl:gap-6 ${columnsClassName}`}>
           <div className={`${PANE_CLASS_NAME} xl:pr-1`}>
-            <FeedbackListView
-              items={items}
-              projectKey={projectKey}
-              nowTimestamp={nowTimestamp}
-              onReload={reload}
-              selectedId={selectedId}
-              onSelect={isSplitView ? handleSelect : undefined}
-            />
+            {isListCollapsed ? <SidePaneToggle isCollapsed side="left" label="피드백 목록" onToggle={listPane.toggle} /> : null}
+            <div hidden={isListCollapsed}>
+              <FeedbackListView
+                items={items}
+                projectKey={projectKey}
+                nowTimestamp={nowTimestamp}
+                onReload={reload}
+                selectedId={selectedId}
+                onSelect={isSplitView ? handleSelect : undefined}
+                onCollapse={isSplitView ? listPane.toggle : undefined}
+              />
+            </div>
           </div>
           {isSplitView ? (
             <div className={PANE_CLASS_NAME}>
