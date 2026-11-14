@@ -19,7 +19,7 @@ import { openReplayStore, type ReplayChunk } from '@/sdk/flow-replay-session';
 import { getPageUrl } from '@/sdk/page-context';
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { isMutationEvent, sanitizeReplayEvents, trimReplayStart, type MutationData, type RecordedElements } from '@/sdk/replay-sanitize';
-import { BLOCKED_SELECTOR, findUsedCssImageUrls, MASKED_SELECTOR } from '@/sdk/screen-capture';
+import { BLOCKED_SELECTOR, findLoadedFontFamilies, findUsedCssImageUrls, MASKED_SELECTOR } from '@/sdk/screen-capture';
 import type { SnapshotNode } from '@/sdk/snapshot-assets';
 import type { ScreenSnapshotEvent, ScreenSnapshotPage } from '@/types/screen-snapshot';
 
@@ -61,8 +61,8 @@ export interface ReplayRecorder {
   discard(): void;
 }
 
-function createUnsaved(): Pick<ReplayChunk, 'events' | 'bytes' | 'usedCssImageUrls' | 'liveImageSources'> {
-  return { events: [], bytes: 0, usedCssImageUrls: [], liveImageSources: [] };
+function createUnsaved(): Pick<ReplayChunk, 'events' | 'bytes' | 'usedCssImageUrls' | 'loadedFontFamilies' | 'liveImageSources'> {
+  return { events: [], bytes: 0, usedCssImageUrls: [], loadedFontFamilies: [], liveImageSources: [] };
 }
 
 export function startReplayRecording(sdkSelector: string, session: ReplaySession): ReplayRecorder {
@@ -81,6 +81,7 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
   const elements: RecordedElements = new Map();
   const events: ScreenSnapshotEvent[] = [];
   const usedCssImageUrls = new Set<string>();
+  const loadedFontFamilies = new Set<string>();
   const liveImageSources = new Map<number, string>();
   let earlier: ReplaySegment[] = [];
   let segment = session.resumed ? UNKNOWN_SEGMENT : 0;
@@ -99,12 +100,20 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
   let lastSampledAt = Number.NEGATIVE_INFINITY;
   let stopRecording: (() => void) | undefined;
 
-  function sampleCssImageUsage(at: number): void {
+  // Each document notes its own images and fonts: a later document of the Flow cannot tell what an
+  // earlier one showed.
+  function sampleAssetUsage(at: number): void {
     lastSampledAt = at;
     for (const url of findUsedCssImageUrls(excludedSelector)) {
       if (!usedCssImageUrls.has(url)) {
         usedCssImageUrls.add(url);
         unsaved.usedCssImageUrls.push(url);
+      }
+    }
+    for (const family of findLoadedFontFamilies()) {
+      if (!loadedFontFamilies.has(family)) {
+        loadedFontFamilies.add(family);
+        unsaved.loadedFontFamilies.push(family);
       }
     }
   }
@@ -203,7 +212,7 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
       }
     }
     if (event.type === RRWEB_INCREMENTAL_EVENT_TYPE && event.timestamp - lastSampledAt >= CSS_USAGE_SAMPLE_INTERVAL_MS) {
-      sampleCssImageUsage(event.timestamp);
+      sampleAssetUsage(event.timestamp);
     }
     if (!waiting) {
       accept(event);
@@ -255,6 +264,7 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
     events.length = 0;
     elements.clear();
     usedCssImageUrls.clear();
+    loadedFontFamilies.clear();
     liveImageSources.clear();
     unsaved = createUnsaved();
     nextChunkIndex = 0;
@@ -265,7 +275,7 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
 
   let ready: Promise<void> = session.resumed ? store.load().then(restore) : Promise.resolve();
   function beginRecording(): void {
-    sampleCssImageUsage(Date.now());
+    sampleAssetUsage(Date.now());
     stopRecording = record({
       emit: (event) => handleEvent(event as ScreenSnapshotEvent),
       blockSelector: excludedSelector,
@@ -291,7 +301,7 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
     const playable = trimReplayStart(events, page.url);
     const segments = [...earlier];
     if (playable.length > 0) {
-      segments.push({ page, events: playable, usedCssImageUrls: [...usedCssImageUrls], liveImageSources: [...liveImageSources], gapBefore });
+      segments.push({ page, events: playable, usedCssImageUrls: [...usedCssImageUrls], loadedFontFamilies: [...loadedFontFamilies], liveImageSources: [...liveImageSources], gapBefore });
     }
     if (segments.length === 0) {
       return null;

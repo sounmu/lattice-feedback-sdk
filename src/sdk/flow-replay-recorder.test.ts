@@ -6,6 +6,7 @@ import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
 const recorder = vi.hoisted(() => ({ emit: (() => undefined) as (event: ScreenSnapshotEvent) => void, starts: 0, stops: 0 }));
 const usedNow = vi.hoisted(() => ({ urls: [] as string[] }));
+const fontsNow = vi.hoisted(() => ({ families: [] as string[] }));
 const page = vi.hoisted(() => ({ images: [] as { id: number; currentSrc: string }[] }));
 // Stands for the storage the documents of one tab share.
 const saved = vi.hoisted(() => ({
@@ -39,6 +40,7 @@ vi.mock('@/sdk/screen-capture', () => ({
   BLOCKED_SELECTOR: '[data-lattice-block]',
   MASKED_SELECTOR: '[data-lattice-mask]',
   findUsedCssImageUrls: () => new Set(usedNow.urls),
+  findLoadedFontFamilies: () => new Set(fontsNow.families),
 }));
 vi.mock('@/sdk/flow-replay-session', () => ({
   openReplayStore: () => ({
@@ -138,6 +140,17 @@ it('keeps CSS images shown at the start or after a later change even when they a
   usedNow.urls = [];
 
   expect((await recording.stop())?.segments[0].usedCssImageUrls).toEqual([`${HOST}/start.png`, `${HOST}/banner.png`]);
+});
+
+it('keeps the fonts a document had loaded, so a later document of the Flow does not decide which fonts are saved', async () => {
+  fontsNow.families = ['pretendard'];
+  const recording = startReplayRecording(SDK, FRESH);
+  emitPage(START);
+  fontsNow.families = ['pretendard', 'noto sans kr'];
+  recorder.emit({ type: 3, timestamp: START + 1500, data: { source: 0 } });
+  fontsNow.families = [];
+
+  expect((await recording.stop())?.segments[0].loadedFontFamilies).toEqual(['pretendard', 'noto sans kr']);
 });
 
 it('stops observing the page once the event limit is reached and keeps what was recorded as truncated', async () => {

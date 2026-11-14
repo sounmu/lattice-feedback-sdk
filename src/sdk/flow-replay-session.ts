@@ -24,6 +24,7 @@ export interface ReplayChunk {
   /** Size of the events as counted against the replay limit. */
   bytes: number;
   usedCssImageUrls: string[];
+  loadedFontFamilies: string[];
   liveImageSources: [number, string][];
 }
 

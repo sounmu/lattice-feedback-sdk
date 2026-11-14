@@ -10,6 +10,8 @@ export interface ReplaySegment {
   events: ScreenSnapshotEvent[];
   /** Same-origin CSS image URLs the page showed at some point while recording, not only at the end. */
   usedCssImageUrls: string[];
+  /** Normalized families of the fonts this document had loaded while recording. */
+  loadedFontFamilies: string[];
   /** The file each <img> showed when it was recorded (srcset or <picture> choice), by rrweb node id. */
   liveImageSources: [number, string][];
   /** Events recorded before this document were lost; the replay carries a marker here. */
@@ -54,6 +56,7 @@ export function mergeReplayChunks(chunks: readonly ReplayChunk[]): SavedReplay {
       page,
       events: playable,
       usedCssImageUrls: group.flatMap((chunk) => chunk.usedCssImageUrls),
+      loadedFontFamilies: group.flatMap((chunk) => chunk.loadedFontFamilies),
       liveImageSources: group.flatMap((chunk) => chunk.liveImageSources),
       gapBefore: saved.hasGapAfter,
     });

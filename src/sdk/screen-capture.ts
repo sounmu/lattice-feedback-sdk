@@ -149,16 +149,9 @@ export async function captureScreen(
     scrollX: page.scrollX,
     scrollY: page.scrollY,
   });
-  const loadedFontFamilies = new Set<string>();
-  document.fonts.forEach((fontFace) => {
-    if (fontFace.status === 'loaded') {
-      loadedFontFamilies.add(normalizeFontFamily(fontFace.family));
-    }
-  });
-
   const { assetFiles, missingAssets } = await extractSnapshotAssets(node, {
     pageOrigin: window.location.origin,
-    loadedFontFamilies,
+    loadedFontFamilies: findLoadedFontFamilies(),
     usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
     fetchAsset: fetchSameOriginAsset,
     maxDurationMs: ASSET_COLLECTION_DURATION_MS,
@@ -197,7 +190,8 @@ export async function captureScreen(
   return { screen, assetFiles };
 }
 
-function findLoadedFontFamilies(): Set<string> {
+/** Normalized families of the fonts the current document has loaded. */
+export function findLoadedFontFamilies(): Set<string> {
   const families = new Set<string>();
   document.fonts.forEach((fontFace) => {
     if (fontFace.status === 'loaded') {
@@ -219,7 +213,8 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
   const assetRoot = createSegmentedReplayAssetRoot(segments);
   const { assetFiles, missingAssets } = await extractSnapshotAssets(assetRoot.root, {
     pageOrigin: window.location.origin,
-    loadedFontFamilies: findLoadedFontFamilies(),
+    // Fonts of every document the Flow went through, not only of the one it ended on.
+    loadedFontFamilies: new Set([...segments.flatMap((segment) => segment.loadedFontFamilies), ...findLoadedFontFamilies()]),
     // Images the pages showed while recording count too, not only those still shown at the end.
     usedCssImageUrls: new Set([...segments.flatMap((segment) => segment.usedCssImageUrls), ...findUsedCssImageUrls(excludedSelector)]),
     // As for a saved screen, the file the browser chose from srcset or <picture> is the one kept.
