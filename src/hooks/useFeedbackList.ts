@@ -7,6 +7,8 @@ import { findAdminLoadStatus, type AdminLoadStatus } from '@/lib/admin-load-stat
 import type { Feedback } from '@/types/feedback';
 
 interface FeedbackListState {
+  /** Which project and token this result was loaded for. */
+  requestKey: string;
   items: Feedback[] | null;
   errorStatus: number | null;
   errorMessage: string;
@@ -27,6 +29,7 @@ interface UseFeedbackListResult {
 export function useFeedbackList({ projectKey, token }: UseFeedbackListInput): UseFeedbackListResult {
   const [state, setState] = useState<FeedbackListState | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
+  const requestKey = JSON.stringify([projectKey, token]);
 
   useEffect(() => {
     if (!token) {
@@ -38,23 +41,30 @@ export function useFeedbackList({ projectKey, token }: UseFeedbackListInput): Us
         return;
       }
       if (result.ok) {
-        setState({ items: result.data.items, errorStatus: null, errorMessage: '' });
+        setState({ requestKey, items: result.data.items, errorStatus: null, errorMessage: '' });
         return;
       }
-      setState((previous) => ({ items: previous?.items ?? null, errorStatus: result.status, errorMessage: result.message }));
+      setState((previous) => ({
+        requestKey,
+        items: previous?.requestKey === requestKey ? previous.items : null,
+        errorStatus: result.status,
+        errorMessage: result.message,
+      }));
     });
     return () => {
       isCancelled = true;
     };
-  }, [projectKey, token, reloadCount]);
+  }, [projectKey, token, requestKey, reloadCount]);
 
   const reload = useCallback(() => setReloadCount((count) => count + 1), []);
-  const snapshot = state && { hasData: state.items !== null, errorStatus: state.errorStatus };
+  // A result for another project or token must never be shown under the current one.
+  const currentState = state?.requestKey === requestKey ? state : null;
+  const snapshot = currentState && { hasData: currentState.items !== null, errorStatus: currentState.errorStatus };
 
   return {
     status: findAdminLoadStatus(token, snapshot),
-    items: state?.items ?? [],
-    errorMessage: state?.errorMessage ?? '',
+    items: currentState?.items ?? [],
+    errorMessage: currentState?.errorMessage ?? '',
     reload,
   };
 }

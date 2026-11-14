@@ -7,6 +7,8 @@ import { findAdminLoadStatus, type AdminLoadStatus } from '@/lib/admin-load-stat
 import type { FeedbackDetailResponse, UpdateFeedbackInput } from '@/types/feedback';
 
 interface FeedbackDetailState {
+  /** Which project, token and feedback this result was loaded for. */
+  requestKey: string;
   detail: FeedbackDetailResponse | null;
   errorStatus: number | null;
   errorMessage: string;
@@ -33,6 +35,7 @@ export function useFeedbackDetail({ projectKey, token, id }: UseFeedbackDetailIn
   const [state, setState] = useState<FeedbackDetailState | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [saveErrorMessage, setSaveErrorMessage] = useState('');
+  const requestKey = JSON.stringify([projectKey, token, id]);
 
   useEffect(() => {
     if (!token) {
@@ -44,15 +47,15 @@ export function useFeedbackDetail({ projectKey, token, id }: UseFeedbackDetailIn
         return;
       }
       if (result.ok) {
-        setState({ detail: result.data, errorStatus: null, errorMessage: '' });
+        setState({ requestKey, detail: result.data, errorStatus: null, errorMessage: '' });
         return;
       }
-      setState({ detail: null, errorStatus: result.status, errorMessage: result.message });
+      setState({ requestKey, detail: null, errorStatus: result.status, errorMessage: result.message });
     });
     return () => {
       isCancelled = true;
     };
-  }, [projectKey, token, id]);
+  }, [projectKey, token, id, requestKey]);
 
   const save = useCallback(
     async (changes: UpdateFeedbackInput): Promise<boolean> => {
@@ -63,20 +66,22 @@ export function useFeedbackDetail({ projectKey, token, id }: UseFeedbackDetailIn
         setSaveErrorMessage(result.message);
         return false;
       }
-      setState({ detail: result.data, errorStatus: null, errorMessage: '' });
+      setState({ requestKey, detail: result.data, errorStatus: null, errorMessage: '' });
       setSaveStatus('saved');
       setSaveErrorMessage('');
       return true;
     },
-    [projectKey, token, id],
+    [projectKey, token, id, requestKey],
   );
 
-  const snapshot = state && { hasData: state.detail !== null, errorStatus: state.errorStatus };
+  // A result for another project, token or feedback must never be shown under the current one.
+  const currentState = state?.requestKey === requestKey ? state : null;
+  const snapshot = currentState && { hasData: currentState.detail !== null, errorStatus: currentState.errorStatus };
 
   return {
     status: findAdminLoadStatus(token, snapshot),
-    detail: state?.detail ?? null,
-    errorMessage: state?.errorMessage ?? '',
+    detail: currentState?.detail ?? null,
+    errorMessage: currentState?.errorMessage ?? '',
     saveStatus,
     saveErrorMessage,
     save,

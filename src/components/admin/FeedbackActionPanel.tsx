@@ -23,6 +23,7 @@ const SAVE_STATUS_MESSAGES: Record<SaveStatus, string> = {
 export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, onSave }: FeedbackActionPanelProps) {
   const [status, setStatus] = useState<FeedbackStatus>(feedback.status);
   const [reply, setReply] = useState(feedback.adminReply ?? '');
+  const isSaving = saveStatus === 'saving';
   const isChanged = status !== feedback.status || reply.trim() !== (feedback.adminReply ?? '');
 
   async function handleSave() {
@@ -40,7 +41,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
     <section className="flex flex-col gap-3 rounded-2xl border border-(--admin-border) bg-(--admin-surface) p-4">
       <h2 className="text-base font-bold">처리하기</h2>
 
-      <fieldset className="flex flex-wrap gap-2">
+      <fieldset disabled={isSaving} className="flex flex-wrap gap-2">
         <legend className="mb-1 text-sm font-semibold">상태</legend>
         {FEEDBACK_STATUSES.map((option) => (
           <label
@@ -63,6 +64,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
       <textarea
         id="admin-reply"
         rows={5}
+        disabled={isSaving}
         value={reply}
         onChange={(event) => setReply(event.target.value)}
         placeholder="작성자에게 보여줄 답변을 적어 주세요."
@@ -73,7 +75,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
         <button
           type="button"
           onClick={handleSave}
-          disabled={!isChanged || saveStatus === 'saving'}
+          disabled={!isChanged || isSaving}
           className="min-h-11 rounded-[10px] bg-(--admin-primary) px-5 font-semibold text-white hover:bg-(--admin-primary-hover) disabled:opacity-50"
         >
           저장
