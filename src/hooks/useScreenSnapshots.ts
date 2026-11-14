@@ -36,11 +36,11 @@ interface UseScreenSnapshotsOptions {
 
 // An SDK build without screen saving never answers, so the request must not wait forever.
 const CAPTURE_TIMEOUT_MS = 30_000;
-const SAVE_FAILED_MESSAGE = '화면을 저장하지 못했습니다. 다시 시도해 주세요.';
-const PAGE_NOT_ALLOWED_MESSAGE = '이 페이지에서는 화면을 저장할 수 없습니다.';
+const SAVE_FAILED_MESSAGE = '화면을 저장하지 못했어요. 다시 시도해 주세요.';
+const PAGE_NOT_ALLOWED_MESSAGE = '이 페이지에서는 화면을 저장할 수 없어요.';
 const PAYLOAD_TOO_LARGE_STATUS = 413;
-const FLOW_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 흐름 재생을 저장하지 못했습니다.';
-const MARKED_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 코멘트·편집 위치를 화면에 표시하지 못했습니다.';
+const FLOW_SCREEN_FULL_MESSAGE = `저장한 화면이 ${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}개라 흐름 재생을 저장하지 못했어요. 필요 없는 화면을 지워 주세요.`;
+const MARKED_SCREEN_FULL_MESSAGE = `저장한 화면이 ${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}개라 위치를 화면에 표시하지 못했어요. 필요 없는 화면을 지워 주세요.`;
 
 function findMarkKeys(events: readonly ScreenSnapshotEvent[]): string[] {
   return [...findCommentPins(events).map((pin) => pin.key), ...findEditMoves(events).map((move) => move.key)];
@@ -121,13 +121,13 @@ async function uploadAssetFiles(
 function getUploadErrorMessage(status: number): string {
   switch (status) {
     case PAYLOAD_TOO_LARGE_STATUS:
-      return '화면이 너무 커서 저장할 수 없습니다.';
+      return '화면이 너무 커서 저장할 수 없어요.';
     case 403:
       return PAGE_NOT_ALLOWED_MESSAGE;
     case 429:
-      return '화면을 너무 자주 저장했습니다. 잠시 후 다시 시도해 주세요.';
+      return '화면을 너무 자주 저장했어요. 잠시 후 다시 시도해 주세요.';
     case 503:
-      return '화면 저장소를 사용할 수 없습니다. 화면 없이도 피드백을 보낼 수 있습니다.';
+      return '지금은 화면을 저장할 수 없어요. 화면 없이도 보낼 수 있어요.';
     default:
       return SAVE_FAILED_MESSAGE;
   }

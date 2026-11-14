@@ -24,3 +24,58 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Widget tokens. Values follow design/widget-ui/UX.md. */
+@theme inline {
+  --color-fw-primary: #3b5bfd;
+  --color-fw-primary-hover: #2f4ae0;
+  --color-fw-primary-weak: #eef1ff;
+  --color-fw-text: #1c2024;
+  --color-fw-sub: #60646c;
+  --color-fw-muted: #6f7280;
+  --color-fw-border: #e8e8ec;
+  --color-fw-surface: #ffffff;
+  --color-fw-surface-sub: #f9f9fb;
+  --color-fw-danger: #d1343a;
+  --color-fw-danger-weak: #fff0f0;
+  --color-fw-recording: #e5484d;
+  --color-fw-warning: #a35b00;
+  --color-fw-warning-weak: #fff8e6;
+  --color-fw-success: #30a46c;
+  --color-fw-success-weak: #e9f9ee;
+}
+
+.widget-root {
+  color: var(--color-fw-text);
+  background: var(--color-fw-surface);
+  font-family: 'Pretendard Variable', Pretendard, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.widget-root :focus-visible {
+  outline: 2px solid var(--color-fw-primary);
+  outline-offset: 2px;
+}
+
+@keyframes widget-shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.widget-skeleton {
+  animation: widget-shimmer 1.4s ease-in-out infinite;
+}
+
+.widget-recording-dot {
+  animation: widget-shimmer 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-skeleton,
+  .widget-recording-dot {
+    animation: none;
+  }
+}
