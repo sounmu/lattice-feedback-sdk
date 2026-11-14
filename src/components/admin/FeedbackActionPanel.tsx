@@ -6,6 +6,7 @@ import { DuplicateOriginalPicker } from '@/components/admin/DuplicateOriginalPic
 import { ShortcutKey } from '@/components/admin/ShortcutKey';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
 import { findAdminShortcut, type AdminShortcut } from '@/lib/admin-shortcuts';
+import { createFeedbackChanges } from '@/lib/feedback-changes';
 import { FEEDBACK_STATUS_LABELS, FEEDBACK_STATUSES } from '@/lib/feedback-display';
 import type { Feedback, FeedbackStatus, UpdateFeedbackInput } from '@/types/feedback';
 
@@ -31,25 +32,9 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
   const [reply, setReply] = useState(feedback.adminReply ?? '');
   const [duplicateOfId, setDuplicateOfId] = useState(feedback.duplicateOfId ?? '');
   const isSaving = saveStatus === 'saving';
-  const isOriginalChanged = status === 'duplicate' && duplicateOfId !== (feedback.duplicateOfId ?? '');
-  const isStatusChanged = status !== feedback.status || isOriginalChanged;
   const isOriginalMissing = status === 'duplicate' && duplicateOfId === '';
-  const isChanged = isStatusChanged || reply.trim() !== (feedback.adminReply ?? '');
-
-  // Saves the given status together with everything else the admin changed in this panel.
-  async function saveWithStatus(nextStatus: FeedbackStatus) {
-    const changes: UpdateFeedbackInput = {};
-    if (nextStatus !== feedback.status || isOriginalChanged) {
-      changes.status = nextStatus;
-      if (nextStatus === 'duplicate') {
-        changes.duplicateOfId = duplicateOfId;
-      }
-    }
-    if (reply.trim() !== (feedback.adminReply ?? '')) {
-      changes.adminReply = reply.trim() === '' ? null : reply.trim();
-    }
-    await onSave(changes);
-  }
+  const changes = createFeedbackChanges(feedback, { status, reply, duplicateOfId });
+  const isChanged = Object.keys(changes).length > 0;
 
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
     const shortcut = findAdminShortcut(event);
@@ -62,11 +47,16 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
       return;
     }
     const nextStatus = SHORTCUT_STATUSES[shortcut];
-    if (nextStatus === undefined || nextStatus === feedback.status) {
+    if (nextStatus === undefined) {
+      return;
+    }
+    // Saved together with a reply the admin has typed, so the key never drops it.
+    const shortcutChanges = createFeedbackChanges(feedback, { status: nextStatus, reply, duplicateOfId });
+    if (Object.keys(shortcutChanges).length === 0) {
       return;
     }
     event.preventDefault();
-    void saveWithStatus(nextStatus);
+    void onSave(shortcutChanges);
   });
 
   useEffect(() => {
@@ -127,7 +117,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => saveWithStatus(status)}
+          onClick={() => onSave(changes)}
           disabled={!isChanged || isSaving || isOriginalMissing}
           className="min-h-11 rounded-[10px] bg-(--admin-primary) px-5 font-semibold text-white hover:bg-(--admin-primary-hover) disabled:opacity-50"
         >
