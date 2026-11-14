@@ -36,6 +36,7 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
         message: input.message,
         type: input.type,
         status: 'open',
+        duplicateOfId: null,
         reporter: input.reporter,
         page: input.page,
         attachments: {
@@ -79,6 +80,9 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
       }
       if (input.adminReply !== undefined) {
         item.adminReply = input.adminReply;
+      }
+      if (input.duplicateOfId !== undefined) {
+        item.duplicateOfId = input.duplicateOfId;
       }
       item.updatedAt = new Date().toISOString();
       return structuredClone(item);

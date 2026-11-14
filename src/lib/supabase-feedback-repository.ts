@@ -8,7 +8,7 @@ import type { Feedback } from '@/types/feedback';
 const REQUEST_TIMEOUT_MS = 10_000;
 const PAGE_SIZE = 100;
 const FEEDBACK_SELECT = [
-  'id', 'projectKey:project_key', 'message', 'type', 'status', 'reporter', 'page',
+  'id', 'projectKey:project_key', 'message', 'type', 'status', 'duplicateOfId:duplicate_of', 'reporter', 'page',
   'attachments', 'adminReply:admin_reply', 'createdAt:created_at', 'updatedAt:updated_at',
 ].join(',');
 
@@ -16,6 +16,7 @@ const feedbackRowsSchema = z.array(
   createFeedbackInputSchema.omit({ hostOrigin: true }).extend({
     id: z.uuid(),
     status: updateFeedbackInputSchema.shape.status.unwrap(),
+    duplicateOfId: z.uuid().nullable(),
     adminReply: updateFeedbackInputSchema.shape.adminReply.unwrap(),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
@@ -124,6 +125,7 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
         method: 'PATCH',
         body: JSON.stringify({
           status: input.status,
+          duplicate_of: input.duplicateOfId,
           admin_reply: input.adminReply,
           updated_at: new Date().toISOString(),
         }),

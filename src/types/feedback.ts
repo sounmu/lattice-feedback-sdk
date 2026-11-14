@@ -4,7 +4,7 @@
 
 import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
-export type FeedbackStatus = 'open' | 'in_progress' | 'resolved';
+export type FeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'rejected' | 'duplicate';
 
 export type FeedbackType = 'bug' | 'improvement' | 'question' | 'other';
 
@@ -91,6 +91,8 @@ export interface Feedback {
   message: string;
   type: FeedbackType;
   status: FeedbackStatus;
+  /** The feedback this one repeats. Set exactly when status is 'duplicate'. */
+  duplicateOfId: string | null;
   reporter: FeedbackReporter;
   page: PageContext;
   attachments: FeedbackAttachments;
@@ -108,7 +110,7 @@ export type CreateFeedbackInput = Pick<Feedback, 'projectKey' | 'message' | 'typ
   screenSnapshotIds?: string[];
 };
 
-export type UpdateFeedbackInput = Partial<Pick<Feedback, 'status' | 'adminReply'>>;
+export type UpdateFeedbackInput = Partial<Pick<Feedback, 'status' | 'adminReply' | 'duplicateOfId'>>;
 
 export interface CreateFeedbackResponse {
   feedback: Feedback;

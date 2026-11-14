@@ -16,6 +16,7 @@ function createDetail(feedback: Partial<Feedback> = {}, screenSnapshots: ScreenS
       message: '저장 버튼이 안 보여요',
       type: 'bug',
       status: 'open',
+      duplicateOfId: null,
       reporter: { id: 'user-1', name: '홍길동', email: 'hong@example.com' },
       page: { url: 'https://host.example.com/orders', title: '주문', viewportWidth: 1440, viewportHeight: 900, userAgent: 'vitest' },
       attachments: { comments: [], edits: [], flow: null },

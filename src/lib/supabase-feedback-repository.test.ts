@@ -21,6 +21,7 @@ const storedRow = {
   message: input.message,
   type: input.type,
   status: 'open',
+  duplicateOfId: null,
   reporter: input.reporter,
   page: input.page,
   attachments: input.attachments,
@@ -169,6 +170,17 @@ describe('Supabase REST repository contract', () => {
       admin_reply: null,
       updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     });
+  });
+
+  it('stores the original of a duplicate in its own column', async () => {
+    const duplicateOfId = '00000000-0000-4000-8000-000000000002';
+    responseBodies = [JSON.stringify([{ ...storedRow, status: 'duplicate', duplicateOfId }])];
+
+    const feedback = await createSupabaseFeedbackRepository().update('demo', storedRow.id, { status: 'duplicate', duplicateOfId });
+
+    expect(feedback).toMatchObject({ status: 'duplicate', duplicateOfId });
+    expect(JSON.parse(received[0].body)).toMatchObject({ status: 'duplicate', duplicate_of: duplicateOfId });
+    expect(received[0].url.searchParams.get('select')).toContain('duplicateOfId:duplicate_of');
   });
 
   it('treats a non-UUID identifier as missing without sending a failing SQL filter', async () => {
