@@ -62,7 +62,7 @@ export function CommentPinOverlay({ boxes, width: viewWidth, height: viewHeight,
               {isSelected && (
                 <div
                   role="note"
-                  className={`pointer-events-auto mt-1 w-64 rounded border bg-white p-2 text-xs text-gray-900 shadow-lg ${opensLeft ? '-translate-x-full' : ''}`}
+                  className={`pointer-events-auto mt-1 w-64 rounded-xl border bg-white p-2 text-xs text-gray-900 shadow-lg ${opensLeft ? '-translate-x-full' : ''}`}
                 >
                   <p className="font-medium text-gray-600">{pin.label}</p>
                   <p className="mt-1 whitespace-pre-wrap break-words">{pin.comment}</p>
@@ -90,7 +90,7 @@ export function CommentPinList({ pins, selectedNumber, onSelect }: CommentPinLis
           <button
             type="button"
             aria-pressed={pin.number === selectedNumber}
-            className="flex w-full items-start gap-2 rounded border bg-white p-2 text-left text-sm aria-pressed:border-blue-600"
+            className="flex w-full items-start gap-2 rounded-xl border bg-white p-2 text-left text-sm aria-pressed:border-blue-600"
             onClick={() => onSelect(pin.number === selectedNumber ? null : pin.number)}
           >
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
@@ -166,7 +166,7 @@ export function EditMoveList({ moves, showsProposed, onToggle }: EditMoveListPro
         <button
           type="button"
           aria-pressed={showsProposed}
-          className="min-h-11 rounded border bg-white px-3 py-2 text-sm aria-pressed:bg-emerald-700 aria-pressed:text-white"
+          className="min-h-11 rounded-[10px] border bg-white px-3 py-2 text-sm aria-pressed:bg-emerald-700 aria-pressed:text-white"
           onClick={onToggle}
         >
           {showsProposed ? '원래 위치로 보기' : '제안 위치로 보기'}
@@ -177,7 +177,7 @@ export function EditMoveList({ moves, showsProposed, onToggle }: EditMoveListPro
       </div>
       <ol className="flex flex-col gap-1 text-sm">
         {moves.map((move) => (
-          <li key={move.number} className="rounded border bg-white p-2">
+          <li key={move.number} className="rounded-xl border bg-white p-2">
             <span className="font-medium">편집 {move.number}</span> · {move.label} · 가로{' '}
             {formatDelta(move.proposedRect.x - move.originalRect.x)}px, 세로 {formatDelta(move.proposedRect.y - move.originalRect.y)}px
           </li>
