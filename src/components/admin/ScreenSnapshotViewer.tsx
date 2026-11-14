@@ -231,6 +231,13 @@ function getVisualTransform(element: Element, view: Window & typeof globalThis):
 }
 
 // The copy of `node` inside `copyRoot`, found by walking the same child positions as from `sourceRoot`.
+// Every copied element carries its own visibility, so hiding the root alone would leave its children showing.
+function hideCopiedSubtree(root: Element): void {
+  for (const element of [root, ...root.querySelectorAll('*')]) {
+    (element as Partial<ElementCSSInlineStyle>).style?.setProperty('visibility', 'hidden');
+  }
+}
+
 function findCopiedNode(sourceRoot: Element, copyRoot: Element, node: Element): Element | null {
   const path: number[] = [];
   for (let current = node; current !== sourceRoot; current = current.parentElement as Element) {
@@ -337,8 +344,10 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
       if (!outer || !outerClone || !inner || inner === outer || !outer.contains(inner)) {
         return;
       }
-      const copy = findCopiedNode(outer, outerClone, inner) as HTMLElement | null;
-      copy?.style.setProperty('visibility', 'hidden');
+      const copy = findCopiedNode(outer, outerClone, inner);
+      if (copy) {
+        hideCopiedSubtree(copy);
+      }
     });
   });
   elements.forEach((element) => element?.style.setProperty('visibility', 'hidden'));
