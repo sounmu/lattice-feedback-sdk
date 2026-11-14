@@ -332,6 +332,7 @@ export function FeedbackWidget() {
             enabled={captureState?.enabled ?? false}
             disabled={!isReady || isBusy}
             screenCount={screens.snapshots.length}
+            isSavingScreen={screens.status !== 'idle'}
             canCaptureScreen={isInitialized && screens.canCapture}
             screenToolTitle={SCREEN_TOOL_TITLE}
             onStart={(mode) => sendCaptureCommand(createCaptureCommand({ type: 'capture:start', payload: { mode } }))}
