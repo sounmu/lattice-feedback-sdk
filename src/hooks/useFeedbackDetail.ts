@@ -18,6 +18,8 @@ interface UseFeedbackDetailInput {
   projectKey: string;
   token: string;
   id: string;
+  /** Called when a save reaches the server, even if the admin has moved on to another feedback by then. */
+  onSaved?: () => void;
 }
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed';
@@ -38,7 +40,7 @@ interface UseFeedbackDetailResult {
   save: (changes: UpdateFeedbackInput) => Promise<boolean>;
 }
 
-export function useFeedbackDetail({ projectKey, token, id }: UseFeedbackDetailInput): UseFeedbackDetailResult {
+export function useFeedbackDetail({ projectKey, token, id, onSaved }: UseFeedbackDetailInput): UseFeedbackDetailResult {
   const [state, setState] = useState<FeedbackDetailState | null>(null);
   const [saveState, setSaveState] = useState<SaveState | null>(null);
   const requestKey = JSON.stringify([projectKey, token, id]);
@@ -72,6 +74,9 @@ export function useFeedbackDetail({ projectKey, token, id }: UseFeedbackDetailIn
     async (changes: UpdateFeedbackInput): Promise<boolean> => {
       setSaveState({ requestKey, status: 'saving', errorMessage: '' });
       const result = await updateFeedback({ projectKey, token, id, changes });
+      if (result.ok) {
+        onSaved?.();
+      }
       // Settle this save even if the admin moved on, so coming back does not find the form still locked.
       const settled: SaveState = result.ok
         ? { requestKey, status: 'saved', errorMessage: '' }
@@ -84,7 +89,7 @@ export function useFeedbackDetail({ projectKey, token, id }: UseFeedbackDetailIn
       setState({ requestKey, detail: result.data, errorStatus: null, errorMessage: '' });
       return true;
     },
-    [projectKey, token, id, requestKey],
+    [projectKey, token, id, requestKey, onSaved],
   );
 
   // A result for another project, token or feedback must never be shown under the current one.
