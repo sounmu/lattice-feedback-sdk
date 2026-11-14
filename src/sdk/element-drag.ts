@@ -10,6 +10,7 @@
 // document CSS px once at start. Any resize or scroll (including nested
 // scrollers, observed in the capture phase) would invalidate that mapping, so it
 // cancels the active edit instead of trying to re-project positions.
+import { describeTarget } from '@/lib/target-labels';
 import type { CaptureTarget } from '@/sdk/capture-policy';
 import { SDK_Z_INDEX } from '@/sdk/styles';
 import type { EditAttachment, ElementRect } from '@/types/feedback';
@@ -27,9 +28,15 @@ const EDIT_OVERLAY_ATTRIBUTE = 'data-lattice-overlay';
 const EDIT_OVERLAY_VALUE = 'edit';
 const CONFIRM_LABEL = '변경 첨부';
 const CANCEL_LABEL = '취소';
+const TOOLBAR_LABEL = '위치 편집';
+const GHOST_LABEL_SUFFIX = ' 이동 미리보기: 끌거나 방향키로 옮기고, Enter로 첨부해요';
+const TOOLBAR_GAP = 8;
+const VIEWPORT_EDGE = 8;
+const KEYBOARD_STEP = 8;
 const GUARDED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'beforeinput', 'keydown', 'keyup'] as const;
 const INTERACTION_CAPTURE: AddEventListenerOptions = { capture: true, passive: false };
 
+const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const OVERLAY_ROOT_STYLE = `position: fixed; inset: 0; z-index: ${SDK_Z_INDEX}; pointer-events: none; margin: 0; padding: 0;`;
 const GHOST_STYLE = [
   'position: fixed',
@@ -40,35 +47,47 @@ const GHOST_STYLE = [
   'border-radius: 4px',
   'background: rgba(37, 99, 235, 0.18)',
   'color: #1e3a8a',
-  'font: 600 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  `font: 600 12px/1.2 ${FONT}`,
   'overflow: hidden',
   'cursor: grab',
   'user-select: none',
   'touch-action: none',
   'pointer-events: auto',
+  'outline: none',
 ].join('; ');
 const TOOLBAR_STYLE = [
   'position: fixed',
-  'left: 50%',
-  'bottom: 24px',
-  'transform: translateX(-50%)',
+  'left: 0',
+  'top: 0',
   'display: flex',
-  'gap: 8px',
-  'padding: 8px',
-  'border-radius: 8px',
+  'gap: 6px',
+  'padding: 6px',
+  'border-radius: 12px',
   'background: #111827',
   'box-shadow: 0 6px 20px rgba(17, 24, 39, 0.3)',
   'pointer-events: auto',
 ].join('; ');
 const BUTTON_STYLE = [
   'all: initial',
-  'padding: 8px 14px',
-  'border-radius: 6px',
-  'font: 600 13px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  'box-sizing: border-box',
+  'display: inline-flex',
+  'align-items: center',
+  'justify-content: center',
+  'min-width: 44px',
+  'min-height: 44px',
+  'padding: 0 16px',
+  'border-radius: 10px',
+  `font: 600 14px/1 ${FONT}`,
+  'white-space: nowrap',
   'cursor: pointer',
 ].join('; ');
 const CONFIRM_BUTTON_STYLE = `${BUTTON_STYLE}; background: #2563eb; color: #ffffff;`;
 const CANCEL_BUTTON_STYLE = `${BUTTON_STYLE}; background: #374151; color: #f9fafb;`;
+// Inline styles cannot express focus states, so the overlay carries one attribute-scoped rule set.
+const FOCUS_STYLES = `
+[${EDIT_OVERLAY_ATTRIBUTE}="${EDIT_OVERLAY_VALUE}"] [role="button"]:focus-visible { outline: 3px solid #1d4ed8 !important; outline-offset: 2px !important; }
+[${EDIT_OVERLAY_ATTRIBUTE}="${EDIT_OVERLAY_VALUE}"] button:focus-visible { outline: 3px solid #93c5fd !important; outline-offset: 2px !important; }
+`;
 
 let activeHandle: ElementDragHandle | null = null;
 
@@ -106,17 +125,20 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   root.setAttribute(EDIT_OVERLAY_ATTRIBUTE, EDIT_OVERLAY_VALUE);
   root.setAttribute('style', OVERLAY_ROOT_STYLE);
 
+  const targetLabel = describeTarget(selection.target);
   const ghost = document.createElement('div');
   ghost.setAttribute('style', GHOST_STYLE);
   ghost.setAttribute('role', 'button');
   ghost.setAttribute('tabindex', '0');
-  ghost.setAttribute('aria-label', '이동 미리보기: 방향키로 이동, Enter로 첨부');
-  ghost.textContent = selection.target.feedbackId ?? selection.target.tagName;
+  ghost.setAttribute('aria-label', `${targetLabel}${GHOST_LABEL_SUFFIX}`);
+  ghost.textContent = targetLabel;
   ghost.style.width = `${bounds.width}px`;
   ghost.style.height = `${bounds.height}px`;
 
   const toolbar = document.createElement('div');
   toolbar.setAttribute('style', TOOLBAR_STYLE);
+  toolbar.setAttribute('role', 'group');
+  toolbar.setAttribute('aria-label', TOOLBAR_LABEL);
   const confirmButton = document.createElement('button');
   confirmButton.setAttribute('type', 'button');
   confirmButton.setAttribute('style', CONFIRM_BUTTON_STYLE);
@@ -128,12 +150,28 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   toolbar.appendChild(confirmButton);
   toolbar.appendChild(cancelButton);
 
+  const focusStyle = document.createElement('style');
+  focusStyle.textContent = FOCUS_STYLES;
+
   root.appendChild(ghost);
   root.appendChild(toolbar);
+  root.appendChild(focusStyle);
+
+  // The toolbar sits under the ghost and follows it, above it when there is no room below.
+  function placeToolbar(): void {
+    const toolbarWidth = toolbar.offsetWidth || 0;
+    const toolbarHeight = toolbar.offsetHeight || 0;
+    const below = ghostTop + bounds.height + TOOLBAR_GAP;
+    const top = below + toolbarHeight + VIEWPORT_EDGE <= viewportHeight ? below : ghostTop - TOOLBAR_GAP - toolbarHeight;
+    const left = Math.min(Math.max(ghostLeft, VIEWPORT_EDGE), Math.max(VIEWPORT_EDGE, viewportWidth - toolbarWidth - VIEWPORT_EDGE));
+    toolbar.style.left = `${left}px`;
+    toolbar.style.top = `${Math.max(VIEWPORT_EDGE, top)}px`;
+  }
 
   function placeGhost(): void {
     ghost.style.left = `${ghostLeft}px`;
     ghost.style.top = `${ghostTop}px`;
+    placeToolbar();
   }
 
   function handleGhostPointerDown(event: PointerEvent): void {
@@ -184,7 +222,7 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
         return;
       }
       const directions: Record<string, [number, number]> = {
-        ArrowLeft: [-8, 0], ArrowRight: [8, 0], ArrowUp: [0, -8], ArrowDown: [0, 8],
+        ArrowLeft: [-KEYBOARD_STEP, 0], ArrowRight: [KEYBOARD_STEP, 0], ArrowUp: [0, -KEYBOARD_STEP], ArrowDown: [0, KEYBOARD_STEP],
       };
       const direction = directions[event.key];
       if (direction) {
@@ -284,6 +322,9 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   }
   document.addEventListener('keydown', handleKeyDown, true);
   document.body.appendChild(root);
+  placeToolbar();
+  // Keyboard users land on the ghost right away, where the arrow keys and Enter work.
+  ghost.focus?.({ preventScroll: true });
 
   activeHandle = handle;
   return handle;

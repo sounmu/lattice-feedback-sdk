@@ -78,6 +78,27 @@ class FakeNode {
   find(matches: (node: FakeNode) => boolean): FakeNode[] {
     return this.children.flatMap((child) => [...(matches(child) ? [child] : []), ...child.find(matches)]);
   }
+  closest(): FakeNode | null {
+    return null;
+  }
+}
+
+interface HostEvent extends FakeEvent {
+  target: FakeNode;
+  immediatelyStopped: boolean;
+  stopImmediatePropagation(): void;
+}
+
+/** Dispatches a host-page event to the overlay's window listeners, the way the browser would in the capture phase. */
+function fireHost(type: string, target: FakeNode): HostEvent {
+  const event: HostEvent = {
+    type, target, defaultPrevented: false, stopped: false, immediatelyStopped: false,
+    preventDefault() { this.defaultPrevented = true; },
+    stopPropagation() { this.stopped = true; },
+    stopImmediatePropagation() { this.immediatelyStopped = true; },
+  };
+  for (const listener of [...(view.listeners.get(type) ?? [])]) (listener as unknown as (event: HostEvent) => void)(event);
+  return event;
 }
 
 interface HostElement {
@@ -242,6 +263,40 @@ it('cancels on Escape once, ignores IME composition, and keeps typed keys from t
   overlay.destroy();
 });
 
+it('keeps a stray host click from the page while the editor is open, and keeps a typed draft', () => {
+  vi.stubGlobal('Element', FakeNode);
+  const overlay = createCommentOverlay(root as unknown as ShadowRoot);
+  const onCancel = vi.fn();
+  overlay.openEditor(createTarget(), { x: 0.5, y: 0.5 }, { onSubmit: vi.fn(), onCancel });
+  const hostButton = new FakeNode('button');
+  const sdkButton = new FakeNode('button');
+  sdkButton.closest = () => sdkButton;
+
+  const passed = fireHost('click', sdkButton);
+  expect(passed.defaultPrevented).toBe(false);
+  expect(passed.immediatelyStopped).toBe(false);
+
+  textarea().value = 'keep this draft';
+  textarea().attributes.focused = 'false';
+  const guarded = fireHost('click', hostButton);
+  expect(guarded.defaultPrevented).toBe(true);
+  expect(guarded.immediatelyStopped).toBe(true);
+  expect(editors()).toHaveLength(1);
+  expect(textarea().attributes.focused).toBe('true');
+  expect(onCancel).not.toHaveBeenCalled();
+
+  const press = fireHost('mousedown', hostButton);
+  expect(press.defaultPrevented).toBe(true);
+  expect(editors()).toHaveLength(1);
+
+  textarea().value = '   ';
+  fireHost('click', hostButton);
+  expect(editors()).toHaveLength(0);
+  expect(onCancel).toHaveBeenCalledTimes(1);
+  expect(hostListenerCount()).toBe(0);
+  overlay.destroy();
+});
+
 it('keeps the editor inside a narrow viewport', () => {
   view.innerWidth = 320;
   const overlay = createCommentOverlay(root as unknown as ShadowRoot);
@@ -256,7 +311,8 @@ it('removes its nodes and host listeners on destroy without calling callbacks', 
   const onCancel = vi.fn();
   overlay.renderPins([createSource()], vi.fn());
   overlay.openEditor(createTarget(), { x: 0.5, y: 0.5 }, { onSubmit: vi.fn(), onCancel });
-  expect(hostListenerCount()).toBe(2);
+  // scroll + resize keep the pins in place; six pointer guards keep the host page from reacting while the editor is open.
+  expect(hostListenerCount()).toBe(8);
 
   overlay.destroy();
   overlay.destroy();
