@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { AdminSection } from '@/components/admin/AdminSection';
 import { createTicketDraft } from '@/lib/ticket-draft';
 import type { FeedbackDetailResponse } from '@/types/feedback';
 
@@ -29,8 +30,7 @@ export function TicketDraftPanel({ detail }: { detail: FeedbackDetailResponse })
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-2xl border border-(--admin-border) bg-(--admin-surface) p-4">
-      <h2 className="text-base font-bold">티켓 초안</h2>
+    <AdminSection sectionKey="ticket-draft" title="티켓 초안">
       <p className="text-sm text-(--admin-text-sub)">
         피드백 내용과 SDK 기록으로 만든 초안이에요. 고친 뒤 복사해서 이슈 트래커에 붙여 넣으세요. 여기서 고친 내용은 저장되지 않아요.
       </p>
@@ -74,6 +74,6 @@ export function TicketDraftPanel({ detail }: { detail: FeedbackDetailResponse })
           </p>
         ) : null}
       </div>
-    </section>
+    </AdminSection>
   );
 }

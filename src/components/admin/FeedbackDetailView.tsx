@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import type { ReactNode } from 'react';
 
+import { AdminSection } from '@/components/admin/AdminSection';
 import { CommentAttachmentList } from '@/components/admin/CommentAttachmentList';
 import { EditScreenPreview } from '@/components/admin/EditScreenPreview';
 import { FeedbackActionPanel } from '@/components/admin/FeedbackActionPanel';
@@ -20,15 +20,6 @@ interface FeedbackDetailViewProps {
   onSave: (changes: UpdateFeedbackInput) => Promise<boolean>;
   /** Shown next to the list instead of on its own page. */
   isEmbedded?: boolean;
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="flex flex-col gap-3 rounded-2xl border border-(--admin-border) bg-(--admin-surface) p-4">
-      <h2 className="text-base font-bold">{title}</h2>
-      {children}
-    </section>
-  );
 }
 
 export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMessage, onSave, isEmbedded = false }: FeedbackDetailViewProps) {
@@ -52,7 +43,7 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex flex-col gap-4">
-          <Section title="피드백 내용">
+          <AdminSection sectionKey="content" title="피드백 내용">
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={feedback.status} />
               <TypeBadge type={feedback.type} />
@@ -69,30 +60,30 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
               </p>
             ) : null}
             <p className="whitespace-pre-wrap text-base">{feedback.message}</p>
-          </Section>
+          </AdminSection>
 
           {comments.length > 0 ? (
-            <Section title={`코멘트 ${comments.length}개`}>
+            <AdminSection sectionKey="comments" title={`코멘트 ${comments.length}개`}>
               <CommentAttachmentList comments={comments} />
-            </Section>
+            </AdminSection>
           ) : null}
 
           {edits.length > 0 ? (
-            <Section title={`위치 편집 ${edits.length}개`}>
+            <AdminSection sectionKey="edits" title={`위치 편집 ${edits.length}개`}>
               <EditScreenPreview screens={screenSnapshots} projectKey={projectKey} edits={edits} />
-            </Section>
+            </AdminSection>
           ) : null}
 
           {flow ? (
-            <Section title={`흐름 기록 ${flow.events.length}개`}>
+            <AdminSection sectionKey="flow" title={`흐름 기록 ${flow.events.length}개`}>
               <FlowTimeline flow={flow} />
-            </Section>
+            </AdminSection>
           ) : null}
 
           {screenSnapshots.length > 0 ? (
-            <Section title="저장된 화면">
+            <AdminSection sectionKey="screens" title="저장된 화면">
               <SavedScreenList screens={screenSnapshots} projectKey={projectKey} />
-            </Section>
+            </AdminSection>
           ) : null}
 
           <TicketDraftPanel key={feedback.id} detail={detail} />
@@ -106,7 +97,7 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
             saveErrorMessage={saveErrorMessage}
             onSave={onSave}
           />
-          <Section title="보낸 사람 · 페이지">
+          <AdminSection sectionKey="reporter" title="보낸 사람 · 페이지">
             <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-2 gap-y-1">
               <dt className="text-(--admin-text-muted)">이름</dt>
               <dd>{feedback.reporter.name}</dd>
@@ -127,7 +118,7 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
               <dt className="text-(--admin-text-muted)">수정</dt>
               <dd>{formatDateTime(feedback.updatedAt)}</dd>
             </dl>
-          </Section>
+          </AdminSection>
         </aside>
       </div>
     </div>

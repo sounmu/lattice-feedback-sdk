@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useState } from 'react';
 
+import { AdminSection } from '@/components/admin/AdminSection';
 import { DuplicateOriginalPicker } from '@/components/admin/DuplicateOriginalPicker';
 import { ShortcutKey } from '@/components/admin/ShortcutKey';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
@@ -75,9 +76,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
   }, []);
 
   return (
-    <section className="flex flex-col gap-3 rounded-2xl border border-(--admin-border) bg-(--admin-surface) p-4">
-      <h2 className="text-base font-bold">처리하기</h2>
-
+    <AdminSection sectionKey="actions" title="처리하기">
       <fieldset disabled={isSaving} className="flex flex-wrap gap-2">
         <legend className="mb-1 text-sm font-semibold">상태</legend>
         {FEEDBACK_STATUSES.map((option) => (
@@ -148,6 +147,6 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
           </p>
         ) : null}
       </div>
-    </section>
+    </AdminSection>
   );
 }
