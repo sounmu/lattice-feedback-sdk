@@ -455,6 +455,8 @@ interface ScreenReplayProps {
    * replay revokes them when it closes. Keep the function's identity stable: a new one rebuilds the page.
    */
   loadAssetUrls: () => Promise<(string | null)[]>;
+  /** Opens with edited elements already at their proposed position. */
+  initiallyShowsProposed?: boolean;
 }
 
 // A long Flow replay arrives as a gzip file, because the platform limits how large a response may be.
@@ -467,6 +469,28 @@ async function readSnapshotResponse(response: Response): Promise<ScreenSnapshotD
 }
 
 // Asset files need the admin token, so they are fetched here and handed to the replay as blob: URLs.
+export type SavedScreenResult = { snapshot: ScreenSnapshot } | { status: number };
+
+/** Reads one saved screen with the admin token. Status 0 means the request never reached the server. */
+export async function fetchSavedScreen(id: string, projectKey: string, token: string, signal?: AbortSignal): Promise<SavedScreenResult> {
+  try {
+    const response = await fetch(`/api/snapshots/${encodeURIComponent(id)}?projectKey=${encodeURIComponent(projectKey)}`, {
+      headers: { authorization: `Bearer ${token}`, accept: isGzipSupported() ? GZIP_MEDIA_TYPE : 'application/json' },
+      signal,
+    });
+    if (!response.ok) {
+      return { status: response.status };
+    }
+    const body = await readSnapshotResponse(response);
+    return { snapshot: body.snapshot };
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    return { status: 0 };
+  }
+}
+
 async function fetchAssetUrl(hash: string, projectKey: string, token: string): Promise<string | null> {
   try {
     const response = await fetch(`/api/snapshots/assets/${hash}?projectKey=${encodeURIComponent(projectKey)}`, {
@@ -483,7 +507,7 @@ async function fetchAssetUrl(hash: string, projectKey: string, token: string): P
 
 // Shared by the admin viewer and the widget's preview. It only draws what it is handed: reading a saved
 // screen from the server, and the admin token that needs, stay with the caller.
-export function ScreenReplay({ screen, loadAssetUrls }: ScreenReplayProps) {
+export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = false }: ScreenReplayProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [unloadedAssetCount, setUnloadedAssetCount] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -624,6 +648,10 @@ export function ScreenReplay({ screen, loadAssetUrls }: ScreenReplayProps) {
       frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
       frameDocument = replayer?.iframe.contentDocument ?? null;
       frameDocument?.addEventListener('scroll', measurePins, { capture: true, passive: true });
+      // A rebuilt page has no clones yet, so a proposal that is shown is drawn again on it.
+      if (replayer && showsProposedRef.current) {
+        showProposedPositions(replayer, moves, true);
+      }
       void frameDocument?.fonts.ready.then(measurePins);
       measurePins();
     }
@@ -675,7 +703,9 @@ export function ScreenReplay({ screen, loadAssetUrls }: ScreenReplayProps) {
         setCurrentMs(0);
         setIsPlaying(false);
       }
-      showsProposedRef.current = false;
+      const showsProposedAtStart = initiallyShowsProposed && moves.length > 0;
+      showsProposedRef.current = showsProposedAtStart;
+      setShowsProposed(showsProposedAtStart);
       if (hasMarks) {
         followMarks();
       }
@@ -693,7 +723,7 @@ export function ScreenReplay({ screen, loadAssetUrls }: ScreenReplayProps) {
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay]);
+  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -767,19 +797,19 @@ export function ScreenReplay({ screen, loadAssetUrls }: ScreenReplayProps) {
   );
 }
 
-interface AdminScreenReplayProps {
+interface AdminScreenReplayProps extends Pick<ScreenReplayProps, 'initiallyShowsProposed'> {
   snapshot: ScreenSnapshot;
   projectKey: string;
   token: string;
 }
 
 // The saved files are read with the admin token here, so the shared replay never sees it.
-function AdminScreenReplay({ snapshot, projectKey, token }: AdminScreenReplayProps) {
+export function AdminScreenReplay({ snapshot, projectKey, token, initiallyShowsProposed }: AdminScreenReplayProps) {
   const loadAssetUrls = useCallback(
     () => Promise.all(snapshot.assetHashes.map((hash) => fetchAssetUrl(hash, projectKey, token))),
     [snapshot, projectKey, token],
   );
-  return <ScreenReplay screen={snapshot} loadAssetUrls={loadAssetUrls} />;
+  return <ScreenReplay screen={snapshot} loadAssetUrls={loadAssetUrls} initiallyShowsProposed={initiallyShowsProposed} />;
 }
 
 function ScreenSnapshotDetails({ snapshot }: { snapshot: ScreenSnapshot }) {
@@ -820,26 +850,10 @@ export function ScreenSnapshotViewer() {
     }
     const controller = new AbortController();
 
-    async function load() {
-      try {
-        const response = await fetch(`/api/snapshots/${encodeURIComponent(id)}?projectKey=${encodeURIComponent(projectKey)}`, {
-          headers: { authorization: `Bearer ${token}`, accept: isGzipSupported() ? GZIP_MEDIA_TYPE : 'application/json' },
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          setResult({ key: requestKey, status: response.status });
-          return;
-        }
-        const body = await readSnapshotResponse(response);
-        setResult({ key: requestKey, snapshot: body.snapshot });
-      } catch {
-        if (!controller.signal.aborted) {
-          setResult({ key: requestKey, status: 0 });
-        }
-      }
-    }
-
-    void load();
+    fetchSavedScreen(id, projectKey, token, controller.signal).then(
+      (loaded) => setResult({ key: requestKey, ...loaded }),
+      () => undefined,
+    );
     return () => controller.abort();
   }, [id, projectKey, token, requestKey]);
 

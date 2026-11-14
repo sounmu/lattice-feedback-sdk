@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import { CommentAttachmentList } from '@/components/admin/CommentAttachmentList';
 import { EditComparison } from '@/components/admin/EditComparison';
+import { EditScreenPreview } from '@/components/admin/EditScreenPreview';
 import { FeedbackActionPanel } from '@/components/admin/FeedbackActionPanel';
 import { StatusBadge, TypeBadge } from '@/components/admin/FeedbackBadges';
 import { FlowTimeline } from '@/components/admin/FlowTimeline';
@@ -56,9 +57,13 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
 
           {edits.length > 0 ? (
             <Section title={`위치 편집 ${edits.length}개`}>
-              {edits.map((edit, index) => (
-                <EditComparison key={`${edit.target.selector}-${index}`} edit={edit} />
-              ))}
+              <EditScreenPreview
+                screens={screenSnapshots}
+                projectKey={projectKey}
+                fallback={edits.map((edit, index) => (
+                  <EditComparison key={`${edit.target.selector}-${index}`} edit={edit} />
+                ))}
+              />
             </Section>
           ) : null}
 
