@@ -76,7 +76,13 @@ export function countAttachments(attachments: Attachments): number {
   return attachments.comments.length + attachments.edits.length + (attachments.flow ? 1 : 0);
 }
 
-export function findStartBlocker(mode: CaptureMode, attachments: Attachments): string | null {
+/** How many screens the draft holds, and whether one more is being saved right now. */
+interface ScreenSlots {
+  screenCount: number;
+  isSavingScreen: boolean;
+}
+
+export function findStartBlocker(mode: CaptureMode, attachments: Attachments, { screenCount, isSavingScreen }: ScreenSlots): string | null {
   if (mode === 'comment' && attachments.comments.length >= MAX_COMMENTS) {
     return `코멘트는 최대 ${MAX_COMMENTS}개까지 첨부할 수 있어요.`;
   }
@@ -85,6 +91,14 @@ export function findStartBlocker(mode: CaptureMode, attachments: Attachments): s
   }
   if (mode === 'flow' && attachments.flow !== null) {
     return '흐름 기록은 1개만 첨부할 수 있어요. 기존 기록을 지운 뒤 다시 시작해 주세요.';
+  }
+  // A finished Flow is attached as a replay screen. Without a free slot it could not be attached, and
+  // freeing one afterwards would not bring the replay back.
+  if (mode === 'flow' && screenCount >= MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK) {
+    return `저장한 화면이 ${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}개라 흐름 재생을 붙일 자리가 없어요. 화면을 하나 지운 뒤 시작해 주세요.`;
+  }
+  if (mode === 'flow' && isSavingScreen) {
+    return '화면을 저장하는 중이에요. 끝난 뒤 흐름 기록을 시작해 주세요.';
   }
   return null;
 }
@@ -131,6 +145,7 @@ interface CaptureToolBarProps {
   enabled: boolean;
   disabled: boolean;
   screenCount: number;
+  isSavingScreen: boolean;
   canCaptureScreen: boolean;
   /** What the screen tool does, shown as its tooltip. */
   screenToolTitle: string;
@@ -143,6 +158,7 @@ export function CaptureToolBar({
   enabled,
   disabled,
   screenCount,
+  isSavingScreen,
   canCaptureScreen,
   screenToolTitle,
   onStart,
@@ -155,7 +171,7 @@ export function CaptureToolBar({
       <p className="text-xs text-fw-sub">화면으로 보여주기 (선택)</p>
       <div className="grid grid-cols-4 gap-1.5">
         {MODES.map((mode) => {
-          const blocker = attachments ? findStartBlocker(mode, attachments) : null;
+          const blocker = attachments ? findStartBlocker(mode, attachments, { screenCount, isSavingScreen }) : null;
           return (
             <ToolButton
               key={mode}
