@@ -29,6 +29,10 @@ import { createSegmentedReplayAssetRoot } from '@/sdk/replay-assets';
 import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
 
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
+import { createAutomaticMasker, prepareStaticTextIndex } from '@/sdk/static-text-index';
+import { SnapshotMasker } from '@/sdk/snapshot-masking';
+import { getMaskingOmissions, getReplayMaskingOmissions } from '@/sdk/masking-report';
+import { MAX_MISSING_SNAPSHOT_ASSETS } from '@/lib/feedback-limits';
 
 /** Comments and proposed moves to mark on the saved screen. */
 export interface ScreenMarkSources {
@@ -45,7 +49,7 @@ const CSS_IMAGE_PROPERTIES = ['background-image', 'border-image-source', 'list-s
 const PSEUDO_ELEMENTS = [null, '::before', '::after'] as const;
 const CSS_IMAGE_URL_PATTERN = /url\(\s*"([^"]*)"\s*\)/g;
 
-function isMaskedInput(element: HTMLElement): boolean {
+export function isMaskedInput(element: HTMLElement): boolean {
   if (element.closest(MASKED_SELECTOR)) {
     return true;
   }
@@ -111,6 +115,7 @@ export async function captureScreen(
   sdkSelector: string,
   marks: ScreenMarkSources = { comments: [], edits: [] },
 ): Promise<ScreenCapture> {
+  await prepareStaticTextIndex();
   const capturedAt = Date.now();
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
   const mirror = createMirror();
@@ -132,12 +137,15 @@ export async function captureScreen(
   }
   removeInlineScripts(node);
   removeHiddenValues(node);
+  const masker = createAutomaticMasker();
+  const commentedIds = new Set(marks.comments.map(({ element }) => mirror.getId(element)));
+  new SnapshotMasker(masker, commentedIds).node(node);
 
   // Read together with the DOM, before any await: the reporter may scroll or navigate while files download.
   const url = getPageUrl(window.location.href);
   const page: CapturedScreen['page'] = {
     url,
-    title: truncateText(document.title, MAX_PAGE_TITLE_LENGTH),
+    title: truncateText(masker.text(document.title), MAX_PAGE_TITLE_LENGTH),
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
     scrollX: window.scrollX,
@@ -185,7 +193,7 @@ export async function captureScreen(
       ...pins.map((pin) => createCommentPinEvent(pin, capturedAt)),
       ...moves.map((move) => createEditMoveEvent(move, capturedAt)),
     ],
-    missingAssets,
+    missingAssets: [...getMaskingOmissions(masker), ...missingAssets].slice(0, MAX_MISSING_SNAPSHOT_ASSETS),
   };
   return { screen, assetFiles };
 }
@@ -239,7 +247,7 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
     capturedAt: recording.startedAt,
     page: recording.page,
     events,
-    missingAssets,
+    missingAssets: [...getReplayMaskingOmissions(events), ...missingAssets].slice(0, MAX_MISSING_SNAPSHOT_ASSETS),
   };
   return { screen, assetFiles };
 }

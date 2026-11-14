@@ -19,6 +19,8 @@ vi.mock('@/sdk/element-selection', () => ({ startElementSelection: engines.selec
 vi.mock('@/sdk/element-drag', () => ({ startElementDrag: engines.drag }));
 vi.mock('@/sdk/flow-recorder', () => ({ createFlowRecorder: engines.flow }));
 vi.mock('@/sdk/flow-replay-recorder', () => ({ startReplayRecording: engines.replay }));
+const index = vi.hoisted(() => ({ ready: vi.fn(), prepare: vi.fn() }));
+vi.mock('@/sdk/static-text-index', () => ({ isStaticIndexReady: index.ready, prepareStaticTextIndex: index.prepare }));
 vi.mock('@/sdk/comment-overlay', () => ({
   createCommentOverlay: () => ({
     renderPins: engines.renderPins,
@@ -44,6 +46,8 @@ beforeEach(() => {
   dragOptions = undefined;
   restoredFlow = false;
   commentCallbacks = undefined;
+  index.ready.mockReturnValue(true);
+  index.prepare.mockResolvedValue(undefined);
   engines.openEditor.mockImplementation((_target, _point, callbacks: CommentEditorCallbacks) => {
     commentCallbacks = callbacks;
   });
@@ -277,6 +281,34 @@ it('restores earlier replay data without recording a disallowed document', async
     projectKey: 'demo', sessionId: 'flow-test-session', resumed: true, recordPage: false,
   });
   expect(await controller.takeFlowReplay()).toBeNull();
+  controller.destroy();
+});
+
+it('waits for the static text index before recording a resumed Flow', async () => {
+  let release!: () => void;
+  const prepared = new Promise<void>((resolve) => { release = resolve; });
+  index.ready.mockReturnValue(false);
+  index.prepare.mockReturnValue(prepared);
+  restoredFlow = true;
+  const { controller } = createHarness();
+  expect(engines.replay).not.toHaveBeenCalled();
+  release();
+  await prepared;
+  expect(engines.replay).toHaveBeenCalledOnce();
+  controller.destroy();
+});
+
+it('does not start a deferred recording after its Flow has stopped', async () => {
+  let release!: () => void;
+  const prepared = new Promise<void>((resolve) => { release = resolve; });
+  index.ready.mockReturnValue(false);
+  index.prepare.mockReturnValue(prepared);
+  restoredFlow = true;
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
+  release();
+  await prepared;
+  expect(engines.replay).not.toHaveBeenCalled();
   controller.destroy();
 });
 

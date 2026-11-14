@@ -1,5 +1,5 @@
 // Records what happens on the page while Flow is on, so the admin can watch it back.
-// Inputs are always masked here: Flow keeps that an input happened, never its value (AGENTS.md section 3).
+// Input data is classified before recording; password and explicit mask exclusions always win.
 // Each event is cleaned before it is kept, and saved as it is recorded, so the replay continues in the next
 // document after a reload or full navigation instead of starting over.
 import { record } from '@rrweb/record';
@@ -20,9 +20,11 @@ import { getPageUrl } from '@/sdk/page-context';
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { isMutationEvent, sanitizeReplayEvents, trimReplayStart, type MutationData, type RecordedElements } from '@/sdk/replay-sanitize';
 import { findStyleSheetOwnerId, resolveStyleSheetChange } from '@/sdk/replay-assets';
-import { BLOCKED_SELECTOR, findLoadedFontFamilies, findUsedCssImageUrls, MASKED_SELECTOR } from '@/sdk/screen-capture';
+import { BLOCKED_SELECTOR, findLoadedFontFamilies, findUsedCssImageUrls, isMaskedInput, MASKED_SELECTOR } from '@/sdk/screen-capture';
 import type { SnapshotNode } from '@/sdk/snapshot-assets';
 import type { ScreenSnapshotEvent, ScreenSnapshotPage } from '@/types/screen-snapshot';
+import { createAutomaticMasker } from '@/sdk/static-text-index';
+import { SnapshotMasker } from '@/sdk/snapshot-masking';
 
 // Reading every element's computed style is costly, so page changes are sampled at most once per second.
 const CSS_USAGE_SAMPLE_INTERVAL_MS = 1000;
@@ -79,10 +81,11 @@ function resolveLinkedStyleSheetUrls(event: ScreenSnapshotEvent): ScreenSnapshot
 }
 
 export function startReplayRecording(sdkSelector: string, session: ReplaySession): ReplayRecorder {
+  const masking = new SnapshotMasker(createAutomaticMasker());
   const store = openReplayStore(session.projectKey, session.sessionId);
   const page: ScreenSnapshotPage = {
     url: getPageUrl(window.location.href),
-    title: truncateText(document.title, MAX_PAGE_TITLE_LENGTH),
+    title: truncateText(masking.masker.text(document.title), MAX_PAGE_TITLE_LENGTH),
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
     scrollX: window.scrollX,
@@ -205,7 +208,7 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
       // The Meta event carries window.location.href; the kept one gets the URL without query and fragment.
       recorded.data = { ...(recorded.data as Record<string, unknown>), href: page.url };
     }
-    sanitizeReplayEvents([recorded], elements);
+    sanitizeReplayEvents([recorded], elements, masking);
     events.push(recorded);
     unsaved.events.push(recorded);
     unsaved.bytes += bytes;
@@ -303,6 +306,9 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
       blockSelector: excludedSelector,
       maskTextSelector: MASKED_SELECTOR,
       maskAllInputs: true,
+      maskInputFn: (text, element) => masking.masker.options.enabled === false
+        ? '*'.repeat(text.length)
+        : masking.masker.text(text, { forced: isMaskedInput(element), safe: element.closest('[data-lattice-keep]') !== null }),
       slimDOMOptions: { script: true },
       inlineStylesheet: true,
       inlineImages: false,

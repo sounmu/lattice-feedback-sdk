@@ -5,6 +5,8 @@ import type { SnapshotAttributes, SnapshotNode } from '@/sdk/snapshot-assets';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
+import type { SnapshotMasker } from '@/sdk/snapshot-masking';
+import { addMaskingReport } from '@/sdk/masking-report';
 
 // rrweb IncrementalSource.Mutation and IncrementalSource.Input.
 export const MUTATION_SOURCE = 0;
@@ -95,10 +97,12 @@ export function trimReplayStart(events: readonly ScreenSnapshotEvent[], pageUrl:
  * Cleans the recorded events of one document in place, in order, and returns what is known about each
  * recorded element. A recorder cleaning events one at a time passes the same elements back in with each.
  */
-export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], elements: RecordedElements = new Map()): RecordedElements {
+export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], elements: RecordedElements = new Map(), masking?: SnapshotMasker): RecordedElements {
   for (const event of events) {
     if (event.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
       sanitizeNode((event.data as { node: SnapshotNode }).node, elements);
+      masking?.node((event.data as { node: SnapshotNode }).node);
+      if (masking) addMaskingReport(event, masking.masker);
       continue;
     }
     if (isHiddenInputEvent(event, elements)) {
@@ -107,11 +111,22 @@ export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], ele
       continue;
     }
     if (!isMutationEvent(event)) {
+      const data = event.data as { source?: number; id?: number; text?: string };
+      if (event.type === RRWEB_INCREMENTAL_EVENT_TYPE && data.source === INPUT_SOURCE && typeof data.text === 'string') {
+        data.text = masking?.text(data.id ?? -1, data.text) ?? data.text;
+      }
+      if (masking) addMaskingReport(event, masking.masker);
       continue;
     }
     const data = event.data as MutationData;
     data.adds?.forEach((add) => sanitizeNode(add.node, elements));
     data.attributes?.forEach((change) => sanitizeAttributeChange(change, elements));
+    data.adds?.forEach((add) => masking?.node(add.node, add.parentId));
+    data.attributes?.forEach((change) => masking?.attributes(change.id, change.attributes));
+    data.texts?.forEach((change) => {
+      if (change.value !== null) change.value = masking?.text(change.id, change.value) ?? change.value;
+    });
+    if (masking) addMaskingReport(event, masking.masker);
   }
   return elements;
 }

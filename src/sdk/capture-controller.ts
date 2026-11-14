@@ -8,6 +8,7 @@ import { startElementDrag } from '@/sdk/element-drag';
 import { startElementSelection, type SelectionPoint } from '@/sdk/element-selection';
 import { createFlowRecorder, type FlowRecorder, type FlowRecorderState } from '@/sdk/flow-recorder';
 import { startReplayRecording, type ReplayRecorder, type ReplayRecording } from '@/sdk/flow-replay-recorder';
+import { isStaticIndexReady, prepareStaticTextIndex } from '@/sdk/static-text-index';
 import { clearFlowSession, findSessionStorage, getFlowSessionKey } from '@/sdk/flow-session';
 import type { AttachmentKind, CaptureCommand, CaptureMode, CaptureState } from '@/types/sdk-message';
 import type { ElementTarget, FeedbackAttachments, FlowAttachment } from '@/types/feedback';
@@ -318,6 +319,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
       if (state.sessionId) startReplay(state.sessionId, !isStartingFlow);
     } else if (!state.recording && activeMode === 'flow') {
       activeMode = null;
+      replayStartToken += 1;
       // A replay that was cut off has no recorder left and is kept as it is.
       if (replayRecorder) {
         stoppedReplay = replayRecorder.stop();
@@ -329,17 +331,29 @@ export function createCaptureController(options: CaptureControllerOptions) {
     emit();
   }
 
+  // Text is classified as it is recorded, so the first snapshot waits for the static text index (a resumed Flow starts without a click).
+  let replayStartToken = 0;
+
   function startReplay(sessionId: string, resumed: boolean): void {
     discardReplay();
     finishedReplay = null;
     stoppedReplay = null;
-    // On an excluded page, recover earlier segments without recording this document.
-    replayRecorder = startReplayRecording(options.sdkSelector, {
-      projectKey: options.projectKey,
-      sessionId,
-      resumed,
-      recordPage: isCapturePageAllowed(policy),
-    });
+    const token = replayStartToken;
+    const launch = (): void => {
+      if (isDestroyed || token !== replayStartToken) return;
+      // On an excluded page, recover earlier segments without recording this document.
+      replayRecorder = startReplayRecording(options.sdkSelector, {
+        projectKey: options.projectKey,
+        sessionId,
+        resumed,
+        recordPage: isCapturePageAllowed(policy),
+      });
+    };
+    if (isStaticIndexReady()) {
+      launch();
+      return;
+    }
+    void prepareStaticTextIndex().then(launch);
   }
 
   // The replay must not carry a page the policy leaves out. Once cut off it is not resumed, even back on an allowed page.
@@ -349,12 +363,14 @@ export function createCaptureController(options: CaptureControllerOptions) {
   }
 
   function discardReplay(): void {
+    replayStartToken += 1;
     replayRecorder?.discard();
     replayRecorder = null;
   }
 
   function handleFlowComplete(flow: FlowAttachment): void {
     if (isDestroyed) return;
+    replayStartToken += 1;
     finishedReplay = stoppedReplay ?? replayRecorder?.stop() ?? null;
     stoppedReplay = null;
     replayRecorder = null;

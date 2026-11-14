@@ -6,6 +6,7 @@ import { trackHistory } from '@/sdk/history-tracking';
 import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
 import { captureRecording, captureScreen } from '@/sdk/screen-capture';
+import { configureAutomaticMasking, prepareStaticTextIndex, warmStaticTextIndex } from '@/sdk/static-text-index';
 import { HOST_ELEMENT_STYLE, PANEL_OPEN_CLASS_NAME, SDK_STYLES } from '@/sdk/styles';
 import type { FeedbackSdkInitOptions } from '@/sdk/types';
 import type { FeedbackReporter } from '@/types/feedback';
@@ -56,6 +57,7 @@ export class FeedbackSdk {
     this.capturePolicy = options.capturePolicy === undefined
       ? null
       : findCapturePolicy(options.capturePolicy) ?? { allowedPaths: [], targets: [] };
+    configureAutomaticMasking(this.capturePolicy?.automaticMasking);
     window.addEventListener('message', this.handleMessage);
     this.stopHistoryTracking = trackHistory(this.handleNavigation);
     if (document.body) {
@@ -88,6 +90,7 @@ export class FeedbackSdk {
     this.panelElement.classList.add(PANEL_OPEN_CLASS_NAME);
     this.launcherButton.setAttribute('aria-expanded', 'true');
     this.isPanelOpen = true;
+    warmStaticTextIndex();
     // The viewport may have changed since the iframe was created, so refresh on every open.
     this.updatePageContext();
     this.captureController?.setPanelVisible(true);
@@ -265,6 +268,7 @@ export class FeedbackSdk {
         comments: this.captureController?.getCommentPinSources() ?? [],
         edits: this.captureController?.getEditMoveSources() ?? [],
       });
+      this.updatePageContext();
       this.postToWidget(createHostToWidgetMessage('screen:captured', { ...capture, requestId }));
     } catch (error) {
       console.warn(`${LOG_PREFIX} Saving the screen failed.`, error);
@@ -297,7 +301,13 @@ export class FeedbackSdk {
     }
     const message: unknown = event.data;
     if (isCaptureCommand(message)) {
-      this.captureController?.handleCommand(message);
+      if (message.type === 'capture:start') {
+        void prepareStaticTextIndex().then(() => {
+          if (!this.isDestroyed) this.captureController?.handleCommand(message);
+        });
+      } else {
+        this.captureController?.handleCommand(message);
+      }
       return;
     }
     if (!isWidgetToHostMessage(message)) {
