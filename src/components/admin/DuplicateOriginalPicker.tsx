@@ -14,6 +14,8 @@ interface DuplicateOriginalPickerProps {
   /** Id of the chosen original, or an empty string. */
   value: string;
   disabled: boolean;
+  /** Moves the keyboard to the search field when the picker appears. */
+  autoFocus: boolean;
   onChange: (originalId: string) => void;
 }
 
@@ -27,7 +29,7 @@ function getOptionLabel(feedback: Feedback): string {
 }
 
 /** Picks the feedback this one repeats. The project's feedback is loaded only while the picker is shown. */
-export function DuplicateOriginalPicker({ feedbackId, value, disabled, onChange }: DuplicateOriginalPickerProps) {
+export function DuplicateOriginalPicker({ feedbackId, value, disabled, autoFocus, onChange }: DuplicateOriginalPickerProps) {
   const projectKey = useAdminProjectKey();
   const token = useAdminToken();
   const { status, items, errorMessage } = useFeedbackList({ projectKey, token });
@@ -48,6 +50,7 @@ export function DuplicateOriginalPicker({ feedbackId, value, disabled, onChange 
         placeholder="내용, 작성자로 찾기"
         value={keyword}
         disabled={disabled}
+        autoFocus={autoFocus}
         onChange={(event) => setKeyword(event.target.value)}
         className={FIELD_CLASS_NAME}
       />

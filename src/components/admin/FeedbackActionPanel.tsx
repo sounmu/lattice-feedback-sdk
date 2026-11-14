@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 
 import { DuplicateOriginalPicker } from '@/components/admin/DuplicateOriginalPicker';
+import { ShortcutKey } from '@/components/admin/ShortcutKey';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
+import { findAdminShortcut, type AdminShortcut } from '@/lib/admin-shortcuts';
 import { FEEDBACK_STATUS_LABELS, FEEDBACK_STATUSES } from '@/lib/feedback-display';
 import type { Feedback, FeedbackStatus, UpdateFeedbackInput } from '@/types/feedback';
 
@@ -13,6 +15,9 @@ interface FeedbackActionPanelProps {
   saveErrorMessage: string;
   onSave: (changes: UpdateFeedbackInput) => Promise<boolean>;
 }
+
+// Statuses a single key press saves. A duplicate needs its original first, so its key only opens the picker.
+const SHORTCUT_STATUSES: Partial<Record<AdminShortcut, FeedbackStatus>> = { accept: 'in_progress', reject: 'rejected' };
 
 const SAVE_STATUS_MESSAGES: Record<SaveStatus, string> = {
   idle: '',
@@ -31,11 +36,12 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
   const isOriginalMissing = status === 'duplicate' && duplicateOfId === '';
   const isChanged = isStatusChanged || reply.trim() !== (feedback.adminReply ?? '');
 
-  async function handleSave() {
+  // Saves the given status together with everything else the admin changed in this panel.
+  async function saveWithStatus(nextStatus: FeedbackStatus) {
     const changes: UpdateFeedbackInput = {};
-    if (isStatusChanged) {
-      changes.status = status;
-      if (status === 'duplicate') {
+    if (nextStatus !== feedback.status || isOriginalChanged) {
+      changes.status = nextStatus;
+      if (nextStatus === 'duplicate') {
         changes.duplicateOfId = duplicateOfId;
       }
     }
@@ -44,6 +50,30 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
     }
     await onSave(changes);
   }
+
+  const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+    const shortcut = findAdminShortcut(event);
+    if (isSaving || shortcut === null) {
+      return;
+    }
+    if (shortcut === 'duplicate') {
+      event.preventDefault();
+      setStatus('duplicate');
+      return;
+    }
+    const nextStatus = SHORTCUT_STATUSES[shortcut];
+    if (nextStatus === undefined || nextStatus === feedback.status) {
+      return;
+    }
+    event.preventDefault();
+    void saveWithStatus(nextStatus);
+  });
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => handleShortcut(event);
+    document.addEventListener('keydown', listener);
+    return () => document.removeEventListener('keydown', listener);
+  }, []);
 
   return (
     <section className="flex flex-col gap-3 rounded-2xl border border-(--admin-border) bg-(--admin-surface) p-4">
@@ -65,9 +95,20 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
           </label>
         ))}
       </fieldset>
+      <p className="hidden text-xs text-(--admin-text-muted) md:block">
+        단축키: <ShortcutKey>1</ShortcutKey> {FEEDBACK_STATUS_LABELS.in_progress} · <ShortcutKey>2</ShortcutKey> {FEEDBACK_STATUS_LABELS.duplicate} ·{' '}
+        <ShortcutKey>3</ShortcutKey> {FEEDBACK_STATUS_LABELS.rejected}
+      </p>
 
       {status === 'duplicate' ? (
-        <DuplicateOriginalPicker feedbackId={feedback.id} value={duplicateOfId} disabled={isSaving} onChange={setDuplicateOfId} />
+        <DuplicateOriginalPicker
+          feedbackId={feedback.id}
+          value={duplicateOfId}
+          disabled={isSaving}
+          // Chosen just now, so the admin can start searching right away.
+          autoFocus={feedback.status !== 'duplicate'}
+          onChange={setDuplicateOfId}
+        />
       ) : null}
 
       <label htmlFor="admin-reply" className="text-sm font-semibold">
@@ -86,7 +127,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={handleSave}
+          onClick={() => saveWithStatus(status)}
           disabled={!isChanged || isSaving || isOriginalMissing}
           className="min-h-11 rounded-[10px] bg-(--admin-primary) px-5 font-semibold text-white hover:bg-(--admin-primary-hover) disabled:opacity-50"
         >

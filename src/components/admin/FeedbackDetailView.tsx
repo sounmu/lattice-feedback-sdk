@@ -18,6 +18,8 @@ interface FeedbackDetailViewProps {
   saveStatus: SaveStatus;
   saveErrorMessage: string;
   onSave: (changes: UpdateFeedbackInput) => Promise<boolean>;
+  /** Shown next to the list instead of on its own page. */
+  isEmbedded?: boolean;
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -29,17 +31,26 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMessage, onSave }: FeedbackDetailViewProps) {
+export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMessage, onSave, isEmbedded = false }: FeedbackDetailViewProps) {
   const { feedback, screenSnapshots } = detail;
   const { comments, edits, flow } = feedback.attachments;
 
   return (
     <div className="flex flex-col gap-4">
-      <Link href={`/admin?projectKey=${encodeURIComponent(projectKey)}`} className="flex min-h-11 items-center text-(--admin-primary)">
-        ← 목록으로
-      </Link>
+      {isEmbedded ? (
+        <Link
+          href={`/admin/feedback/${encodeURIComponent(feedback.id)}?projectKey=${encodeURIComponent(projectKey)}`}
+          className="flex min-h-11 items-center self-start text-(--admin-primary)"
+        >
+          전체 화면으로 열기 →
+        </Link>
+      ) : (
+        <Link href={`/admin?projectKey=${encodeURIComponent(projectKey)}`} className="flex min-h-11 items-center text-(--admin-primary)">
+          ← 목록으로
+        </Link>
+      )}
 
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex flex-col gap-4">
           <Section title="피드백 내용">
             <div className="flex flex-wrap items-center gap-2">
