@@ -62,6 +62,15 @@ export function createReplayAssetRoot(events: readonly ScreenSnapshotEvent[], el
   // Text nodes of <style> elements, whose text is CSS.
   const styleTextIds = new Set<number>();
   const target: CssTextTarget = { baseUrl: undefined, childNodes };
+  // The src each recorded <img> has at this point of the recording, by rrweb node id.
+  const imageSources = new Map<number, string>();
+  const trackImageSources = (node: SnapshotNode): void => {
+    const source = node.attributes?.src;
+    if (node.tagName === IMAGE_TAG_NAME && node.id !== undefined && typeof source === 'string') {
+      imageSources.set(node.id, source);
+    }
+    node.childNodes?.forEach(trackImageSources);
+  };
   for (const event of events) {
     if (event.type === RRWEB_META_EVENT_TYPE) {
       const { href } = event.data as { href?: unknown };
@@ -71,6 +80,7 @@ export function createReplayAssetRoot(events: readonly ScreenSnapshotEvent[], el
     if (event.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
       const { node } = event.data as { node: SnapshotNode };
       childNodes.push(node);
+      trackImageSources(node);
       rewrites.push(...addStyleTexts(node, undefined, styleTextIds, target));
       continue;
     }
@@ -84,6 +94,7 @@ export function createReplayAssetRoot(events: readonly ScreenSnapshotEvent[], el
     const data = event.data as MutationData;
     for (const add of data.adds ?? []) {
       childNodes.push(add.node);
+      trackImageSources(add.node);
       const parentTagName = add.parentId === undefined ? undefined : elements.get(add.parentId)?.tagName;
       rewrites.push(...addStyleTexts(add.node, parentTagName, styleTextIds, target));
     }
@@ -101,9 +112,26 @@ export function createReplayAssetRoot(events: readonly ScreenSnapshotEvent[], el
       if (hasSrcset) {
         rewrites.push(addSrcsetCandidates(change.attributes, tagName === IMAGE_TAG_NAME, childNodes));
       }
-      if (typeof style === 'string' || (typeof src === 'string' && !hasSrcset)) {
-        // With a srcset the sources are handled above, so the stand-in is read for its style only.
-        childNodes.push({ type: ELEMENT_NODE_TYPE, tagName: hasSrcset ? undefined : tagName, attributes: change.attributes });
+      const isImage = tagName === IMAGE_TAG_NAME;
+      if (isImage && typeof src === 'string') {
+        imageSources.set(change.id, src);
+      } else if (isImage && src === null) {
+        // A src the page removed must not come back with a later srcset removal.
+        imageSources.delete(change.id);
+      }
+      // Once its srcset is removed an image shows its src again. Saving the first snapshot kept only the file
+      // the image showed then and dropped that src, so the removal carries the src the image has by now.
+      const removesSrcset = isImage && srcset === null && src !== null;
+      if (removesSrcset) {
+        const source = typeof src === 'string' ? src : imageSources.get(change.id);
+        if (source !== undefined) {
+          rewrites.push(addImageSource(change.attributes, source, childNodes));
+        }
+      }
+      const hasOwnSources = hasSrcset || removesSrcset;
+      if (typeof style === 'string' || (typeof src === 'string' && !hasOwnSources)) {
+        // With a srcset set or removed the sources are handled above, so the stand-in is read for its style only.
+        childNodes.push({ type: ELEMENT_NODE_TYPE, tagName: hasOwnSources ? undefined : tagName, attributes: change.attributes });
       }
       if (style && typeof style === 'object') {
         rewrites.push(...addStyleProperties(style as SnapshotStyleChange, childNodes));
@@ -219,6 +247,16 @@ export function resolveStyleSheetChange(event: ScreenSnapshotEvent, styleSheetUr
     }
   }
   return copy;
+}
+
+// A stand-in of its own, because rewriting an image in place drops its srcset entry, and here that entry is
+// the removal the replay has to apply.
+function addImageSource(attributes: SnapshotAttributes, source: string, childNodes: SnapshotNode[]): () => void {
+  const stand: SnapshotNode = { type: ELEMENT_NODE_TYPE, tagName: IMAGE_TAG_NAME, attributes: { src: source } };
+  childNodes.push(stand);
+  return () => {
+    attributes.src = String(stand.attributes?.src);
+  };
 }
 
 // Which candidate the browser shows after a later srcset change is not known when the change is recorded

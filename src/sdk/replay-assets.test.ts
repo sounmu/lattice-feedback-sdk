@@ -164,6 +164,38 @@ it('saves every candidate of a srcset changed later and leaves other sources alo
   expect(clip.attributes.src).toBe(`${ORIGIN}/clip.mp4`);
 });
 
+it('keeps the src an image falls back to when its srcset is removed later, although the first snapshot saved only the shown file', async () => {
+  const image = element(2, 'img', { src: `${ORIGIN}/fallback.png`, srcset: `${ORIGIN}/retina.png 2x` });
+  const full = element(1, 'html', {}, [image]);
+  const removal: AttributeChange = { id: 2, attributes: { srcset: null } };
+  const { result } = extractReplayAssets(createRecording(full, [], [removal]), {
+    findLiveImage: (node) => (node.id === 2 ? `${ORIGIN}/retina.png` : null),
+  });
+
+  const { assetFiles, missingAssets } = await result;
+
+  expect(await Promise.all(assetFiles.map((file) => file.text()))).toEqual([`${ORIGIN}/retina.png`, `${ORIGIN}/fallback.png`]);
+  expect(image.attributes).toEqual({ srcset: `${createAssetReference(0)} 2x` });
+  expect(removal.attributes).toEqual({ srcset: null, src: createAssetReference(1) });
+  expect(missingAssets).toEqual([]);
+});
+
+it('does not bring back a src the page removed before it removed the srcset', async () => {
+  const image = element(2, 'img', { src: `${ORIGIN}/fallback.png`, srcset: `${ORIGIN}/retina.png 2x` });
+  const full = element(1, 'html', {}, [image]);
+  const sourceRemoval: AttributeChange = { id: 2, attributes: { src: null } };
+  const srcsetRemoval: AttributeChange = { id: 2, attributes: { srcset: null } };
+  const { result } = extractReplayAssets(createRecording(full, [], [sourceRemoval, srcsetRemoval]), {
+    findLiveImage: (node) => (node.id === 2 ? `${ORIGIN}/retina.png` : null),
+  });
+
+  const { assetFiles } = await result;
+
+  expect(await Promise.all(assetFiles.map((file) => file.text()))).toEqual([`${ORIGIN}/retina.png`]);
+  expect(sourceRemoval.attributes).toEqual({ src: null });
+  expect(srcsetRemoval.attributes).toEqual({ srcset: null });
+});
+
 it('reads each document of a Flow on its own, since rrweb node ids start over in every document', async () => {
   const createPage = (child: SnapshotNode, change: AttributeChange): ScreenSnapshotEvent[] => [
     { type: 4, timestamp: 1, data: {} },
