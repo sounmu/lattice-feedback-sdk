@@ -47,7 +47,15 @@ const SAVE_FAILED_MESSAGE = '화면을 저장하지 못했어요. 다시 시도�
 const PAGE_NOT_ALLOWED_MESSAGE = '이 페이지에서는 화면을 저장할 수 없어요.';
 const PAYLOAD_TOO_LARGE_STATUS = 413;
 const FLOW_SCREEN_FULL_MESSAGE = `저장한 화면이 ${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}개라 흐름 재생을 저장하지 못했어요. 필요 없는 화면을 지워 주세요.`;
+const RECONCILE_FAILED_MESSAGE = '지운 표시를 화면에서 빼지 못해서 그 화면을 첨부에서 뺐어요. 남은 코멘트·편집은 글로 전달돼요.';
 const MARKED_SCREEN_FULL_MESSAGE = `저장한 화면이 ${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}개라 위치를 화면에 표시하지 못했어요. 필요 없는 화면을 지워 주세요.`;
+
+function removeScreen(screens: MarkedScreens, id: string): MarkedScreens {
+  return {
+    snapshots: screens.snapshots.filter((snapshot) => snapshot.id !== id),
+    marksByScreen: new Map([...screens.marksByScreen].filter(([screenId]) => screenId !== id)),
+  };
+}
 
 function findMarkKeys(events: readonly ScreenSnapshotEvent[]): string[] {
   return [...findCommentPins(events).map((pin) => pin.key), ...findEditMoves(events).map((move) => move.key)];
@@ -281,16 +289,24 @@ export function useScreenSnapshots({
       if (events === saved.screen.events) {
         continue;
       }
-      const current = screensRef.current;
       if (!events) {
-        commitScreens({
-          snapshots: current.snapshots.filter((snapshot) => snapshot.id !== id),
-          marksByScreen: new Map([...current.marksByScreen].filter(([screenId]) => screenId !== id)),
-        });
+        commitScreens(removeScreen(screensRef.current, id));
         continue;
       }
       const screen: CapturedScreen = { ...saved.screen, events: [...events] };
-      const created = await createSnapshot(owner, screen, saved.assetHashes);
+      let created: Awaited<ReturnType<typeof createSnapshot>>;
+      try {
+        created = await createSnapshot(owner, screen, saved.assetHashes);
+      } catch {
+        if (jobGeneration !== generation.current) {
+          return;
+        }
+        // The listed screen still shows the deleted mark and its replacement was not saved (the save
+        // limit can refuse it), so the screen leaves the draft instead of being sent.
+        commitScreens(removeScreen(screensRef.current, id));
+        setErrorMessage(RECONCILE_FAILED_MESSAGE);
+        continue;
+      }
       if (jobGeneration !== generation.current) {
         return;
       }
@@ -444,10 +460,7 @@ export function useScreenSnapshots({
   }, []);
 
   const remove = useCallback((id: string) => {
-    commitScreens({
-      snapshots: screensRef.current.snapshots.filter((snapshot) => snapshot.id !== id),
-      marksByScreen: new Map([...screensRef.current.marksByScreen].filter(([screenId]) => screenId !== id)),
-    });
+    commitScreens(removeScreen(screensRef.current, id));
     setFlowScreenIds((current) => new Set([...current].filter((screenId) => screenId !== id)));
     setTruncatedFlowScreenIds((current) => new Set([...current].filter((screenId) => screenId !== id)));
   }, []);
