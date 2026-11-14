@@ -101,6 +101,7 @@ beforeEach(() => {
   Object.assign(recorder, { starts: 0, stops: 0 });
   page.images = [];
   usedNow.urls = [];
+  fontsNow.families = [];
   openDocument('/orders?token=SECRET');
   vi.stubGlobal('document', {
     title: 'Orders',
@@ -140,6 +141,22 @@ it('keeps CSS images shown at the start or after a later change even when they a
   usedNow.urls = [];
 
   expect((await recording.stop())?.segments[0].usedCssImageUrls).toEqual([`${HOST}/start.png`, `${HOST}/banner.png`]);
+});
+
+it('notes the images and fonts a document shows as it is left, even when no event is waiting to be saved', async () => {
+  usedNow.urls = [`${HOST}/start.png`];
+  startReplayRecording(SDK, FRESH);
+  const appended = waitForAppend();
+  emitPage(START);
+  await appended;
+  usedNow.urls = [`${HOST}/start.png`, `${HOST}/late.png`];
+  fontsNow.families = ['late'];
+
+  leaveDocument();
+
+  expect(saved.chunks.flatMap((chunk) => chunk.usedCssImageUrls)).toEqual([`${HOST}/start.png`, `${HOST}/late.png`]);
+  expect(saved.chunks.flatMap((chunk) => chunk.loadedFontFamilies)).toEqual(['late']);
+  expect(saved.chunks.at(-1)?.events).toEqual([]);
 });
 
 it('keeps the fonts a document had loaded, so a later document of the Flow does not decide which fonts are saved', async () => {
