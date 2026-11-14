@@ -1,6 +1,6 @@
 // A Flow replay is one segment per document it passed through. rrweb numbers nodes from 1 again in every
 // document, so node ids are only ever looked up inside their own segment.
-import type { ReplayChunk } from '@/sdk/flow-replay-session';
+import type { ReplayChunk, ReplayProgress } from '@/sdk/flow-replay-session';
 import { trimReplayStart } from '@/sdk/replay-sanitize';
 import type { ScreenSnapshotEvent, ScreenSnapshotPage } from '@/types/screen-snapshot';
 
@@ -29,6 +29,49 @@ export interface SavedReplay {
   /** The last saved document left nothing that can be shown, so whatever comes next follows a gap. */
   hasGapAfter: boolean;
   isEnded: boolean;
+}
+
+function isStashedChunk(value: unknown): value is ReplayChunk {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<Record<keyof ReplayChunk, unknown>>;
+  return Number.isSafeInteger(candidate.segment) && Number.isSafeInteger(candidate.index) && Array.isArray(candidate.events) &&
+    typeof candidate.bytes === 'number' && Array.isArray(candidate.usedCssImageUrls) &&
+    Array.isArray(candidate.loadedFontFamilies) && Array.isArray(candidate.liveImageSources);
+}
+
+/** Reads the tail a document stashed as it was left. Anything that is not a list of chunks yields none. */
+export function parseStashedChunks(text: string | null): ReplayChunk[] {
+  if (text === null) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) && parsed.every(isStashedChunk) ? parsed : [];
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+/** The saved chunks and the stashed tail as one run in recorded order. A chunk found in both is kept once. */
+export function mergeStashedChunks(stored: readonly ReplayChunk[], stashed: readonly ReplayChunk[]): ReplayChunk[] {
+  const chunks = new Map<string, ReplayChunk>();
+  for (const chunk of [...stashed, ...stored]) {
+    chunks.set(`${chunk.segment}:${chunk.index}`, chunk);
+  }
+  return [...chunks.values()].sort((first, second) => first.segment - second.segment || first.index - second.index);
+}
+
+/**
+ * Whether events were lost on the way into this document. The document before it notes how many events it
+ * recorded as it was left: fewer saved than that, or no note from it, means some are missing.
+ */
+export function findGapBefore(saved: SavedReplay, progress: ReplayProgress | null): boolean {
+  return saved.hasGapAfter || progress?.segment !== saved.lastSegment || progress.eventCount > saved.lastEventCount;
 }
 
 export function mergeReplayChunks(chunks: readonly ReplayChunk[]): SavedReplay {
