@@ -101,7 +101,7 @@ export const createScreenSnapshotInputSchema = z.object({
     .array(
       z.object({
         url: z.string().max(MAX_URL_LENGTH),
-        reason: z.enum(['fetch_failed', 'too_large', 'budget_exceeded', 'timed_out']),
+        reason: z.enum(['fetch_failed', 'too_large', 'budget_exceeded', 'timed_out', 'text_masked', 'text_index_incomplete']),
       }),
     )
     .max(MAX_MISSING_SNAPSHOT_ASSETS),

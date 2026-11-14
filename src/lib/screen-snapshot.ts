@@ -43,6 +43,8 @@ const MISSING_SNAPSHOT_ASSET_REASONS: readonly MissingSnapshotAssetReason[] = [
   'too_large',
   'budget_exceeded',
   'timed_out',
+  'text_masked',
+  'text_index_incomplete',
 ];
 
 const SCREEN_CAPTURE_FAILURE_REASONS: readonly ScreenCaptureFailureReason[] = ['page_not_allowed', 'capture_failed'];
