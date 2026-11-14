@@ -7,7 +7,10 @@ import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 const recorder = vi.hoisted(() => ({ emit: (() => undefined) as (event: ScreenSnapshotEvent) => void, starts: 0, stops: 0 }));
 const usedNow = vi.hoisted(() => ({ urls: [] as string[] }));
 const fontsNow = vi.hoisted(() => ({ families: [] as string[] }));
-const page = vi.hoisted(() => ({ images: [] as { id: number; currentSrc: string }[] }));
+const page = vi.hoisted(() => ({
+  images: [] as { id: number; currentSrc: string }[],
+  links: [] as { id: number; href: string }[],
+}));
 // Stands for the storage the documents of one tab share.
 const saved = vi.hoisted(() => ({
   chunks: [] as ReplayChunk[],
@@ -30,7 +33,11 @@ vi.mock('@rrweb/record', () => ({
         getId: (image: { id: number }) => image.id,
         getNode: (id: number) => {
           const image = page.images.find((candidate) => candidate.id === id);
-          return image ? { ...image, closest: () => null } : null;
+          if (image) {
+            return { ...image, closest: () => null };
+          }
+          const link = page.links.find((candidate) => candidate.id === id);
+          return link ? { sheet: { href: link.href } } : null;
         },
       },
     },
@@ -100,6 +107,7 @@ beforeEach(() => {
   Object.assign(saved, { chunks: [], progress: null, onAppend: undefined });
   Object.assign(recorder, { starts: 0, stops: 0 });
   page.images = [];
+  page.links = [];
   usedNow.urls = [];
   fontsNow.families = [];
   openDocument('/orders?token=SECRET');
@@ -141,6 +149,21 @@ it('keeps CSS images shown at the start or after a later change even when they a
   usedNow.urls = [];
 
   expect((await recording.stop())?.segments[0].usedCssImageUrls).toEqual([`${HOST}/start.png`, `${HOST}/banner.png`]);
+});
+
+it('resolves the URLs of a rule set in a linked stylesheet against that stylesheet, leaving other rules and the emitted event alone', async () => {
+  page.links = [{ id: 4, href: `${HOST}/assets/css/theme.css?v=3` }];
+  const recording = startReplayRecording(SDK, FRESH);
+  emitPage(START);
+  const emitted = { type: 3, timestamp: START + 10, data: { source: 8, id: 4, adds: [{ rule: '.hero { background: url(../images/hero.png); }', index: 0 }] } };
+  recorder.emit(emitted);
+  recorder.emit({ type: 3, timestamp: START + 20, data: { source: 8, id: 5, adds: [{ rule: '.plain { background: url(plain.png); }' }] } });
+
+  const events = (await recording.stop())?.segments[0].events ?? [];
+
+  const rules = events.flatMap((event) => (event.data as { adds?: { rule?: string }[] }).adds ?? []).map((add) => add.rule);
+  expect(rules).toEqual([`.hero { background: url("${HOST}/assets/images/hero.png"); }`, '.plain { background: url(plain.png); }']);
+  expect(emitted.data.adds[0].rule).toBe('.hero { background: url(../images/hero.png); }');
 });
 
 it('notes the images and fonts a document shows as it is left, even when no event is waiting to be saved', async () => {
