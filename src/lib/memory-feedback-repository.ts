@@ -1,3 +1,4 @@
+import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import type { FeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import type { Feedback } from '@/types/feedback';
@@ -69,11 +70,16 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
     },
 
     async update(projectKey, id, input) {
-      const item = getStore()
-        .get(projectKey)
-        ?.find((candidate) => candidate.id === id);
+      const items = getStore().get(projectKey) ?? [];
+      const item = items.find((candidate) => candidate.id === id);
       if (!item) {
         return null;
+      }
+      if (input.duplicateOfId && input.duplicateOfId !== item.duplicateOfId) {
+        const original = items.find((candidate) => candidate.id === input.duplicateOfId);
+        if (!original || original === item || original.status === 'duplicate') {
+          throw new FeedbackDuplicateTargetError();
+        }
       }
       if (input.status !== undefined) {
         item.status = input.status;

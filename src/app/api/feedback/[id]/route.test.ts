@@ -150,6 +150,20 @@ describe('PATCH /api/feedback/[id]', () => {
     expect(await repository.find('demo', id)).toMatchObject({ status: 'open', duplicateOfId: null });
   });
 
+  it('lets only one of two simultaneous requests that would make two feedbacks duplicates of each other succeed', async () => {
+    const firstId = await createStoredFeedbackId();
+    const secondId = await createStoredFeedbackId();
+    const markDuplicate = (id: string, duplicateOfId: string) =>
+      PATCH(
+        createJsonRequest(createDetailUrl(id), 'PATCH', { status: 'duplicate', duplicateOfId }, { authorization: ADMIN_AUTHORIZATION }),
+        createContext(id),
+      );
+
+    const responses = await Promise.all([markDuplicate(firstId, secondId), markDuplicate(secondId, firstId)]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 400]);
+  });
+
   it('returns 400 invalid_body for an invalid status', async () => {
     const id = await createFeedbackId();
     const request = createJsonRequest(

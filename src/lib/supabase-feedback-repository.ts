@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import type { FeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { getSupabaseConfiguration } from '@/lib/supabase-rest';
@@ -11,6 +12,18 @@ const FEEDBACK_SELECT = [
   'id', 'projectKey:project_key', 'message', 'type', 'status', 'duplicateOfId:duplicate_of', 'reporter', 'page',
   'attachments', 'adminReply:admin_reply', 'createdAt:created_at', 'updatedAt:updated_at',
 ].join(',');
+
+// How Postgres reports a refused original: a foreign key violation (missing, or in another project) or a
+// check violation (the feedback itself, or one that is already a duplicate).
+const DUPLICATE_TARGET_ERROR_CODES = ['23503', '23514'];
+
+async function isDuplicateTargetRefusal(response: Response): Promise<boolean> {
+  const body: unknown = await response.json().catch(() => null);
+  if (typeof body !== 'object' || body === null || !('code' in body)) {
+    return false;
+  }
+  return typeof body.code === 'string' && DUPLICATE_TARGET_ERROR_CODES.includes(body.code);
+}
 
 const feedbackRowsSchema = z.array(
   createFeedbackInputSchema.omit({ hostOrigin: true }).extend({
@@ -26,7 +39,11 @@ const feedbackRowsSchema = z.array(
 export function createSupabaseFeedbackRepository(): FeedbackRepository {
   const { url, secretKey } = getSupabaseConfiguration();
 
-  async function requestRows(parameters: Record<string, string>, options: RequestInit = {}): Promise<Feedback[]> {
+  async function requestRows(
+    parameters: Record<string, string>,
+    options: RequestInit = {},
+    setsDuplicateTarget = false,
+  ): Promise<Feedback[]> {
     const endpoint = new URL('/rest/v1/feedback', url);
     endpoint.search = new URLSearchParams({ select: FEEDBACK_SELECT, ...parameters }).toString();
     let response: Response;
@@ -49,7 +66,14 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
       throw error;
     }
     if (!response.ok) {
-      await response.body?.cancel();
+      // The error body is read only where its code changes the outcome.
+      if (!setsDuplicateTarget) {
+        await response.body?.cancel();
+        throw new FeedbackStorageUnavailableError();
+      }
+      if (await isDuplicateTargetRefusal(response)) {
+        throw new FeedbackDuplicateTargetError();
+      }
       throw new FeedbackStorageUnavailableError();
     }
     try {
@@ -129,7 +153,7 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
           admin_reply: input.adminReply,
           updated_at: new Date().toISOString(),
         }),
-      });
+      }, typeof input.duplicateOfId === 'string');
       return rows[0] ?? null;
     },
   };

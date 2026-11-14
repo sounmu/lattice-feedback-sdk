@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
@@ -15,18 +16,6 @@ interface RouteContext {
 async function createDetailBody(feedback: Feedback): Promise<FeedbackDetailResponse> {
   const screenSnapshots = await getScreenSnapshotRepository().findManyByFeedback(feedback.projectKey, feedback.id);
   return { feedback, screenSnapshots };
-}
-
-// The original of a duplicate must be another feedback of the same project that is not itself a duplicate.
-async function findDuplicateOriginal(projectKey: string, id: string, originalId: string): Promise<Feedback | null> {
-  if (originalId.toLowerCase() === id.toLowerCase()) {
-    return null;
-  }
-  const original = await getFeedbackRepository().find(projectKey, originalId);
-  if (!original || original.status === 'duplicate') {
-    return null;
-  }
-  return original;
 }
 
 function createFeedbackNotFoundResponse() {
@@ -87,15 +76,15 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   try {
-    if (changes.duplicateOfId && !(await findDuplicateOriginal(project.projectKey, id, changes.duplicateOfId))) {
-      return createApiErrorResponse(400, 'invalid_duplicate_target', 'The original must be another feedback of this project that is not a duplicate.');
-    }
     const feedback = await getFeedbackRepository().update(project.projectKey, id, changes);
     if (!feedback) {
       return createFeedbackNotFoundResponse();
     }
     return NextResponse.json(await createDetailBody(feedback));
   } catch (error) {
+    if (error instanceof FeedbackDuplicateTargetError) {
+      return createApiErrorResponse(400, 'invalid_duplicate_target', error.message);
+    }
     if (error instanceof FeedbackStorageUnavailableError) {
       return createApiErrorResponse(503, 'storage_unavailable', error.message);
     }

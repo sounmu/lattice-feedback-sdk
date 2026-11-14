@@ -2,6 +2,7 @@ import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { once } from 'node:events';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFeedbackBody } from '@/app/api/feedback/feedback-test-fixtures';
+import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { createSupabaseFeedbackRepository } from '@/lib/supabase-feedback-repository';
@@ -181,6 +182,18 @@ describe('Supabase REST repository contract', () => {
     expect(feedback).toMatchObject({ status: 'duplicate', duplicateOfId });
     expect(JSON.parse(received[0].body)).toMatchObject({ status: 'duplicate', duplicate_of: duplicateOfId });
     expect(received[0].url.searchParams.get('select')).toContain('duplicateOfId:duplicate_of');
+  });
+
+  it.each(['23503', '23514'])('reports a database refusal %s of the original as an invalid duplicate target, and only then', async (code) => {
+    const duplicateOfId = '00000000-0000-4000-8000-000000000002';
+    responseStatus = 400;
+    responseBodies = [JSON.stringify({ code, message: 'private database error' }), JSON.stringify({ code, message: 'private database error' })];
+    const repository = createSupabaseFeedbackRepository();
+
+    await expect(repository.update('demo', storedRow.id, { status: 'duplicate', duplicateOfId }))
+      .rejects.toEqual(new FeedbackDuplicateTargetError());
+    await expect(repository.update('demo', storedRow.id, { adminReply: 'x' }))
+      .rejects.toEqual(new FeedbackStorageUnavailableError());
   });
 
   it('treats a non-UUID identifier as missing without sending a failing SQL filter', async () => {

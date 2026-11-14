@@ -9,6 +9,10 @@ export interface FeedbackRepository {
   /** Newest first. */
   findMany(projectKey: string): Promise<Feedback[]>;
   find(projectKey: string, id: string): Promise<Feedback | null>;
+  /**
+   * Throws FeedbackDuplicateTargetError when a new duplicateOfId cannot be an original. The store checks and
+   * writes in one step, so two admins cannot point two feedbacks at each other.
+   */
   update(projectKey: string, id: string, input: UpdateFeedbackInput): Promise<Feedback | null>;
 }
 
