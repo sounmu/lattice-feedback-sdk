@@ -115,6 +115,9 @@ export function createReplayAssetRoot(events: readonly ScreenSnapshotEvent[], el
       const isImage = tagName === IMAGE_TAG_NAME;
       if (isImage && typeof src === 'string') {
         imageSources.set(change.id, src);
+      } else if (isImage && src === null) {
+        // A src the page removed must not come back with a later srcset removal.
+        imageSources.delete(change.id);
       }
       // Once its srcset is removed an image shows its src again. Saving the first snapshot kept only the file
       // the image showed then and dropped that src, so the removal carries the src the image has by now.
