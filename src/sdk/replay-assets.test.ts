@@ -66,6 +66,52 @@ it('replaces the images and styles added or changed after the first snapshot, nu
   expect(missingAssets).toEqual([]);
 });
 
+it('saves the fonts and images of CSS changed after the first snapshot, which rrweb records with the URLs as the page wrote them', async () => {
+  const styleText = { type: 3, id: 6, textContent: '' };
+  const full = element(1, 'html', {}, [element(5, 'style', { _cssText: '.a { color: red; }' }, [styleText])]);
+  const fontRule = { rule: '@font-face { font-family: Late; src: url(../late.woff2); }', index: 0 };
+  const failing = { rule: '.c { background: url("/gone.png"); }' };
+  const adoptedRule = { rule: ".b { background: url('/box.png'); }" };
+  const declaration = { property: 'background-image', value: 'url("set.png")', priority: undefined };
+  const addedText = { type: 3, id: 21, textContent: '.d { background: url(/added.png); }' };
+  const textChange = { id: 6, value: '.a { background: url(/swap.png); filter: url(#blur); }' };
+  const otherText = { id: 99, value: 'url(/swap.png) is only text here' };
+  const events: ScreenSnapshotEvent[] = [
+    { type: 4, timestamp: 1, data: { href: `${ORIGIN}/app/page` } },
+    { type: 2, timestamp: 1, data: { node: { type: 0, id: 0, childNodes: [full] } } },
+    { type: 3, timestamp: 2, data: { source: 8, id: 5, adds: [fontRule, failing] } },
+    { type: 3, timestamp: 3, data: { source: 15, id: 1, styleIds: [1], styles: [{ styleId: 1, rules: [adoptedRule] }] } },
+    { type: 3, timestamp: 4, data: { source: 13, id: 5, index: [0], set: declaration } },
+    { type: 3, timestamp: 5, data: { source: 0, adds: [{ parentId: 1, node: element(20, 'style', {}) }, { parentId: 20, node: addedText }], attributes: [] } },
+    { type: 3, timestamp: 6, data: { source: 0, adds: [], attributes: [], texts: [textChange, otherText] } },
+  ];
+  const used = ['box.png', 'app/set.png', 'added.png', 'swap.png', 'gone.png'].map((name) => `${ORIGIN}/${name}`);
+  const { result } = extractReplayAssets(events, {
+    loadedFontFamilies: new Set(['late']),
+    usedCssImageUrls: new Set(used),
+    fetchAsset: vi.fn(async (url: string) => {
+      if (url.endsWith('/gone.png')) {
+        throw new Error('not found');
+      }
+      return new Blob([url]);
+    }),
+  });
+
+  const { assetFiles, missingAssets } = await result;
+
+  const names = await Promise.all(assetFiles.map(async (file) => (await file.text()).replace(`${ORIGIN}/`, '')));
+  const reference = (name: string) => `url("${createAssetReference(names.indexOf(name))}")`;
+  expect([...names].sort()).toEqual(['added.png', 'app/set.png', 'box.png', 'late.woff2', 'swap.png']);
+  expect(fontRule.rule).toBe(`@font-face { font-family: Late; src: ${reference('late.woff2')}; }`);
+  expect(failing.rule).toBe(`.c { background: url("${ORIGIN}/gone.png"); }`);
+  expect(adoptedRule.rule).toBe(`.b { background: ${reference('box.png')}; }`);
+  expect(declaration.value).toBe(reference('app/set.png'));
+  expect(addedText.textContent).toBe(`.d { background: ${reference('added.png')}; }`);
+  expect(textChange.value).toBe(`.a { background: ${reference('swap.png')}; filter: url(#blur); }`);
+  expect(otherText.value).toBe('url(/swap.png) is only text here');
+  expect(missingAssets).toEqual([{ url: `${ORIGIN}/gone.png`, reason: 'fetch_failed' }]);
+});
+
 it('counts files that appear later against the same budget as the first snapshot', async () => {
   const full = element(1, 'html', {}, [element(2, 'img', { src: `${ORIGIN}/first.png` })]);
   const swapped: AttributeChange = { id: 2, attributes: { src: `${ORIGIN}/second.png` } };

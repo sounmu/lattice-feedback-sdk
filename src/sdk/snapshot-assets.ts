@@ -106,6 +106,26 @@ export function normalizeFontFamily(value: string): string {
   return value.trim().replace(/^["']|["']$/g, '').toLowerCase();
 }
 
+/**
+ * CSS text with every url() made absolute. The first snapshot already has absolute URLs; CSS recorded
+ * later keeps them as the page wrote them, which neither the admin origin nor this module can resolve.
+ */
+export function resolveCssUrls(cssText: string, baseUrl: string): string {
+  return cssText.replace(CSS_URL_PATTERN, (match, doubleQuoted?: string, singleQuoted?: string, bare?: string) => {
+    const url = doubleQuoted ?? singleQuoted ?? bare ?? '';
+    // A fragment points inside the document (an SVG filter, for example) and data: carries its own content.
+    if (url === '' || url.startsWith('#') || url.startsWith('data:')) {
+      return match;
+    }
+    try {
+      return `url("${new URL(url, baseUrl).href}")`;
+    } catch {
+      // Not a URL the browser could load either; it stays as written.
+      return match;
+    }
+  });
+}
+
 function findCssUrls(cssText: string): string[] {
   return [...cssText.matchAll(CSS_URL_PATTERN)].map((match) => match[1] ?? match[2] ?? match[3] ?? '');
 }

@@ -20,8 +20,10 @@ export interface AttributeChange {
 
 export interface MutationData {
   source: number;
-  adds?: { node: SnapshotNode }[];
+  adds?: { node: SnapshotNode; parentId?: number }[];
   attributes?: AttributeChange[];
+  /** New text of text nodes. The text of a <style> element is CSS. */
+  texts?: { id: number; value: string | null }[];
 }
 
 /** Tag and current attributes of each recorded element, by rrweb node id. */
