@@ -329,11 +329,12 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
     return clone;
   });
   // An edited element inside another edited one is shown only by its own clone; its copy inside the
-  // outer clone keeps its space but is hidden, so it does not appear twice.
+  // outer clone keeps its space but is hidden, so it does not appear twice. An element edited twice is
+  // not inside itself: each of its edits keeps its own clone.
   elements.forEach((outer, outerIndex) => {
     const outerClone = clones[outerIndex];
-    elements.forEach((inner, innerIndex) => {
-      if (!outer || !outerClone || !inner || innerIndex === outerIndex || !outer.contains(inner)) {
+    elements.forEach((inner) => {
+      if (!outer || !outerClone || !inner || inner === outer || !outer.contains(inner)) {
         return;
       }
       const copy = findCopiedNode(outer, outerClone, inner) as HTMLElement | null;
