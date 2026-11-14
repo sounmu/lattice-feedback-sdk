@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>피드백 위젯 UI 시안 v0.3</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+<style>
+/* ─────────────────────────────────────────────
+   디자인 토큰 (색·글자·모서리)
+   → 개발할 때 Tailwind 값이나 CSS 변수로 그대로 옮기면 됩니다.
+   ───────────────────────────────────────────── */
+:root {
+  --fw-primary: #3b5bfd;        /* 래티스 데모 페이지의 파란 버튼 색 */
+  --fw-primary-hover: #2f4ae0;
+  --fw-primary-weak: #eef1ff;   /* 선택된 칩, 내 말풍선 배경 */
+  --fw-text: #1c2024;           /* 본문 */
+  --fw-text-sub: #60646c;       /* 보조 설명 */
+  --fw-text-muted: #6f7280;     /* 시간, 개수, 힌트 (흰 배경 대비 4.8:1) */
+  --fw-border: #e8e8ec;
+  --fw-surface: #ffffff;
+  --fw-surface-sub: #f9f9fb;    /* 위젯 배경 */
+  --fw-danger: #d1343a;         /* 오류 글자·빨간 버튼 (흰 글자 대비 4.9:1) */
+  --fw-danger-weak: #fff0f0;
+  --fw-success: #30a46c;
+  --fw-success-weak: #e9f9ee;
+  --fw-warning-weak: #fff8e6;
+  --fw-warning: #a35b00;
+  --fw-recording: #e5484d;
+
+  --fw-radius-panel: 16px;
+  --fw-radius-card: 12px;
+  --fw-radius-chip: 999px;
+
+  --fw-font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --fw-text-xs: 12px;   /* 최소 글자 크기: 12px 아래로 내리지 않음 */
+  --fw-text-sm: 13px;
+  --fw-text-md: 14px;   /* 본문 기본 */
+  --fw-text-lg: 16px;   /* 헤더 제목 */
+  --fw-touch: 44px;     /* 버튼 최소 높이 (손가락·마우스로 누르기 쉬운 크기) */
+}
+
+* { box-sizing: border-box; margin: 0; }
+body {
+  font-family: var(--fw-font);
+  background: #eceef2;
+  color: var(--fw-text);
+  padding: 40px 24px 80px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 시안 보드 (설명용, 실제 위젯에는 들어가지 않음) ── */
+.board-head { max-width: 1240px; margin: 0 auto 32px; }
+.board-head h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+.board-head p { font-size: 14px; color: var(--fw-text-sub); line-height: 1.6; }
+.board { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 40px 24px; justify-items: center; }
+.frame-wrap { display: flex; flex-direction: column; gap: 12px; }
+.frame-label { font-size: 14px; font-weight: 700; }
+.frame-label small { display: block; font-weight: 400; color: var(--fw-text-sub); font-size: 13px; margin-top: 4px; line-height: 1.5; }
+.section-title { grid-column: 1 / -1; justify-self: stretch; font-size: 18px; font-weight: 700; padding-top: 16px; border-top: 1px solid #d5d7de; }
+
+/* ─────────────────────────────────────────────
+   위젯 패널 (iframe 안, 380 × 560)
+   ───────────────────────────────────────────── */
+.fw {
+  width: 380px;
+  height: 560px;
+  border-radius: var(--fw-radius-panel);
+  background: var(--fw-surface-sub);
+  box-shadow: 0 12px 40px rgba(17, 24, 39, 0.18);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--fw-text-md);
+  line-height: 1.55;
+  word-break: keep-all;        /* 한글을 단어 중간에서 자르지 않음 */
+  overflow-wrap: anywhere;     /* 아주 긴 영문·주소는 넘치지 않게 */
+}
+.fw button:focus-visible, .fw textarea:focus-visible { outline: 2px solid var(--fw-primary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .fw-rec-dot { animation: none; } }
+.fw-skeleton { border-radius: 8px; background: linear-gradient(90deg, #eceef2 25%, #f5f6f8 50%, #eceef2 75%); background-size: 200% 100%; animation: fw-shimmer 1.4s infinite; }
+@keyframes fw-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .fw-skeleton { animation: none; } }
+.fw-detail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fw-text-xs); color: var(--fw-text-sub); background: var(--fw-surface); border: 1px solid var(--fw-border); border-radius: 8px; padding: 8px 10px; }
+
+/* 헤더 */
+.fw-header { display: flex; align-items: center; gap: 12px; padding: 16px 12px 16px 20px; background: var(--fw-surface); border-bottom: 1px solid var(--fw-border); }
+.fw-avatar { width: 36px; height: 36px; border-radius: 10px; background: var(--fw-primary); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 16px; flex-shrink: 0; }
+.fw-header-text { flex: 1; min-width: 0; }
+.fw-title { font-size: var(--fw-text-lg); font-weight: 700; }
+.fw-subtitle { font-size: var(--fw-text-xs); color: var(--fw-text-sub); }
+.fw-icon-btn { width: var(--fw-touch); height: var(--fw-touch); border: 0; background: none; border-radius: 10px; display: grid; place-items: center; color: var(--fw-text-sub); cursor: pointer; }
+.fw-icon-btn:hover { background: var(--fw-surface-sub); }
+
+/* 대화 영역 */
+.fw-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.fw-msg { display: flex; gap: 8px; align-items: flex-start; }
+.fw-msg .fw-avatar { width: 28px; height: 28px; border-radius: 8px; font-size: 12px; }
+.fw-bubble { background: var(--fw-surface); border: 1px solid var(--fw-border); border-radius: 4px var(--fw-radius-card) var(--fw-radius-card) var(--fw-radius-card); padding: 12px 14px; max-width: 290px; }
+.fw-bubble strong { font-weight: 700; }
+.fw-bubble p + p { margin-top: 6px; }
+.fw-msg-me { justify-content: flex-end; }
+.fw-msg-me .fw-bubble { background: var(--fw-primary-weak); border-color: transparent; border-radius: var(--fw-radius-card) 4px var(--fw-radius-card) var(--fw-radius-card); }
+.fw-meta { font-size: var(--fw-text-xs); color: var(--fw-text-muted); margin-top: 4px; }
+
+/* 유형 칩 */
+.fw-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.fw-chip { min-height: 36px; padding: 0 14px; border-radius: var(--fw-radius-chip); border: 1px solid var(--fw-border); background: var(--fw-surface); font: inherit; font-size: var(--fw-text-sm); color: var(--fw-text); cursor: pointer; }
+.fw-chip[aria-pressed="true"] { background: var(--fw-primary); border-color: var(--fw-primary); color: #fff; font-weight: 600; }
+
+/* 하단 입력부 */
+.fw-composer { background: var(--fw-surface); border-top: 1px solid var(--fw-border); padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+.fw-tools-label { font-size: var(--fw-text-xs); color: var(--fw-text-sub); font-weight: 600; }
+.fw-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.fw-tool { min-height: 52px; border: 1px solid var(--fw-border); border-radius: 10px; background: var(--fw-surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font: inherit; font-size: var(--fw-text-xs); color: var(--fw-text); cursor: pointer; }
+.fw-tool svg { color: var(--fw-primary); }
+.fw-tool:hover { border-color: var(--fw-primary); background: var(--fw-primary-weak); }
+.fw-tool[aria-pressed="true"] { border-color: var(--fw-primary); background: var(--fw-primary-weak); font-weight: 600; }
+.fw-tool:disabled { opacity: 0.4; cursor: not-allowed; }
+.fw-tool .fw-count { font-size: var(--fw-text-xs); color: var(--fw-text-muted); }
+
+.fw-input { display: flex; align-items: flex-end; gap: 8px; border: 1.5px solid var(--fw-border); border-radius: var(--fw-radius-card); padding: 8px 8px 8px 14px; background: var(--fw-surface); }
+.fw-input:focus-within { border-color: var(--fw-primary); }
+.fw-input textarea { flex: 1; border: 0; outline: none; resize: none; font: inherit; font-size: var(--fw-text-md); min-height: 44px; max-height: 96px; padding: 4px 0; color: var(--fw-text); background: transparent; }
+.fw-input textarea::placeholder { color: var(--fw-text-muted); }
+.fw-send { width: 40px; height: 40px; border-radius: 10px; border: 0; background: var(--fw-primary); color: #fff; display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+.fw-send:hover { background: var(--fw-primary-hover); }
+.fw-send:disabled { background: #eceef2; color: var(--fw-text-muted); cursor: not-allowed; }
+.fw-hint { font-size: var(--fw-text-xs); color: var(--fw-text-muted); display: flex; justify-content: space-between; }
+
+/* 첨부 카드: 대화 영역 안에 두어 많아지면 위쪽만 스크롤 */
+.fw-attach-head { display: flex; justify-content: space-between; font-size: var(--fw-text-xs); color: var(--fw-text-sub); padding: 4px 2px 0; }
+.fw-attach-head span:first-child { font-weight: 700; color: var(--fw-text); }
+.fw-attachments { display: flex; flex-direction: column; gap: 6px; }
+.fw-attachment { display: flex; align-items: center; gap: 10px; border: 1px solid var(--fw-border); border-radius: 10px; padding: 6px 4px 6px 10px; background: var(--fw-surface); }
+.fw-attachment-icon { width: 28px; height: 28px; border-radius: 8px; background: var(--fw-primary-weak); color: var(--fw-primary); display: grid; place-items: center; flex-shrink: 0; }
+.fw-attachment-text { flex: 1; min-width: 0; font-size: var(--fw-text-sm); }
+.fw-attachment-text b { font-weight: 600; }
+.fw-attachment-text span { display: block; color: var(--fw-text-sub); font-size: var(--fw-text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fw-remove { width: 36px; height: 36px; border: 0; background: none; color: var(--fw-text-muted); border-radius: 8px; cursor: pointer; display: grid; place-items: center; }
+.fw-remove:hover { background: var(--fw-danger-weak); color: var(--fw-danger); }
+
+/* 진행 중 배너 (모드 사용 중) */
+.fw-banner { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--fw-radius-card); background: var(--fw-primary-weak); color: var(--fw-text); font-size: var(--fw-text-sm); }
+.fw-banner svg { color: var(--fw-primary); flex-shrink: 0; margin-top: 2px; }
+.fw-banner b { display: block; font-size: var(--fw-text-md); margin-bottom: 2px; }
+.fw-banner.is-recording { background: var(--fw-danger-weak); }
+.fw-banner.is-recording svg { color: var(--fw-recording); }
+.fw-banner.is-warning { background: var(--fw-warning-weak); color: var(--fw-warning); }
+.fw-banner.is-error { background: var(--fw-danger-weak); color: #b42318; }
+.fw-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--fw-recording); flex-shrink: 0; margin-top: 5px; animation: fw-blink 1.2s infinite; }
+@keyframes fw-blink { 50% { opacity: 0.25; } }
+
+.fw-actions { display: flex; gap: 8px; }
+.fw-btn { flex: 1; min-height: var(--fw-touch); border-radius: 10px; border: 1px solid var(--fw-border); background: var(--fw-surface); font: inherit; font-size: var(--fw-text-md); font-weight: 600; color: var(--fw-text); cursor: pointer; }
+.fw-btn-primary { background: var(--fw-primary); border-color: var(--fw-primary); color: #fff; }
+.fw-btn-danger { background: var(--fw-danger); border-color: var(--fw-danger); color: #fff; }
+.fw-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.fw-target { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; background: var(--fw-surface-sub); border: 1px solid var(--fw-border); font-size: var(--fw-text-xs); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* 완료 화면 */
+.fw-done { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 12px; }
+.fw-done-icon { width: 64px; height: 64px; border-radius: 50%; background: var(--fw-success-weak); color: var(--fw-success); display: grid; place-items: center; }
+.fw-done h2 { font-size: 18px; font-weight: 700; }
+.fw-done p { color: var(--fw-text-sub); font-size: var(--fw-text-sm); }
+.fw-summary { width: 100%; text-align: left; border: 1px solid var(--fw-border); border-radius: var(--fw-radius-card); background: var(--fw-surface); padding: 12px 14px; font-size: var(--fw-text-sm); display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 8px 0; }
+.fw-summary dt { color: var(--fw-text-sub); }
+
+</style>
+</head>
+<body>
+
+<!-- 아이콘 묶음: 아래에서 <use href="#i-..."/>로 재사용 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2.5-6.5L4 12z" fill="currentColor"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 22s7-6.2 7-12a7 7 0 10-14 0c0 5.8 7 12 7 12z" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="12" cy="10" r="2.5" fill="currentColor"/></symbol>
+  <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+  <symbol id="i-flow" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.2" fill="currentColor"/><circle cx="12" cy="18" r="2.2" fill="currentColor"/><circle cx="19" cy="6" r="2.2" fill="currentColor"/><path d="M6.5 8l4 8M13.5 16l4-8" stroke="currentColor" stroke-width="1.8" fill="none"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" fill="none"/><circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="1.8" fill="none"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 11v5M12 8v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+</svg>
+
+<header class="board-head">
+  <h1>피드백 위젯 UI 시안 v0.3</h1>
+  <p>채널톡 상담창을 참고한 대화형 레이아웃입니다. 위젯 크기는 SDK가 띄우는 iframe 크기(380 × 560px)에 맞췄습니다.<br />
+  색은 래티스 데모 페이지의 파란 버튼(#3B5BFD)과 회색 톤을, 글꼴은 데모와 같은 Pretendard를 씁니다. 가독성을 위해 본문 14px, 최소 12px, 버튼 높이 최소 44px로 맞췄습니다.</p>
+</header>
+
+<main class="board">
+
+  <h2 class="section-title">1. 기본 흐름</h2>
+
+  <!-- ① 처음 열었을 때 -->
+  <div class="frame-wrap">
+    <div class="frame-label">① 처음 열었을 때<small>인사 말풍선 안에서 유형을 고릅니다(기존 select 대신 칩). 아래 4개 도구가 "화면으로 보여주기" 기능입니다.</small></div>
+    <section class="fw" aria-label="피드백 위젯">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text">
+          <div class="fw-title">피드백 보내기</div>
+          <div class="fw-subtitle">홍길동 님 · 보통 1영업일 안에 답변드려요</div>
+        </div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-msg">
+          <div class="fw-avatar">L</div>
+          <div>
+            <div class="fw-bubble">
+              <p>안녕하세요, <strong>홍길동</strong> 님 👋</p>
+              <p>불편한 점을 편하게 적어 주세요. 글로 설명하기 어려우면 아래 도구로 <strong>화면에서 직접</strong> 보여주셔도 돼요.</p>
+              <div class="fw-chips" role="group" aria-label="피드백 유형">
+                <button class="fw-chip" aria-pressed="true">버그</button>
+                <button class="fw-chip" aria-pressed="false">개선 제안</button>
+                <button class="fw-chip" aria-pressed="false">질문</button>
+                <button class="fw-chip" aria-pressed="false">기타</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-tools-label">화면으로 보여주기 (선택)</div>
+        <div class="fw-tools">
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-pin"/></svg>요소 코멘트</button>
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-move"/></svg>위치 편집</button>
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-flow"/></svg>흐름 기록</button>
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-camera"/></svg>화면 저장</button>
+        </div>
+        <div class="fw-input">
+          <textarea rows="2" placeholder="어떤 점이 불편하셨나요?"></textarea>
+          <button class="fw-send" aria-label="보내기" disabled><svg width="18" height="18"><use href="#i-send"/></svg></button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ② 작성 중 + 첨부 -->
+  <div class="frame-wrap">
+    <div class="frame-label">② 내용과 첨부가 쌓인 상태<small>첨부는 대화 영역에 카드로 쌓고(많아지면 이 부분만 스크롤), 카드마다 삭제(✕)가 있습니다. 코멘트·위치 편집을 첨부하면 위치 표시용 화면이 자동 저장되므로 "코멘트 위치 포함" 카드가 함께 생깁니다. 입력창·도구는 항상 같은 자리. 도구 버튼에 "1/5"처럼 사용한 개수를 표시합니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">피드백 보내기</div><div class="fw-subtitle">홍길동 님 · 보통 1영업일 안에 답변드려요</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-msg">
+          <div class="fw-avatar">L</div>
+          <div class="fw-bubble"><p>어떤 내용인가요?</p>
+            <div class="fw-chips"><button class="fw-chip" aria-pressed="true">버그</button><button class="fw-chip">개선 제안</button><button class="fw-chip">질문</button><button class="fw-chip">기타</button></div>
+          </div>
+        </div>
+        <div class="fw-attach-head"><span>첨부한 화면 정보 4개</span><span>보낼 때 함께 전달돼요</span></div>
+        <div class="fw-attachments" aria-label="첨부된 맥락">
+          <div class="fw-attachment">
+            <div class="fw-attachment-icon"><svg width="16" height="16"><use href="#i-pin"/></svg></div>
+            <div class="fw-attachment-text"><b>코멘트 1</b><span>save-button · 눌러도 반응이 없어요</span></div>
+            <button class="fw-remove" aria-label="코멘트 1 삭제"><svg width="16" height="16"><use href="#i-close"/></svg></button>
+          </div>
+          <div class="fw-attachment">
+            <div class="fw-attachment-icon"><svg width="16" height="16"><use href="#i-flow"/></svg></div>
+            <div class="fw-attachment-text"><b>흐름 기록 · 이벤트 4개</b><span>클릭 → 입력 → 클릭 → 화면 이동</span></div>
+            <button class="fw-remove" aria-label="흐름 기록 삭제"><svg width="16" height="16"><use href="#i-close"/></svg></button>
+          </div>
+          <div class="fw-attachment">
+            <div class="fw-attachment-icon"><svg width="16" height="16"><use href="#i-camera"/></svg></div>
+            <div class="fw-attachment-text"><b>저장한 화면 1 · 코멘트 위치 포함</b><span>코멘트를 달 때 자동으로 저장됐어요 · 1440×900</span></div>
+            <button class="fw-remove" aria-label="화면 1 삭제"><svg width="16" height="16"><use href="#i-close"/></svg></button>
+          </div>
+          <div class="fw-attachment">
+            <div class="fw-attachment-icon"><svg width="16" height="16"><use href="#i-camera"/></svg></div>
+            <div class="fw-attachment-text"><b>저장한 화면 2 · 흐름 재생</b><span>흐름 기록을 마칠 때 자동으로 저장됐어요 · 1440×900</span></div>
+            <button class="fw-remove" aria-label="화면 2 삭제"><svg width="16" height="16"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-tools">
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-pin"/></svg>요소 코멘트<span class="fw-count">1/20</span></button>
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-move"/></svg>위치 편집<span class="fw-count">0/10</span></button>
+          <button class="fw-tool" disabled><svg width="18" height="18"><use href="#i-flow"/></svg>흐름 기록<span class="fw-count">1/1</span></button>
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-camera"/></svg>화면 저장<span class="fw-count">2/5</span></button>
+        </div>
+        <div class="fw-input">
+          <textarea rows="2">문서 금액을 고치고 저장을 눌렀는데 목록에 그대로예요.</textarea>
+          <button class="fw-send" aria-label="보내기"><svg width="18" height="18"><use href="#i-send"/></svg></button>
+        </div>
+        <div class="fw-hint"><span>Enter 줄바꿈 · ⌘+Enter 보내기</span><span>29/5000</span></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ③ 전송 완료 -->
+  <div class="frame-wrap">
+    <div class="frame-label">③ 전송 완료<small>무엇이 전달됐는지 요약해서 보여줘 "제대로 갔나?" 불안을 줄입니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">피드백 보내기</div><div class="fw-subtitle">홍길동 님</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-done">
+        <div class="fw-done-icon"><svg width="32" height="32"><use href="#i-check"/></svg></div>
+        <h2>피드백이 전달됐어요</h2>
+        <p>담당자가 확인한 뒤 답변드릴게요.</p>
+        <dl class="fw-summary">
+          <dt>유형</dt><dd>버그</dd>
+          <dt>페이지</dt><dd>전체 계약서</dd>
+          <dt>첨부</dt><dd>코멘트 1 · 흐름 기록 · 화면 2</dd>
+        </dl>
+        <div class="fw-actions" style="width:100%"><button class="fw-btn">닫기</button><button class="fw-btn fw-btn-primary">다른 피드백 작성</button></div>
+      </div>
+    </section>
+  </div>
+
+  <h2 class="section-title">2. 화면으로 보여주기 (모드 사용 중)</h2>
+
+  <!-- ④ 요소 코멘트: 고르는 중 -->
+  <div class="frame-wrap">
+    <div class="frame-label">④ 요소 코멘트 · 요소 고르는 중<small>사용자의 시선이 페이지로 가야 하므로, 위젯은 지금 할 일 한 줄과 취소 버튼만 크게 보여줍니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">요소 코멘트</div><div class="fw-subtitle">Esc 키로도 취소할 수 있어요</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-banner">
+          <svg width="20" height="20"><use href="#i-pin"/></svg>
+          <div><b>페이지에서 요소를 클릭하세요</b>마우스를 올리면 파란 테두리가 보여요. 클릭해도 원래 버튼은 실행되지 않아요.</div>
+        </div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-actions"><button class="fw-btn">요소 코멘트 취소</button></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ⑤ 요소 코멘트: 의견 쓰기 -->
+  <div class="frame-wrap">
+    <div class="frame-label">⑤ 요소 코멘트 · 의견 쓰기<small>어떤 요소를 골랐는지 이름표로 보여주고 바로 의견을 받습니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <button class="fw-icon-btn" aria-label="뒤로"><svg width="20" height="20"><use href="#i-back"/></svg></button>
+        <div class="fw-header-text"><div class="fw-title">요소 코멘트</div><div class="fw-subtitle">코멘트 1/20</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-banner">
+          <svg width="20" height="20"><use href="#i-check"/></svg>
+          <div><b>요소를 골랐어요</b>선택한 요소 <span class="fw-target">save-button</span></div>
+        </div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-input">
+          <textarea rows="3">눌러도 반응이 없어요</textarea>
+        </div>
+        <div class="fw-hint"><span>이 요소에 대한 의견</span><span>10/1000</span></div>
+        <div class="fw-actions"><button class="fw-btn">취소</button><button class="fw-btn fw-btn-primary">코멘트 첨부</button></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ⑥ 위치 편집 -->
+  <div class="frame-wrap">
+    <div class="frame-label">⑥ 위치 편집 · 끌어서 옮기는 중<small>"변경 첨부" 버튼은 페이지 위(SDK 오버레이)에 있으므로, 위젯은 어디를 누르면 되는지 안내와 취소만 보여줍니다. 원본은 그대로라는 안심 문구를 꼭 넣습니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">위치 편집</div><div class="fw-subtitle">위치 편집 1/10</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-banner">
+          <svg width="20" height="20"><use href="#i-move"/></svg>
+          <div><b>요소를 원하는 곳으로 끌어 놓으세요</b>다 옮겼으면 페이지 위의 <strong>변경 첨부</strong> 버튼을 눌러 주세요. 미리보기일 뿐이라 실제 화면과 데이터는 바뀌지 않아요.</div>
+        </div>
+        <div class="fw-banner" style="background:#fff;border:1px solid var(--fw-border)">
+          <svg width="20" height="20"><use href="#i-info"/></svg>
+          <div>옮긴 거리 <b style="display:inline">가로 +240px · 세로 +16px</b></div>
+        </div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-actions"><button class="fw-btn">위치 편집 취소</button></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ⑦ 흐름 기록 중 -->
+  <div class="frame-wrap">
+    <div class="frame-label">⑦ 흐름 기록 중<small>빨간 점과 경과 시간으로 "녹화 중"임을 분명히 하고, 무엇이 기록되고 무엇이 가려지는지 알려줍니다. 기록을 마치면 "흐름 재생" 화면이 자동 첨부됩니다(②). 페이지 이동 시 본문 초안이 복원되지 않는 현재 한계(README)를 노란 배너로 미리 알립니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">흐름 기록</div><div class="fw-subtitle">평소처럼 페이지를 사용하세요 · 최대 5분</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-banner is-recording">
+          <span class="fw-rec-dot" aria-hidden="true"></span>
+          <div><b>기록 중 · 00:24</b>클릭, 화면 이동과 화면 변화를 기록해 담당자가 그대로 재생해 볼 수 있어요. <strong>입력한 값은 가려서 저장해요.</strong></div>
+        </div>
+        <div class="fw-banner is-warning"><svg width="18" height="18"><use href="#i-info"/></svg><div>다른 페이지로 이동하면 <strong>작성 중이던 글이 지워질 수 있어요.</strong> 기록을 마친 뒤 글을 써 주세요.</div></div>
+        <div class="fw-attachment">
+          <div class="fw-attachment-icon"><svg width="16" height="16"><use href="#i-flow"/></svg></div>
+          <div class="fw-attachment-text"><b>지금까지 3개</b><span>클릭 → 입력 → 클릭</span></div>
+        </div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-actions"><button class="fw-btn">기록 취소</button><button class="fw-btn fw-btn-danger">기록 종료 및 첨부</button></div>
+      </div>
+    </section>
+  </div>
+
+  <h2 class="section-title">3. 안내·오류 상태</h2>
+
+  <!-- ⑧ 첨부가 허용되지 않은 페이지 -->
+  <div class="frame-wrap">
+    <div class="frame-label">⑧ 화면 첨부가 허용되지 않은 페이지<small>도구를 숨기지 않고 흐리게 + 이유 한 줄. 글로는 계속 보낼 수 있다고 알려줍니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">피드백 보내기</div><div class="fw-subtitle">홍길동 님</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-msg"><div class="fw-avatar">L</div><div class="fw-bubble"><p>어떤 내용인가요?</p><div class="fw-chips"><button class="fw-chip">버그</button><button class="fw-chip" aria-pressed="true">개선 제안</button><button class="fw-chip">질문</button><button class="fw-chip">기타</button></div></div></div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-banner is-warning"><svg width="18" height="18"><use href="#i-info"/></svg><div>이 페이지에서는 화면 첨부를 쓸 수 없어요. 글로만 보내도 괜찮아요.</div></div>
+        <div class="fw-tools">
+          <button class="fw-tool" disabled><svg width="18" height="18"><use href="#i-pin"/></svg>요소 코멘트</button>
+          <button class="fw-tool" disabled><svg width="18" height="18"><use href="#i-move"/></svg>위치 편집</button>
+          <button class="fw-tool" disabled><svg width="18" height="18"><use href="#i-flow"/></svg>흐름 기록</button>
+          <button class="fw-tool" disabled><svg width="18" height="18"><use href="#i-camera"/></svg>화면 저장</button>
+        </div>
+        <div class="fw-input"><textarea rows="2" placeholder="어떤 점이 불편하셨나요?"></textarea><button class="fw-send" aria-label="보내기" disabled><svg width="18" height="18"><use href="#i-send"/></svg></button></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ⑨ 전송 실패 -->
+  <div class="frame-wrap">
+    <div class="frame-label">⑨ 전송 실패<small>쓴 내용과 첨부는 그대로 두고, 무엇을 하면 되는지(다시 시도) 버튼으로 보여줍니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">피드백 보내기</div><div class="fw-subtitle">홍길동 님</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-msg fw-msg-me"><div><div class="fw-bubble">저장 버튼을 눌러도 반응이 없어요.</div><div class="fw-meta" style="text-align:right;color:var(--fw-danger)">보내지 못했어요</div></div></div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-banner is-error" role="alert"><svg width="18" height="18"><use href="#i-info"/></svg><div><b>전송하지 못했어요</b>잠시 후 다시 시도해 주세요. 작성한 내용은 그대로 남아 있어요.</div></div>
+        <div class="fw-actions"><button class="fw-btn fw-btn-primary">다시 보내기</button></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ⑩ 전송 중 -->
+  <div class="frame-wrap">
+    <div class="frame-label">⑩ 화면 저장·전송 중<small>버튼을 잠그고 진행 문구를 보여 중복 전송을 막습니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">피드백 보내기</div><div class="fw-subtitle">홍길동 님</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-msg fw-msg-me"><div><div class="fw-bubble">저장 버튼을 눌러도 반응이 없어요.</div><div class="fw-meta" style="text-align:right">보내는 중…</div></div></div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-banner"><svg width="18" height="18"><use href="#i-camera"/></svg><div>저장한 화면을 올리는 중이에요…</div></div>
+        <div class="fw-input"><textarea rows="2" disabled></textarea><button class="fw-send" aria-label="보내기" disabled><svg width="18" height="18"><use href="#i-send"/></svg></button></div>
+      </div>
+    </section>
+  </div>
+
+
+  <!-- ⑪ 준비 중 -->
+  <div class="frame-wrap">
+    <div class="frame-label">⑪ 준비 중 (고객사 페이지와 연결되기 전)<small>잠깐이지만 빈 화면 대신 뼈대를 보여줘 "고장났나?" 싶지 않게 합니다. 보내기·도구는 잠급니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">피드백 보내기</div><div class="fw-subtitle">준비하는 중이에요…</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body" role="status" aria-live="polite" aria-label="위젯을 준비하는 중">
+        <div class="fw-msg"><div class="fw-avatar">L</div>
+          <div class="fw-bubble" style="width:260px;display:flex;flex-direction:column;gap:8px">
+            <div class="fw-skeleton" style="height:14px;width:60%"></div>
+            <div class="fw-skeleton" style="height:14px;width:95%"></div>
+            <div class="fw-skeleton" style="height:14px;width:80%"></div>
+          </div>
+        </div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-tools">
+          <button class="fw-tool" disabled><svg width="18" height="18"><use href="#i-pin"/></svg>요소 코멘트</button>
+          <button class="fw-tool" disabled><svg width="18" height="18"><use href="#i-move"/></svg>위치 편집</button>
+          <button class="fw-tool" disabled><svg width="18" height="18"><use href="#i-flow"/></svg>흐름 기록</button>
+          <button class="fw-tool" disabled><svg width="18" height="18"><use href="#i-camera"/></svg>화면 저장</button>
+        </div>
+        <div class="fw-input"><textarea rows="2" placeholder="어떤 점이 불편하셨나요?" disabled></textarea><button class="fw-send" aria-label="보내기" disabled><svg width="18" height="18"><use href="#i-send"/></svg></button></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ⑫ 열 수 없음 -->
+  <div class="frame-wrap">
+    <div class="frame-label">⑫ 위젯을 열 수 없을 때 (설치 설정 오류)<small>고객에게는 할 수 있는 행동만, 개발자용 원인은 작은 회색 상자로 분리합니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">피드백 보내기</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-banner is-error" role="alert"><svg width="18" height="18"><use href="#i-info"/></svg><div><b>피드백 창을 열 수 없어요</b>페이지를 새로고침해 주세요. 계속 이러면 래티스 담당자에게 알려 주세요.</div></div>
+        <div class="fw-detail">원인(개발자용): projectKey 또는 hostOrigin이 올바르지 않습니다.</div>
+      </div>
+      <div class="fw-composer"><div class="fw-actions"><button class="fw-btn">닫기</button></div></div>
+    </section>
+  </div>
+
+  <!-- ⑬ 첨부만 있고 글이 없음 -->
+  <div class="frame-wrap">
+    <div class="frame-label">⑬ 첨부는 했는데 글이 비어 있을 때<small>코멘트를 달았으니 다 됐다고 생각하기 쉬운 순간. 보내기가 왜 안 눌리는지 힌트 줄에서 바로 알려줍니다.</small></div>
+    <section class="fw">
+      <header class="fw-header">
+        <div class="fw-avatar">L</div>
+        <div class="fw-header-text"><div class="fw-title">피드백 보내기</div><div class="fw-subtitle">홍길동 님</div></div>
+        <button class="fw-icon-btn" aria-label="닫기"><svg width="20" height="20"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="fw-body">
+        <div class="fw-msg"><div class="fw-avatar">L</div><div class="fw-bubble"><p>어떤 내용인가요?</p><div class="fw-chips"><button class="fw-chip">버그</button><button class="fw-chip" aria-pressed="true">개선 제안</button><button class="fw-chip">질문</button><button class="fw-chip">기타</button></div></div></div>
+        <div class="fw-attach-head"><span>첨부한 화면 정보 2개</span><span>보낼 때 함께 전달돼요</span></div>
+        <div class="fw-attachments">
+          <div class="fw-attachment"><div class="fw-attachment-icon"><svg width="16" height="16"><use href="#i-move"/></svg></div><div class="fw-attachment-text"><b>위치 편집 1</b><span>save-button (가로 240px, 세로 16px 이동)</span></div><button class="fw-remove" aria-label="위치 편집 1 삭제"><svg width="16" height="16"><use href="#i-close"/></svg></button></div>
+          <div class="fw-attachment"><div class="fw-attachment-icon"><svg width="16" height="16"><use href="#i-camera"/></svg></div><div class="fw-attachment-text"><b>저장한 화면 1 · 편집 위치 포함</b><span>위치를 옮길 때 자동으로 저장됐어요 · 1440×900</span></div><button class="fw-remove" aria-label="화면 1 삭제"><svg width="16" height="16"><use href="#i-close"/></svg></button></div>
+        </div>
+      </div>
+      <div class="fw-composer">
+        <div class="fw-tools">
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-pin"/></svg>요소 코멘트<span class="fw-count">0/20</span></button>
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-move"/></svg>위치 편집<span class="fw-count">1/10</span></button>
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-flow"/></svg>흐름 기록<span class="fw-count">0/1</span></button>
+          <button class="fw-tool"><svg width="18" height="18"><use href="#i-camera"/></svg>화면 저장<span class="fw-count">1/5</span></button>
+        </div>
+        <div class="fw-input"><textarea rows="2" placeholder="어떤 점이 불편하셨나요?"></textarea><button class="fw-send" aria-label="보내기" disabled><svg width="18" height="18"><use href="#i-send"/></svg></button></div>
+        <div class="fw-hint"><span style="color:var(--fw-primary);font-weight:600">한 줄이라도 내용을 적으면 보낼 수 있어요</span><span>0/5000</span></div>
+      </div>
+    </section>
+  </div>
+
+</main>
+</body>
+</html>
