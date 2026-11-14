@@ -1,18 +1,44 @@
 // Images and styles that appear after the first snapshot of a Flow recording would keep the host service's
 // URLs, which the admin origin cannot load. Everything recorded is gathered under one root here, so a single
 // extractSnapshotAssets call covers it with shared budgets and reference numbers.
-import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE } from '@/lib/screen-snapshot';
+import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_INCREMENTAL_EVENT_TYPE, RRWEB_META_EVENT_TYPE } from '@/lib/screen-snapshot';
 import type { ReplaySegment } from '@/sdk/flow-replay-segment';
 import { ELEMENT_NODE_TYPE, isMutationEvent, sanitizeReplayEvents, type MutationData, type RecordedElements } from '@/sdk/replay-sanitize';
-import { parseSrcset, type SnapshotAttributes, type SnapshotNode, type SnapshotStyleChange } from '@/sdk/snapshot-assets';
+import { parseSrcset, resolveCssUrls, type SnapshotAttributes, type SnapshotNode, type SnapshotStyleChange } from '@/sdk/snapshot-assets';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
-// rrweb NodeType.Document.
+// rrweb NodeType.Document and NodeType.Text.
 const DOCUMENT_NODE_TYPE = 0;
+const TEXT_NODE_TYPE = 3;
+// rrweb IncrementalSource.StyleSheetRule, StyleDeclaration and AdoptedStyleSheet: CSS changed through script.
+const STYLE_SHEET_SOURCES: ReadonlySet<number> = new Set([8, 13, 15]);
 const CSS_URL_MARKER = 'url(';
 const IMAGE_TAG_NAME = 'img';
+const STYLE_TAG_NAME = 'style';
 // Elements whose srcset lists image files: <img> and <source> inside <picture>.
 const SRCSET_TAG_NAMES: ReadonlySet<string> = new Set([IMAGE_TAG_NAME, 'source']);
+
+type TextNode = SnapshotNode & { textContent?: string; childNodes?: TextNode[] };
+
+/** Where CSS text recorded after the first snapshot goes: its URLs are relative to the document it was in. */
+interface CssTextTarget {
+  baseUrl: string | undefined;
+  childNodes: SnapshotNode[];
+}
+
+interface StyleRule {
+  rule: string;
+}
+
+/** The CSS text a stylesheet change can carry, whichever of the three sources recorded it. */
+interface StyleSheetChange {
+  source: number;
+  adds?: StyleRule[];
+  replace?: string;
+  replaceSync?: string;
+  set?: { value: string | null };
+  styles?: { rules: StyleRule[] }[];
+}
 
 export interface ReplayAssetRoot {
   root: SnapshotNode;
@@ -21,25 +47,51 @@ export interface ReplayAssetRoot {
 }
 
 /**
- * A root whose children are the full snapshot, every node added later, and every attribute change that sets
- * an image source or an inline style. A change stands in as an element carrying its own attributes object,
+ * A root whose children are the full snapshot, every node added later, every attribute change that sets
+ * an image source or an inline style, and every piece of CSS text changed later: rules and declarations
+ * set through script, and the text of <style> elements. A change stands in as an element carrying its own attributes object,
  * so the extraction rewrites the recorded change in place. Two kinds of change stand in piece by piece and
  * are written back by applyRewrites once the extraction is done: a style recorded as a property dictionary
- * ({ background: 'url(...)' } or [value, priority]), and a changed srcset.
+ * ({ background: 'url(...)' } or [value, priority]), and a changed srcset. Changed CSS text is written back too.
  */
 export function createReplayAssetRoot(events: readonly ScreenSnapshotEvent[], elements: RecordedElements): ReplayAssetRoot {
   const childNodes: SnapshotNode[] = [];
   const rewrites: (() => void)[] = [];
+  // Text nodes of <style> elements, whose text is CSS.
+  const styleTextIds = new Set<number>();
+  const target: CssTextTarget = { baseUrl: undefined, childNodes };
   for (const event of events) {
+    if (event.type === RRWEB_META_EVENT_TYPE) {
+      const { href } = event.data as { href?: unknown };
+      target.baseUrl = typeof href === 'string' ? href : undefined;
+      continue;
+    }
     if (event.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
-      childNodes.push((event.data as { node: SnapshotNode }).node);
+      const { node } = event.data as { node: SnapshotNode };
+      childNodes.push(node);
+      rewrites.push(...addStyleTexts(node, undefined, styleTextIds, target));
+      continue;
+    }
+    if (event.type === RRWEB_INCREMENTAL_EVENT_TYPE && STYLE_SHEET_SOURCES.has((event.data as StyleSheetChange).source)) {
+      rewrites.push(...addStyleSheetChange(event.data as StyleSheetChange, target));
       continue;
     }
     if (!isMutationEvent(event)) {
       continue;
     }
     const data = event.data as MutationData;
-    data.adds?.forEach((add) => childNodes.push(add.node));
+    for (const add of data.adds ?? []) {
+      childNodes.push(add.node);
+      const parentTagName = add.parentId === undefined ? undefined : elements.get(add.parentId)?.tagName;
+      rewrites.push(...addStyleTexts(add.node, parentTagName, styleTextIds, target));
+    }
+    for (const text of data.texts ?? []) {
+      if (styleTextIds.has(text.id) && typeof text.value === 'string') {
+        rewrites.push(...addCssText(text.value, target, (rewritten) => {
+          text.value = rewritten;
+        }));
+      }
+    }
     for (const change of data.attributes ?? []) {
       const { src, srcset, style } = change.attributes;
       const tagName = elements.get(change.id)?.tagName;
@@ -60,6 +112,65 @@ export function createReplayAssetRoot(events: readonly ScreenSnapshotEvent[], el
     root: { type: DOCUMENT_NODE_TYPE, childNodes },
     applyRewrites: () => rewrites.forEach((rewrite) => rewrite()),
   };
+}
+
+// CSS text kept outside an attribute stands in as a stylesheet of its own, so its fonts and images are
+// saved, or recorded as missing, like those of any other stylesheet. Its URLs are resolved against the
+// document: a rule added to a linked stylesheet whose own address differs is resolved the same way, since
+// that address is not part of the recording.
+function addCssText(cssText: string, { baseUrl, childNodes }: CssTextTarget, write: (rewritten: string) => void): (() => void)[] {
+  if (!cssText.includes(CSS_URL_MARKER)) {
+    return [];
+  }
+  const resolved = baseUrl === undefined ? cssText : resolveCssUrls(cssText, baseUrl);
+  const stand: SnapshotNode = { type: ELEMENT_NODE_TYPE, attributes: { _cssText: resolved } };
+  childNodes.push(stand);
+  return [() => write(String(stand.attributes?._cssText))];
+}
+
+function addStyleTexts(
+  node: TextNode,
+  parentTagName: string | undefined,
+  styleTextIds: Set<number>,
+  target: CssTextTarget,
+): (() => void)[] {
+  const rewrites: (() => void)[] = [];
+  if (node.type === TEXT_NODE_TYPE && parentTagName === STYLE_TAG_NAME) {
+    if (node.id !== undefined) {
+      styleTextIds.add(node.id);
+    }
+    if (typeof node.textContent === 'string') {
+      rewrites.push(...addCssText(node.textContent, target, (rewritten) => {
+        node.textContent = rewritten;
+      }));
+    }
+  }
+  for (const child of node.childNodes ?? []) {
+    rewrites.push(...addStyleTexts(child, node.tagName, styleTextIds, target));
+  }
+  return rewrites;
+}
+
+function addStyleSheetChange(change: StyleSheetChange, target: CssTextTarget): (() => void)[] {
+  const rules = [...(change.adds ?? []), ...(change.styles ?? []).flatMap((style) => style.rules)];
+  const rewrites = rules.flatMap((rule) => addCssText(rule.rule, target, (rewritten) => {
+    rule.rule = rewritten;
+  }));
+  for (const key of ['replace', 'replaceSync'] as const) {
+    const cssText = change[key];
+    if (typeof cssText === 'string') {
+      rewrites.push(...addCssText(cssText, target, (rewritten) => {
+        change[key] = rewritten;
+      }));
+    }
+  }
+  const declaration = change.set;
+  if (declaration && typeof declaration.value === 'string') {
+    rewrites.push(...addCssText(declaration.value, target, (rewritten) => {
+      declaration.value = rewritten;
+    }));
+  }
+  return rewrites;
 }
 
 // Which candidate the browser shows after a later srcset change is not known when the change is recorded
