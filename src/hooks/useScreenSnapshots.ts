@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
 import { addMarkedScreen, type MarkedScreens } from '@/lib/marked-screens';
 import { isCaptureCurrent, type CaptureSource } from '@/lib/screen-capture-generation';
+import { keepListedCaptures } from '@/lib/screen-preview';
 import { findCommentPins, findEditMoves, isReplayTruncated, reconcileScreenMarks, type LiveMarkKeys } from '@/lib/screen-snapshot';
 import {
   MAX_SCREEN_SNAPSHOT_BYTES,
@@ -167,6 +168,10 @@ export function useScreenSnapshots({
   const markedScreenIds = useMemo(() => new Set(marksByScreen.keys()), [marksByScreen]);
   // Uploads finish asynchronously, so they read and write the latest screens through this ref.
   const screensRef = useRef(screens);
+  // What each listed screen was saved from, kept in this browser so the reporter can look at it before
+  // sending. It is dropped together with its screen.
+  const [captures, setCaptures] = useState<ReadonlyMap<string, ScreenCapture>>(new Map());
+  const capturesRef = useRef(captures);
   const [pendingCount, setPendingCount] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -200,6 +205,14 @@ export function useScreenSnapshots({
         savedMarkedScreens.current.delete(id);
       }
     }
+    // A screen that left the draft lets go of its events and files.
+    capturesRef.current = keepListedCaptures(capturesRef.current, next.snapshots);
+    setCaptures(capturesRef.current);
+  }
+
+  // Called just before the screen is committed, so a capture is never kept for a screen that is not listed.
+  function keepCapture(id: string, capture: ScreenCapture) {
+    capturesRef.current = new Map(capturesRef.current).set(id, capture);
   }
 
   function isJobCurrent(job: UploadJob, jobGeneration: number): boolean {
@@ -242,6 +255,7 @@ export function useScreenSnapshots({
     if (source === 'marks') {
       savedMarkedScreens.current.set(created.id, { screen: pinnedScreen, assetHashes });
     }
+    keepCapture(created.id, { screen: pinnedScreen, assetFiles });
     commitScreens(next);
   }
 
@@ -273,6 +287,11 @@ export function useScreenSnapshots({
       const marks = new Map([...latest.marksByScreen].filter(([screenId]) => screenId !== id));
       marks.set(created.id, findMarkKeys(screen.events));
       savedMarkedScreens.current.set(created.id, { screen, assetHashes: saved.assetHashes });
+      // The screen saved again shows the remaining marks; its files are the same ones.
+      const capture = capturesRef.current.get(id);
+      if (capture) {
+        keepCapture(created.id, { screen, assetFiles: capture.assetFiles });
+      }
       commitScreens({
         snapshots: latest.snapshots.map((snapshot) => (snapshot.id === id ? created : snapshot)),
         marksByScreen: marks,
@@ -446,6 +465,6 @@ export function useScreenSnapshots({
   }, []);
 
   return {
-    snapshots, markedScreenIds, flowScreenIds, truncatedFlowScreenIds, captureFlow, removeFlowScreens, status, errorMessage, canCapture, capture, captureForMarks, syncMarkKeys, remove, reset,
+    snapshots, captures, markedScreenIds, flowScreenIds, truncatedFlowScreenIds, captureFlow, removeFlowScreens, status, errorMessage, canCapture, capture, captureForMarks, syncMarkKeys, remove, reset,
   };
 }

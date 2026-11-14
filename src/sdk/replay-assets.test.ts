@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { createAssetReference } from '@/lib/snapshot-asset-references';
-import { createReplayAssetRoot } from '@/sdk/replay-assets';
+import { createReplayAssetRoot, createSegmentedReplayAssetRoot } from '@/sdk/replay-assets';
 import { sanitizeReplayEvents, type AttributeChange } from '@/sdk/replay-sanitize';
 import { extractSnapshotAssets, type ExtractSnapshotAssetsOptions, type SnapshotNode } from '@/sdk/snapshot-assets';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
@@ -116,4 +116,36 @@ it('saves every candidate of a srcset changed later and leaves other sources alo
     src: createAssetReference(3),
   });
   expect(clip.attributes.src).toBe(`${ORIGIN}/clip.mp4`);
+});
+
+it('reads each document of a Flow on its own, since rrweb node ids start over in every document', async () => {
+  const createPage = (child: SnapshotNode, change: AttributeChange): ScreenSnapshotEvent[] => [
+    { type: 4, timestamp: 1, data: {} },
+    { type: 2, timestamp: 1, data: { node: { type: 0, id: 1, childNodes: [child] } } },
+    { type: 3, timestamp: 2, data: { source: 0, adds: [], attributes: [change] } },
+  ];
+  const image = element(2, 'img', { src: `${ORIGIN}/first.png` });
+  const swapped: AttributeChange = { id: 2, attributes: { src: `${ORIGIN}/second.png` } };
+  const navigated: AttributeChange = { id: 2, attributes: { src: `${ORIGIN}/frame.html` } };
+  const assetRoot = createSegmentedReplayAssetRoot([
+    { events: createPage(image, swapped), liveImageSources: [[2, `${ORIGIN}/first-2x.png`]] },
+    { events: createPage(element(2, 'iframe', {}), navigated), liveImageSources: [] },
+  ]);
+
+  const { assetFiles } = await extractSnapshotAssets(assetRoot.root, {
+    pageOrigin: ORIGIN,
+    loadedFontFamilies: new Set(),
+    usedCssImageUrls: new Set(),
+    fetchAsset: async (url: string) => new Blob([url], { type: 'image/png' }),
+    maxAssetBytes: 1000,
+    maxTotalBytes: 4000,
+    maxAssetCount: 10,
+    maxDurationMs: 15_000,
+  });
+  assetRoot.applyRewrites();
+
+  expect([...assetRoot.liveImages]).toEqual([[image, `${ORIGIN}/first-2x.png`]]);
+  expect(await Promise.all(assetFiles.map((file) => file.text()))).toEqual([`${ORIGIN}/first.png`, `${ORIGIN}/second.png`]);
+  expect(swapped.attributes.src).toBe(createAssetReference(1));
+  expect(navigated.attributes.src).toBe(`${ORIGIN}/frame.html`);
 });

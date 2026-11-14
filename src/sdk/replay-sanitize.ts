@@ -89,9 +89,11 @@ export function trimReplayStart(events: readonly ScreenSnapshotEvent[], pageUrl:
   return [{ ...meta, data: { ...(meta.data as Record<string, unknown>), href: pageUrl } }, ...rest];
 }
 
-/** Cleans the recorded events in place, in order, and returns what is known about each recorded element. */
-export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[]): RecordedElements {
-  const elements: RecordedElements = new Map();
+/**
+ * Cleans the recorded events of one document in place, in order, and returns what is known about each
+ * recorded element. A recorder cleaning events one at a time passes the same elements back in with each.
+ */
+export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], elements: RecordedElements = new Map()): RecordedElements {
   for (const event of events) {
     if (event.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
       sanitizeNode((event.data as { node: SnapshotNode }).node, elements);

@@ -29,12 +29,14 @@ export const RRWEB_META_EVENT_TYPE = 4;
 export const RRWEB_CUSTOM_EVENT_TYPE = 5;
 export const COMMENT_PIN_EVENT_TAG = 'lattice-comment-pin';
 export const EDIT_MOVE_EVENT_TAG = 'lattice-edit-move';
-/** Marks a Flow replay whose later events were dropped by the count, duration or page limits. */
+/** Marks where a Flow replay lost events: at its end for the count, duration or page limits, or between two pages. */
 export const REPLAY_TRUNCATED_EVENT_TAG = 'lattice-replay-truncated';
 export const MAX_SCREEN_MARK_EVENTS = MAX_COMMENTS + MAX_EDITS;
 export const MAX_LABEL_LENGTH = 200;
 const MAX_MARK_KEY_LENGTH = 40;
 const MAX_RECT_COORDINATE = 10_000_000;
+// After its first pair, a recorded Flow carries page changes and one more Meta and FullSnapshot pair per later document.
+const REPLAY_EVENT_TYPES = [RRWEB_INCREMENTAL_EVENT_TYPE, RRWEB_META_EVENT_TYPE, RRWEB_FULL_SNAPSHOT_EVENT_TYPE];
 
 const MISSING_SNAPSHOT_ASSET_REASONS: readonly MissingSnapshotAssetReason[] = [
   'fetch_failed',
@@ -196,7 +198,8 @@ export function isReplayTruncated(events: readonly ScreenSnapshotEvent[]): boole
 }
 
 export function hasReplayEvents(events: readonly ScreenSnapshotEvent[]): boolean {
-  return events.some((event) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE);
+  // A second full snapshot is a later page of the Flow, which makes it a replay even with no change in between.
+  return events.some((event, index) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE || (index > 1 && event.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE));
 }
 
 function isMissingAsset(value: unknown): boolean {
@@ -233,7 +236,7 @@ export function isCapturedScreen(value: unknown): value is CapturedScreen {
     return false;
   }
   if (!events.slice(2).every((event) => isCommentPinEvent(event) || isEditMoveEvent(event) || isReplayTruncatedEvent(event) ||
-    isSnapshotEvent(event, RRWEB_INCREMENTAL_EVENT_TYPE))) {
+    REPLAY_EVENT_TYPES.some((type) => isSnapshotEvent(event, type)))) {
     return false;
   }
   return (

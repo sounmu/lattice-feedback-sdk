@@ -1,11 +1,16 @@
 'use client';
 
+import { useState } from 'react';
+
+import { ScreenSnapshotPreview } from '@/components/widget/ScreenSnapshotPreview';
 import type { ScreenSaveStatus } from '@/hooks/useScreenSnapshots';
 import { MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
-import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
+import type { ScreenCapture, ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
 interface ScreenSnapshotControlsProps {
   snapshots: ScreenSnapshotSummary[];
+  /** What each screen was saved from, kept in this browser so it can be looked at before sending. */
+  captures: ReadonlyMap<string, ScreenCapture>;
   /** Screens saved automatically for comments and edits; they show where those are on the page. */
   markedScreenIds: ReadonlySet<string>;
   /** Screens holding the replay of a Flow. */
@@ -26,7 +31,7 @@ const STATUS_MESSAGES: Record<ScreenSaveStatus, string> = {
   uploading: '저장한 화면을 올리는 중입니다…',
 };
 
-const FLOW_TRUNCATED_MESSAGE = '흐름 기록이 한도를 넘었거나 저장할 수 없는 페이지로 이동해 뒷부분은 재생에 포함되지 않았습니다.';
+const FLOW_TRUNCATED_MESSAGE = '기록 한도, 페이지 제한 또는 저장 중단으로 흐름의 일부 구간이 누락되었습니다.';
 
 function getSnapshotKind(isMarkedScreen: boolean, isFlowScreen: boolean, isTruncatedFlowScreen: boolean): string {
   if (isTruncatedFlowScreen) {
@@ -50,6 +55,7 @@ function getSnapshotSummary(snapshot: ScreenSnapshotSummary, index: number, kind
 
 export function ScreenSnapshotControls({
   snapshots,
+  captures,
   markedScreenIds,
   flowScreenIds,
   truncatedFlowScreenIds,
@@ -60,6 +66,11 @@ export function ScreenSnapshotControls({
   onCapture,
   onRemove,
 }: ScreenSnapshotControlsProps) {
+  // A removed or replaced screen has no capture any more, which also closes its preview.
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const previewIndex = snapshots.findIndex((snapshot) => snapshot.id === previewId);
+  const previewCapture = previewId === null ? undefined : captures.get(previewId);
+
   function getSummary(snapshot: ScreenSnapshotSummary, index: number): string {
     const { id } = snapshot;
     const kind = getSnapshotKind(markedScreenIds.has(id), flowScreenIds.has(id), truncatedFlowScreenIds.has(id));
@@ -93,7 +104,18 @@ export function ScreenSnapshotControls({
         <ul className="flex flex-col gap-2" aria-label={`저장된 화면 ${snapshots.length}/${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}`}>
           {snapshots.map((snapshot, index) => (
             <li key={snapshot.id} className="flex items-start justify-between gap-2 rounded border p-2">
-              <span className="min-w-0 break-words text-xs">{getSummary(snapshot, index)}</span>
+              <span className="min-w-0 flex-1 break-words text-xs">{getSummary(snapshot, index)}</span>
+              {captures.has(snapshot.id) && (
+                <button
+                  type="button"
+                  aria-label={`화면 ${index + 1} 미리보기`}
+                  aria-pressed={snapshot.id === previewId}
+                  className="min-h-11 min-w-11 shrink-0 rounded border px-2 text-xs aria-pressed:bg-gray-900 aria-pressed:text-white"
+                  onClick={() => setPreviewId(snapshot.id === previewId ? null : snapshot.id)}
+                >
+                  미리보기
+                </button>
+              )}
               <button
                 type="button"
                 aria-label={`화면 ${index + 1} 삭제`}
@@ -106,6 +128,14 @@ export function ScreenSnapshotControls({
             </li>
           ))}
         </ul>
+      )}
+      {previewCapture && previewIndex !== -1 && (
+        <ScreenSnapshotPreview
+          key={previewId}
+          capture={previewCapture}
+          title={`화면 ${previewIndex + 1}`}
+          onClose={() => setPreviewId(null)}
+        />
       )}
     </section>
   );

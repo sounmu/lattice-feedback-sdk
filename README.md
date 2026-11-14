@@ -9,12 +9,13 @@
 호스트 페이지의 SDK가 화면 저장, 요소 선택과 기록을 담당하고, 다른 출처의 iframe에서
 피드백을 작성·전송합니다. 관리자 기능은 **API로 제공**하며,
 관리자 화면은 현재 저장된 화면 뷰어(`/admin/snapshots/{id}`)만 있습니다.
-Comment / Edit / Flow는 아직 저장된 화면 위에서 동작하지 않고 기존의 요소 정보 방식으로 동작합니다.
+Comment와 Edit는 호스트 화면에서 위치를 지정하고, 핀·이동 제안을 저장된 화면에 연결합니다.
+Flow는 조작과 화면 변화를 기록합니다. 전송 전 위젯의 **미리보기**에서 저장된 화면과 재생 결과를 확인할 수 있습니다.
 
 ## 1. 준비
 
 - Node.js **20.9.0 이상**과 npm
-- 이 저장소의 기능 통합 버전인 `dev` 브랜치
+- 기능 개선 작업이 반영된 로컬 브랜치(현재 `feat/local-context-modes`)
 - 영구 저장이 필요할 때만 Supabase 개발 프로젝트
 
 명령은 별도 안내가 없으면 이 저장소 루트에서 실행합니다.
@@ -32,15 +33,16 @@ cp -n .env.example .env.local
 
 ## 2. DB 없이 바로 실행
 
-`.env.local`에 다음 값을 설정합니다. `FEEDBACK_CAPTURE_POLICY`는 줄바꿈 없이 한 줄로 넣습니다.
-이 정책은 아래의 Flow 테스트 페이지와 제공 데모에서 사용하는 경로·요소를 허용합니다.
+`.env.local`에 다음 값을 설정합니다. 캡처 정책을 생략하면 SDK를 삽입한 페이지의 일반 요소를
+선택할 수 있습니다. 기존 `FEEDBACK_CAPTURE_POLICY`가 있다면 허용 경로에 테스트 주소가 포함됐는지
+확인하거나, 로컬 테스트 동안 아래처럼 빈 값으로 설정하세요.
 
 ```dotenv
 FEEDBACK_STORAGE=memory
 FEEDBACK_APP_ORIGINS=http://localhost:3000
 FEEDBACK_ALLOWED_ORIGINS=http://localhost:4000,http://localhost:4001
 FEEDBACK_ADMIN_TOKEN=local-demo-admin-token
-FEEDBACK_CAPTURE_POLICY={"allowedPaths":["/","/first/","/second/"],"targets":[{"id":"main-action","selector":"main button"},{"id":"quick-action","selector":".demoQuickAction"},{"id":"row-selection","selector":"main input[type=\"checkbox\"]"},{"id":"test-input","selector":"[data-feedback-id=\"test-input\"]"},{"id":"save-button","selector":"[data-feedback-id=\"save-button\"]"},{"id":"next-page","selector":"[data-feedback-id=\"next-page\"]"}]}
+FEEDBACK_CAPTURE_POLICY=
 ```
 
 `local-demo-admin-token`은 로컬 확인용 예시입니다. 운영에서는 별도의 긴 임의 값을 사용합니다.
@@ -75,19 +77,33 @@ npx --yes serve examples/flow-pages --listen 4001 --no-clipboard
 ### 기능 확인
 
 1. **텍스트:** 내용을 입력하고 보내기를 누릅니다. 모드 사용은 필수가 아닙니다.
-2. **Comment:** `요소 코멘트` → 페이지의 저장 버튼 선택 → 의견 작성 → `코멘트 첨부`.
-3. **Edit:** `위치 편집` → 저장 버튼 선택 → 미리보기 드래그 → `변경 첨부`.
+2. **Comment:** `요소 코멘트` → 표의 셀·제목·버튼 등 선택 → 선택한 위치 옆에 의견 작성 → `첨부`.
+   다른 요소를 계속 선택해 여러 의견을 남길 수 있습니다. 번호 핀을 누르면 의견과 삭제 버튼이 열립니다.
+   `코멘트 완료`로 위젯에 돌아옵니다. `Ctrl/⌘ + Enter`로 의견을 첨부할 수도 있습니다.
+3. **Edit:** `위치 편집` → 표의 셀·문장·버튼 등 선택 → 미리보기 상자 드래그 → `변경 첨부`.
    원본 요소의 위치는 바뀌지 않습니다. Escape나 취소 버튼으로 종료할 수 있습니다.
 4. **Flow:** `흐름 기록` → 입력·버튼 클릭 → 새로고침 → `다음 문서로 이동` →
-   호스트 표시기의 `기록 종료`. 입력한 값은 수집하지 않고 입력 발생 여부만 기록합니다.
+   두 번째 화면의 저장 버튼 클릭 → 뒤로가기 → 호스트 표시기의 `기록 종료`.
+   같은 탭·출처의 문서 이동 전후 화면을 이어 기록하며, 입력값은 가립니다.
+   기록 중에는 가려진 화면 자료를 해당 호스트 출처의 IndexedDB에 임시 보관하고,
+   기록을 첨부하거나 취소하면 제거합니다.
 5. **화면 저장:** `현재 화면 저장`을 누르면 지금 화면이 저장되어 목록에 추가됩니다(피드백당 최대 5개).
    비밀번호 입력값, `<script>`·인라인 이벤트 핸들러, `data-lattice-block` 영역은 저장하지 않고,
    `data-lattice-mask` 영역의 텍스트와 입력값은 `*`로 가립니다. 그 밖의 입력값은 화면에 보이는 대로 저장됩니다.
-6. 하나의 피드백에 모드별 자료와 저장한 화면을 함께 첨부하고 전송한 뒤 아래 관리자 API로 확인합니다.
+6. 저장된 화면의 **미리보기**를 열어 Comment 핀과 Edit의 원본·제안 위치를 비교합니다.
+   Flow는 재생·일시정지·시간 이동과 이전/다음 단계로 조작 후 화면을 확인할 수 있습니다.
+   미리보기에는 관리자 토큰이 필요하지 않습니다.
+7. 하나의 피드백에 모드별 자료와 저장한 화면을 함께 첨부하고 전송한 뒤 아래 관리자 API로 확인합니다.
+
+비밀번호·숨김 입력, SDK UI, `data-lattice-block`·`data-lattice-mask` 영역은 요소 선택에서 제외합니다.
+명시적인 `allowedPaths`는 계속 적용되며, 잘못된 정책 문자열은 캡처를 허용하지 않습니다.
+브라우저 저장소를 사용할 수 없거나 기록 한도를 넘겨 구간이 누락되면 경고를 표시합니다.
 
 Flow는 같은 탭·출처에서 새로고침과 문서 이동 후에도 이어집니다.
 본문·댓글과 다른 첨부의 초안 복원은 지원하지 않으므로,
 **새로고침·문서 이동을 시험할 때는 Flow를 먼저 기록하고 나머지 내용을 작성하세요.**
+SDK 코드를 수정했다면 `npm run build:sdk` 후 호스트 페이지를 새로고침하세요.
+`npm run dev`를 다시 실행해도 SDK가 재빌드됩니다. 브랜치를 바꾼 뒤에는 개발 서버도 다시 시작하세요.
 
 ## 3. 래티스 제공 데모에 붙이기
 

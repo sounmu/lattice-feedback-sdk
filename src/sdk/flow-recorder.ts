@@ -16,6 +16,7 @@ import type { ElementTarget } from '@/types/feedback';
 
 export interface FlowRecorderState {
   recording: boolean;
+  sessionId: string | null;
   eventCount: number;
   storageAvailable: boolean;
   errorMessage: string | null;
@@ -65,6 +66,7 @@ export function createFlowRecorder(options: FlowRecorderOptions): FlowRecorder {
   function emitState(): void {
     options.onStateChange({
       recording: session !== null,
+      sessionId: session?.sessionId ?? null,
       eventCount: session?.events.length ?? 0,
       storageAvailable: storage !== null,
       errorMessage,
@@ -151,7 +153,8 @@ export function createFlowRecorder(options: FlowRecorderOptions): FlowRecorder {
 
   function recordTargetEvent(type: 'click' | 'input', eventTarget: EventTarget | null): void {
     const path = findAllowedPath();
-    const label = options.findTarget(eventTarget)?.feedbackId;
+    const target = options.findTarget(eventTarget);
+    const label = target?.feedbackId ?? target?.tagName;
     if (path === null || !isSafeTargetLabel(label) || !options.isTargetAllowed(label)) {
       return;
     }

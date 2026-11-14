@@ -1,7 +1,8 @@
 import { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, truncateText } from '@/lib/feedback-limits';
-import type { CapturePolicy } from '@/lib/capture-policy';
+import { isGenericTargetLabel, type CapturePolicy } from '@/lib/capture-policy';
 import type { CommentPinSource, EditMoveSource } from '@/sdk/screen-marks';
-import { findCaptureTarget, isCapturePageAllowed, type CaptureTarget } from '@/sdk/capture-policy';
+import { findCaptureTarget, findFlowTargetLabel, isCapturePageAllowed, type CaptureTarget } from '@/sdk/capture-policy';
+import { createCommentOverlay } from '@/sdk/comment-overlay';
 import { createCaptureStatus } from '@/sdk/capture-status';
 import { startElementDrag } from '@/sdk/element-drag';
 import { startElementSelection, type SelectionPoint } from '@/sdk/element-selection';
@@ -56,18 +57,31 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let transientToken = 0;
   let flowRecorder: FlowRecorder | null = null;
   let flowEventCount = 0;
-  // Records the page for replay while Flow runs. Only the current document is kept: a reload or
-  // full navigation starts a new recording, while the Flow timeline itself continues across them.
+  // A Flow session identifies the replay across same-origin documents.
   let replayRecorder: ReplayRecorder | null = null;
-  let finishedReplay: ReplayRecording | null = null;
+  let finishedReplay: Promise<ReplayRecording | null> | null = null;
   // The recorder reports the stop before the completed Flow arrives, so the replay waits here until then.
   // A replay cut off on a page the policy leaves out waits here as well.
-  let stoppedReplay: ReplayRecording | null = null;
+  let stoppedReplay: Promise<ReplayRecording | null> | null = null;
+  let isStartingFlow = false;
   let flowErrorMessage: string | null = null;
   let controllerErrorMessage: string | null = null;
   let isPanelVisible = false;
   let isDestroyed = false;
-  const status = createCaptureStatus({ root: options.root, onStop: () => flowRecorder?.stop(), onCancel: cancelActiveMode, onShow: showWidget });
+  const commentOverlay = createCommentOverlay(options.root);
+  const status = createCaptureStatus({
+    root: options.root,
+    onStop: () => {
+      if (activeMode === 'flow') {
+        flowRecorder?.stop();
+      } else {
+        cancelTransient();
+        showWidget();
+      }
+    },
+    onCancel: cancelActiveMode,
+    onShow: showWidget,
+  });
 
   function getState(): CaptureState {
     return {
@@ -85,6 +99,10 @@ export function createCaptureController(options: CaptureControllerOptions) {
 
   function emit(): void {
     if (isDestroyed) return;
+    commentOverlay.renderPins(getCommentPinSources(), (key) => {
+      const index = commentKeys.indexOf(key);
+      if (index >= 0) removeAttachment('comments', index);
+    });
     renderStatus();
     options.onUpdate(getState());
   }
@@ -102,6 +120,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
 
   function endTransientMode(): void {
     transientToken += 1;
+    commentOverlay.closeEditor();
     const handle = transientHandle;
     transientHandle = null;
     handle?.cancel();
@@ -126,7 +145,17 @@ export function createCaptureController(options: CaptureControllerOptions) {
       selectionElement = target.element;
       selectionPoint = point;
       emit();
-      showWidget();
+      commentOverlay.openEditor(target, point, {
+        onSubmit: (comment) => {
+          if (token !== transientToken || isDestroyed) return;
+          addComment(comment);
+          if (attachments.comments.length < MAX_COMMENTS) startMode('comment');
+          else showWidget();
+        },
+        onCancel: () => {
+          if (token === transientToken && !isDestroyed) startMode('comment');
+        },
+      });
       return;
     }
     isDragging = true;
@@ -147,7 +176,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
   }
 
   function findStartError(mode: CaptureMode): string | null {
-    if (!policy || !flowRecorder) return CAPTURE_DISABLED_MESSAGE;
+    if (!flowRecorder) return CAPTURE_DISABLED_MESSAGE;
     if (!isCapturePageAllowed(policy)) return PAGE_NOT_ALLOWED_MESSAGE;
     if (activeMode === 'flow') return FLOW_ACTIVE_MESSAGE;
     if (mode === 'comment' && attachments.comments.length >= MAX_COMMENTS) return COMMENT_LIMIT_MESSAGE;
@@ -162,7 +191,9 @@ export function createCaptureController(options: CaptureControllerOptions) {
     endTransientMode();
     hideWidget();
     if (mode === 'flow') {
+      isStartingFlow = true;
       flowRecorder?.start();
+      isStartingFlow = false;
       return emit();
     }
     const token = transientToken;
@@ -220,12 +251,16 @@ export function createCaptureController(options: CaptureControllerOptions) {
   }
 
   function cancelActiveMode(): void {
-    if (activeMode === 'flow') flowRecorder?.cancel();
-    else cancelTransient();
+    if (activeMode === 'flow') {
+      discardReplay();
+      flowRecorder?.cancel();
+      stoppedReplay = null;
+    } else cancelTransient();
   }
 
   function resetCapture(): void {
     endTransientMode();
+    discardReplay();
     if (activeMode === 'flow') flowRecorder?.cancel();
     attachments = createEmptyAttachments();
     finishedReplay = null;
@@ -248,6 +283,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     const storage = flowRecorder ? null : findSessionStorage();
     if (storage) clearFlowSession(storage, getFlowSessionKey(options.projectKey));
     flowRecorder = null;
+    commentOverlay.destroy();
     status.destroy();
   }
 
@@ -279,7 +315,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     if (state.recording && activeMode !== 'flow') {
       endTransientMode();
       activeMode = 'flow';
-      startReplay();
+      if (state.sessionId) startReplay(state.sessionId, !isStartingFlow);
     } else if (!state.recording && activeMode === 'flow') {
       activeMode = null;
       // A replay that was cut off has no recorder left and is kept as it is.
@@ -293,20 +329,23 @@ export function createCaptureController(options: CaptureControllerOptions) {
     emit();
   }
 
-  function startReplay(): void {
+  function startReplay(sessionId: string, resumed: boolean): void {
     discardReplay();
     finishedReplay = null;
     stoppedReplay = null;
-    // A Flow restored on a page the policy leaves out has no replay.
-    if (!isCapturePageAllowed(policy)) return;
-    replayRecorder = startReplayRecording(options.sdkSelector);
+    // On an excluded page, recover earlier segments without recording this document.
+    replayRecorder = startReplayRecording(options.sdkSelector, {
+      projectKey: options.projectKey,
+      sessionId,
+      resumed,
+      recordPage: isCapturePageAllowed(policy),
+    });
   }
 
   // The replay must not carry a page the policy leaves out. Once cut off it is not resumed, even back on an allowed page.
   function cutOffReplayOnDisallowedPage(): void {
     if (!replayRecorder || isCapturePageAllowed(policy)) return;
-    stoppedReplay = replayRecorder.cutOff();
-    replayRecorder = null;
+    replayRecorder.cutOff();
   }
 
   function discardReplay(): void {
@@ -324,18 +363,18 @@ export function createCaptureController(options: CaptureControllerOptions) {
     showWidget();
   }
 
-  if (policy) {
-    const allowedTargetIds = new Set(policy.targets.map((target) => target.id));
-    flowRecorder = createFlowRecorder({
-      projectKey: options.projectKey,
-      isPathAllowed: (path) => policy.allowedPaths.includes(path),
-      isTargetAllowed: (id) => allowedTargetIds.has(id),
-      isPageAllowed: () => isCapturePageAllowed(policy),
-      findTarget: (eventTarget) => findCaptureTarget(eventTarget, policy)?.target ?? null,
-      onComplete: handleFlowComplete,
-      onStateChange: handleFlowState,
-    });
-  }
+  flowRecorder = createFlowRecorder({
+    projectKey: options.projectKey,
+    isPathAllowed: (path) => !policy || policy.allowedPaths.includes(path),
+    isTargetAllowed: (id) => isGenericTargetLabel(id) || (policy?.targets.some((target) => target.id === id) ?? false),
+    isPageAllowed: () => isCapturePageAllowed(policy),
+    findTarget: (eventTarget) => {
+      const found = findCaptureTarget(eventTarget, policy)?.target;
+      return found ? { ...found, feedbackId: findFlowTargetLabel(eventTarget, policy) } : null;
+    },
+    onComplete: handleFlowComplete,
+    onStateChange: handleFlowState,
+  });
 
   function unlessDestroyed<TArguments extends unknown[]>(action: (...args: TArguments) => void): (...args: TArguments) => void {
     return (...args) => { if (!isDestroyed) action(...args); };
@@ -364,10 +403,10 @@ export function createCaptureController(options: CaptureControllerOptions) {
   }
 
   /** Hands over the replay of the last completed Flow once; later calls return null. */
-  function takeFlowReplay(): ReplayRecording | null {
+  function takeFlowReplay(): Promise<ReplayRecording | null> {
     const replay = finishedReplay;
     finishedReplay = null;
-    return replay;
+    return replay ?? Promise.resolve(null);
   }
 
   return {

@@ -28,30 +28,30 @@ export function FeedbackWidget() {
   } = useHostBridge();
   const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture, requestFlowCapture });
   const { syncMarkKeys, captureForMarks, captureFlow } = screens;
-  const commentKeys = captureState?.commentKeys;
-  const editKeys = captureState?.editKeys;
+  const commentCount = useRef(0);
   const editCount = useRef(0);
   const hasFlow = useRef(false);
 
-  useEffect(() => {
-    syncMarkKeys({ comments: commentKeys ?? [], edits: editKeys ?? [] });
-  }, [commentKeys, editKeys, syncMarkKeys]);
-
-  // A finished drag arrives as a new edit in the capture state; the screen is saved right away so the
-  // admin can compare the element's original and proposed position on it.
+  // A comment written on the page or a finished drag arrives as a new comment or edit in the capture
+  // state; the screen is saved right away so the admin sees the pin, or the element's original and
+  // proposed position, on the screen it was made on.
   useEffect(() => subscribeToCaptureUpdate((state) => {
-    const count = state.attachments.edits.length;
-    if (count > editCount.current) {
+    // A capture can return before React commits the new state. Update the mark contract in this
+    // message callback so reconciliation cannot drop a newly added pin or move as an old one.
+    syncMarkKeys({ comments: state.commentKeys ?? [], edits: state.editKeys ?? [] });
+    const { comments, edits } = state.attachments;
+    if (comments.length > commentCount.current || edits.length > editCount.current) {
       captureForMarks();
     }
-    editCount.current = count;
+    commentCount.current = comments.length;
+    editCount.current = edits.length;
     // A newly attached Flow brings a replay of the page, saved as its own screen.
     const flowAttached = state.attachments.flow !== null;
     if (flowAttached && !hasFlow.current) {
       captureFlow();
     }
     hasFlow.current = flowAttached;
-  }), [subscribeToCaptureUpdate, captureForMarks, captureFlow]);
+  }), [subscribeToCaptureUpdate, syncMarkKeys, captureForMarks, captureFlow]);
   const { submit, reset, status, errorMessage } = useSubmitFeedback();
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
@@ -126,6 +126,7 @@ export function FeedbackWidget() {
         {isInitialized && (
           <ScreenSnapshotControls
             snapshots={screens.snapshots}
+            captures={screens.captures}
             markedScreenIds={screens.markedScreenIds}
             flowScreenIds={screens.flowScreenIds}
             truncatedFlowScreenIds={screens.truncatedFlowScreenIds}
@@ -147,11 +148,7 @@ export function FeedbackWidget() {
             onStart={(mode) => sendCaptureCommand(createCaptureCommand({ type: 'capture:start', payload: { mode } }))}
             onCancel={() => sendCaptureCommand(createCaptureCommand({ type: 'capture:cancel', payload: {} }))}
             onStopFlow={() => sendCaptureCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }))}
-            onAddComment={(comment) => {
-              sendCaptureCommand(createCaptureCommand({ type: 'comment:add', payload: { comment } }));
-              // Saved right away so the admin sees the comment pinned on the screen it was written on.
-              screens.captureForMarks();
-            }}
+            onAddComment={(comment) => sendCaptureCommand(createCaptureCommand({ type: 'comment:add', payload: { comment } }))}
             onRemove={(kind, index) => {
               sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }));
               if (kind === 'flow') {

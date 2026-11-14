@@ -12,6 +12,7 @@ import {
   reconcileScreenMarks,
   REPLAY_TRUNCATED_EVENT_TAG,
 } from '@/lib/screen-snapshot';
+import { createScreenSnapshotInputSchema } from '@/lib/validation/screen-snapshot-schema';
 import type { ScreenCommentPin, ScreenEditMove, ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
 const MOVE: ScreenEditMove = {
@@ -103,4 +104,16 @@ it('accepts the marker of a replay that lost its later part and tells such a rep
   expect(isReplayTruncated(createScreen([change]).events as ScreenSnapshotEvent[])).toBe(false);
   expect(isCapturedScreen(malformed)).toBe(false);
   expect(isReplayTruncated(malformed.events as ScreenSnapshotEvent[])).toBe(false);
+});
+
+it('accepts a Flow that went through several documents, in the SDK guard and on the server, and plays it', () => {
+  const nextPage = (createScreenSnapshotBody().events as ScreenSnapshotEvent[]).map((event) => ({ ...event, timestamp: 5 }));
+  const flow = createScreen([{ type: 3, timestamp: 2, data: { source: 2 } }, ...nextPage, createReplayTruncatedEvent(5)]);
+  const pagesOnly = createScreen(nextPage);
+
+  expect(isCapturedScreen(flow)).toBe(true);
+  expect(createScreenSnapshotInputSchema.safeParse(flow).success).toBe(true);
+  expect(isCapturedScreen(pagesOnly)).toBe(true);
+  expect(createScreenSnapshotInputSchema.safeParse(pagesOnly).success).toBe(true);
+  expect(hasReplayEvents(pagesOnly.events as ScreenSnapshotEvent[])).toBe(true);
 });

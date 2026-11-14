@@ -2,7 +2,8 @@
 // URLs, which the admin origin cannot load. Everything recorded is gathered under one root here, so a single
 // extractSnapshotAssets call covers it with shared budgets and reference numbers.
 import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE } from '@/lib/screen-snapshot';
-import { ELEMENT_NODE_TYPE, isMutationEvent, type MutationData, type RecordedElements } from '@/sdk/replay-sanitize';
+import type { ReplaySegment } from '@/sdk/flow-replay-segment';
+import { ELEMENT_NODE_TYPE, isMutationEvent, sanitizeReplayEvents, type MutationData, type RecordedElements } from '@/sdk/replay-sanitize';
 import { parseSrcset, type SnapshotAttributes, type SnapshotNode, type SnapshotStyleChange } from '@/sdk/snapshot-assets';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
@@ -98,4 +99,39 @@ function addStyleProperties(style: SnapshotStyleChange, childNodes: SnapshotNode
       style[property] = priority === undefined ? rewritten : [rewritten, priority];
     }];
   });
+}
+
+export interface SegmentedReplayAssetRoot extends ReplayAssetRoot {
+  /** The file each recorded <img> node showed, for the nodes whose document noted one. */
+  liveImages: Map<SnapshotNode, string>;
+}
+
+/**
+ * The whole replay under one root, so files are budgeted and numbered once across its documents. Each
+ * segment is read on its own because rrweb node ids start over in every document: the same id is an image
+ * on one page and something else on the next.
+ */
+export function createSegmentedReplayAssetRoot(
+  segments: readonly Pick<ReplaySegment, 'events' | 'liveImageSources'>[],
+): SegmentedReplayAssetRoot {
+  const liveImages = new Map<SnapshotNode, string>();
+  const roots = segments.map((segment) => {
+    // Events were cleaned before they were kept or stored; what came back from storage is cleaned again.
+    const assetRoot = createReplayAssetRoot(segment.events, sanitizeReplayEvents(segment.events));
+    const sources = new Map(segment.liveImageSources);
+    const visit = (node: SnapshotNode): void => {
+      const source = node.tagName === IMAGE_TAG_NAME && node.id !== undefined ? sources.get(node.id) : undefined;
+      if (source !== undefined) {
+        liveImages.set(node, source);
+      }
+      node.childNodes?.forEach(visit);
+    };
+    visit(assetRoot.root);
+    return assetRoot;
+  });
+  return {
+    root: { type: DOCUMENT_NODE_TYPE, childNodes: roots.flatMap((assetRoot) => assetRoot.root.childNodes ?? []) },
+    applyRewrites: () => roots.forEach((assetRoot) => assetRoot.applyRewrites()),
+    liveImages,
+  };
 }
