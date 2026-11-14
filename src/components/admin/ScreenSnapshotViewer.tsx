@@ -106,7 +106,10 @@ function scrollSavedScreen(frame: HTMLIFrameElement, event: WheelEvent): void {
   }
   const bounds = frame.getBoundingClientRect();
   const scale = bounds.width / frame.clientWidth;
-  let target = frameDocument.elementFromPoint((event.clientX - bounds.left) / scale, (event.clientY - bounds.top) / scale);
+  const x = (event.clientX - bounds.left) / scale;
+  const y = (event.clientY - bounds.top) / scale;
+  // Before the page is laid out the frame has no width, so there is no point to look up.
+  let target = Number.isFinite(x) && Number.isFinite(y) ? frameDocument.elementFromPoint(x, y) : null;
   while (target && !canScroll(target)) {
     target = target.parentElement;
   }
