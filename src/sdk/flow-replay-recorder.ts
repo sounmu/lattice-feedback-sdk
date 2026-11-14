@@ -145,7 +145,11 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
   // Runs in a microtask after each burst of events, so a navigation interrupts at most that burst.
   function save(ended = false): void {
     isSaveQueued = false;
-    if (isRemoved || waiting || (unsaved.events.length === 0 && !ended)) {
+    // Images and fonts noted since the last save are worth a chunk of their own: without them the files
+    // of this document are neither saved nor reported as missing.
+    const hasUnsaved = unsaved.events.length > 0 || unsaved.usedCssImageUrls.length > 0 ||
+      unsaved.loadedFontFamilies.length > 0 || unsaved.liveImageSources.length > 0;
+    if (isRemoved || waiting || (!hasUnsaved && !ended)) {
       return;
     }
     store.append({ segment, index: nextChunkIndex, page: session.recordPage ? page : null, gapBefore, ended, ...unsaved });
@@ -248,6 +252,10 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
   }
 
   function handlePageHide(): void {
+    // The last look at this document: a later one cannot tell which images and fonts it showed.
+    if (!truncated) {
+      sampleAssetUsage(Date.now());
+    }
     save();
     store.saveProgress({ segment, eventCount: events.length });
   }
