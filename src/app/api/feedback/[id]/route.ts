@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import { ConversationLimitError } from '@/lib/conversation';
+import { consumeRateLimit, getClientAddress } from '@/lib/http/rate-limit';
+import { BodyTooLargeError, readBodyTextWithLimit } from '@/lib/http/read-body';
 import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
@@ -57,11 +60,15 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!authorizeAdmin(request, project)) {
     return createApiErrorResponse(401, 'unauthorized', 'Admin authorization is required.');
   }
+  if (!consumeRateLimit(`admin-reply:${projectKey}:${getClientAddress(request)}`, Date.now(), 30)) {
+    return createApiErrorResponse(429, 'rate_limited', 'Try again later.');
+  }
 
   let json: unknown;
   try {
-    json = await request.json();
-  } catch {
+    json = JSON.parse(await readBodyTextWithLimit(request, 32768));
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) return createApiErrorResponse(413, 'payload_too_large', 'Request too large.');
     return createApiErrorResponse(400, 'invalid_json', 'Request body must be valid JSON.');
   }
   const parsed = updateFeedbackInputSchema.safeParse(json);
@@ -82,6 +89,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
     return NextResponse.json(await createDetailBody(feedback));
   } catch (error) {
+    if (error instanceof ConversationLimitError) {
+      return createApiErrorResponse(409, 'conversation_full', error.message);
+    }
     if (error instanceof FeedbackDuplicateTargetError) {
       return createApiErrorResponse(400, 'invalid_duplicate_target', error.message);
     }

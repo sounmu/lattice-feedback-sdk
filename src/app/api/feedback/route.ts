@@ -12,6 +12,7 @@ import { findProject, isOriginAllowed } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import { createFeedbackWithClaimedScreens } from '@/lib/feedback-submission';
+import { createConversationSecret, findVerifiedReporterId, hashConversationSecret } from '@/lib/reporter-identity';
 import type { CreateFeedbackResponse, Feedback, FeedbackListResponse } from '@/types/feedback';
 
 const MAX_BODY_BYTES = 65536;
@@ -68,6 +69,13 @@ export async function POST(request: Request) {
   }
 
   const { screenSnapshotIds, ...feedbackInput } = parsed.data;
+  const conversationSecret = createConversationSecret();
+  const access = {
+    browserSecretHash: hashConversationSecret(conversationSecret),
+    verifiedReporterId: findVerifiedReporterId(project, feedbackInput.reporter),
+  };
+  // The identity proof is a bearer credential, never reporter metadata.
+  delete feedbackInput.reporter.identity;
   try {
     // Screens are claimed for the new id before the feedback is stored, so two submissions can never
     // both report success for the same screen.
@@ -86,12 +94,13 @@ export async function POST(request: Request) {
         screenSnapshotRepository: getScreenSnapshotRepository(),
         input: feedbackInput,
         id: feedbackId,
+        access,
       });
     } else {
-      feedback = await feedbackRepository.create(feedbackInput, feedbackId);
+      feedback = await feedbackRepository.create(feedbackInput, feedbackId, access);
     }
-    const body: CreateFeedbackResponse = { feedback };
-    return NextResponse.json(body, { status: 201 });
+    const body: CreateFeedbackResponse = { feedback, conversationSecret };
+    return NextResponse.json(body, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof FeedbackStorageFullError) {
       return createApiErrorResponse(503, 'storage_full', 'Feedback storage is full.');

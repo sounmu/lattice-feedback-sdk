@@ -1,6 +1,7 @@
 import type { FeedbackRepository } from '@/lib/feedback-repository';
 import type { ScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import type { CreateFeedbackInput, Feedback } from '@/types/feedback';
+import type { ConversationAccess } from '@/types/conversation';
 
 interface CreateFeedbackWithClaimedScreensInput {
   feedbackRepository: FeedbackRepository;
@@ -8,6 +9,7 @@ interface CreateFeedbackWithClaimedScreensInput {
   input: CreateFeedbackInput;
   /** The id the screens were already claimed for. */
   id: string;
+  access?: ConversationAccess;
 }
 
 // The INSERT may commit even when its response is lost, so a failed create is reconciled by id:
@@ -17,9 +19,10 @@ export async function createFeedbackWithClaimedScreens({
   screenSnapshotRepository,
   input,
   id,
+  access,
 }: CreateFeedbackWithClaimedScreensInput): Promise<Feedback> {
   try {
-    return await feedbackRepository.create(input, id);
+    return await feedbackRepository.create(input, id, access);
   } catch (error) {
     let stored: Feedback | null;
     try {

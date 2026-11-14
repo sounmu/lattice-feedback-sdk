@@ -5,6 +5,7 @@ export interface Project {
   name: string;
   allowedOrigins: string[];
   adminToken: string | null;
+  identitySecret?: string | null;
   capturePolicy: CapturePolicy | null;
 }
 
@@ -47,6 +48,7 @@ export function findProject(projectKey: string): Project | undefined {
     name: 'Demo project',
     allowedOrigins: getAllowedOrigins(),
     adminToken: findAdminToken(),
+    identitySecret: process.env.FEEDBACK_IDENTITY_SECRET ?? null,
     capturePolicy: resolveCapturePolicyFromJson(process.env.FEEDBACK_CAPTURE_POLICY),
   };
 }

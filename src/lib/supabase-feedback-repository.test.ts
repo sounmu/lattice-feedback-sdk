@@ -5,6 +5,7 @@ import { createFeedbackBody } from '@/app/api/feedback/feedback-test-fixtures';
 import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
+import { ConversationLimitError } from '@/lib/conversation';
 import { createSupabaseFeedbackRepository } from '@/lib/supabase-feedback-repository';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 
@@ -79,6 +80,44 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('Supabase REST repository contract', () => {
+  it('distinguishes a full conversation from duplicate-target conflicts', async () => {
+    responseStatus = 409;
+    responseBodies = [JSON.stringify({ code: 'PT409' }), JSON.stringify({ code: '23503' })];
+    const repository = createSupabaseFeedbackRepository();
+    await expect(repository.update('demo', storedRow.id, { adminReply: 'full' })).rejects.toBeInstanceOf(ConversationLimitError);
+    await expect(repository.update('demo', storedRow.id, { status: 'duplicate', duplicateOfId: crypto.randomUUID() }))
+      .rejects.toBeInstanceOf(FeedbackDuplicateTargetError);
+  });
+  it('uses the service-only credential RPC without trusting reporter metadata', async () => {
+    responseBodies = ['[]', '[]'];
+    const repository = createSupabaseFeedbackRepository();
+    const credentials = { browserSecretHashes: ['a'.repeat(64)], verifiedReporterId: 'verified-alice' };
+
+    expect(await repository.findMany('demo', credentials)).toEqual([]);
+    expect(await repository.appendReporterMessage('other', storedRow.id, { credentials, body: 'followup' })).toBeNull();
+
+    expect(received[0].url.pathname).toBe('/rest/v1/rpc/read_reporter_conversations');
+    expect(JSON.parse(received[0].body)).toEqual({ p_project: 'demo', p_id: null, p_hashes: credentials.browserSecretHashes, p_reporter: 'verified-alice' });
+    expect(JSON.parse(received[1].body)).toEqual({ p_project: 'other', p_id: storedRow.id, p_hashes: credentials.browserSecretHashes, p_reporter: 'verified-alice', p_body: 'followup' });
+    expect(received[0].url.searchParams.get('select')).not.toContain('browser_secret_hash');
+  });
+
+  it('persists access hashes alongside creation and parses message roles', async () => {
+    const messages = [{ id: 'legacy', authorRole: 'admin', body: 'Original answer', createdAt: storedRow.updatedAt }];
+    responseBodies = [JSON.stringify([{ ...storedRow, messages }])];
+    const access = { browserSecretHash: 'a'.repeat(64), verifiedReporterId: 'alice' };
+    const result = await createSupabaseFeedbackRepository().create(input, undefined, access);
+    expect(JSON.parse(received[0].body)).toMatchObject({ browser_secret_hash: access.browserSecretHash, verified_reporter_id: 'alice' });
+    expect(result.messages).toEqual(messages);
+    expect(result).not.toHaveProperty('browserSecretHash');
+  });
+
+  it('fails closed when the conversation RPC returns invalid storage data', async () => {
+    responseBodies = [JSON.stringify([{ ...storedRow, messages: [{ authorRole: 'owner', body: 'bad' }] }])];
+    await expect(createSupabaseFeedbackRepository().findMany('demo', { browserSecretHashes: [], verifiedReporterId: 'alice' }))
+      .rejects.toEqual(new FeedbackStorageUnavailableError());
+  });
+
   it('creates feedback with server-only authentication and no hostOrigin in storage', async () => {
     responseStatus = 201;
     responseBodies = [JSON.stringify([storedRow])];
