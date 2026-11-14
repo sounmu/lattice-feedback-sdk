@@ -6,6 +6,7 @@ import {
   createReplayTruncatedEvent,
   findCommentPins,
   findEditMoves,
+  findUnshownEditIndexes,
   hasReplayEvents,
   isCapturedScreen,
   isReplayTruncated,
@@ -82,6 +83,12 @@ it('drops the marks of deleted comments and edits from a saved screen and renumb
   expect(findEditMoves(updated).map(({ key, number }) => [key, number])).toEqual([['edit-3', 1]]);
   expect(updated.slice(0, 2)).toEqual(events.slice(0, 2));
   expect(reconcileScreenMarks(events, { comments: ['comment-9'], edits: [] })).toBeNull();
+});
+
+it('lists the edits a saved screen does not show, by their position in the feedback', () => {
+  expect(findUnshownEditIndexes(3, [{ ...MOVE, number: 2 }])).toEqual([0, 2]);
+  expect(findUnshownEditIndexes(1, [{ ...MOVE, number: 1 }])).toEqual([]);
+  expect(findUnshownEditIndexes(2, [])).toEqual([0, 1]);
 });
 
 it('accepts the page changes of a recorded Flow and tells a replay apart from a still screen', () => {

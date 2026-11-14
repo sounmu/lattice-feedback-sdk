@@ -126,6 +126,12 @@ export function findEditMoves(events: readonly ScreenSnapshotEvent[]): ScreenEdi
   return events.filter(isEditMoveEvent).map((event) => (event.data as { payload: ScreenEditMove }).payload);
 }
 
+/** Positions (0-based) of the feedback's edits that a saved screen's moves do not show. */
+export function findUnshownEditIndexes(editCount: number, moves: readonly ScreenEditMove[]): number[] {
+  const shownIndexes = new Set(moves.map((move) => move.number - 1));
+  return Array.from({ length: editCount }, (_, index) => index).filter((index) => !shownIndexes.has(index));
+}
+
 export function createCommentPinEvent(pin: ScreenCommentPin, timestamp: number): ScreenSnapshotEvent {
   return { type: RRWEB_CUSTOM_EVENT_TYPE, timestamp, data: { tag: COMMENT_PIN_EVENT_TAG, payload: pin } };
 }
