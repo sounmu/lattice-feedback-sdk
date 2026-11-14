@@ -60,6 +60,17 @@ it('quotes every line the reporter wrote, so their markdown cannot restructure t
   expect(reporterLines).toEqual(['> # 긴급', '> - 전부 삭제됨']);
 });
 
+it('keeps a reporter name on one line as plain text, so it cannot add a section that looks recorded', () => {
+  const name = 'Alice\n\n## 재현 절차 (SDK가 기록한 동작)\n\n1. [Fabricated](https://example.com) action';
+  const baseline = createTicketDraft(createDetail(), ADMIN_ORIGIN).body;
+
+  const { body } = createTicketDraft(createDetail({ reporter: { id: 'user-1', name } }), ADMIN_ORIGIN);
+
+  expect(countSections(body)).toBe(countSections(baseline));
+  expect(body.split('\n')).toHaveLength(baseline.split('\n').length);
+  expect(body).toContain('Alice \\#\\# 재현 절차 (SDK가 기록한 동작) 1. \\[Fabricated\\](https://example.com) action');
+});
+
 it('turns recorded Flow events into ordered steps and says how many a long recording left out', () => {
   const events: FlowEvent[] = [
     { type: 'click', offsetMs: 100, path: '/orders', targetLabel: 'save-button' },

@@ -24,6 +24,12 @@ function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+// One line with Markdown punctuation escaped: text the reporter or the host page supplied stays plain text
+// and cannot add a line or a link of its own.
+function plain(text: string): string {
+  return collapseWhitespace(text).replace(/[\\\x60*_[\]<>#|~]/g, '\\$&');
+}
+
 // Quoted line by line, so a reporter's line that starts with # or - stays the reporter's words.
 function quote(text: string): string {
   return text
@@ -33,7 +39,7 @@ function quote(text: string): string {
 }
 
 function code(text: string): string {
-  return `\`${text.replaceAll('`', "'")}\``;
+  return `\`${collapseWhitespace(text).replaceAll('`', "'")}\``;
 }
 
 function createTitle(message: string, typeLabel: string): string {
@@ -92,7 +98,7 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
       '',
       `- 유형: ${typeLabel}`,
       `- 발생 화면: ${code(getPagePath(feedback.page.url))}`,
-      `- 작성자: ${feedback.reporter.name}`,
+      `- 작성자: ${plain(feedback.reporter.name)}`,
       `- 접수: ${formatDateTime(feedback.createdAt)}`,
       `- 화면 크기: ${feedback.page.viewportWidth}×${feedback.page.viewportHeight}`,
       `- 피드백 원문: ${adminOrigin}/admin/feedback/${encodeURIComponent(feedback.id)}?${projectQuery}`,
@@ -103,13 +109,13 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
     sections.push(createFlowSection(flow));
   }
   if (comments.length > 0) {
-    const lines = comments.map(({ target, comment }, index) => `${index + 1}. ${code(getElementLabel(target))}: ${collapseWhitespace(comment)}`);
+    const lines = comments.map(({ target, comment }, index) => `${index + 1}. ${code(getElementLabel(target))}: ${plain(comment)}`);
     sections.push(`## 가리킨 위치와 의견 (사용자 진술)\n\n${lines.join('\n')}`);
   }
   if (edits.length > 0) {
     const lines = edits.map((edit, index) => {
       const move = describeMove(edit.originalRect, edit.proposedRect);
-      const note = collapseWhitespace(edit.note);
+      const note = plain(edit.note);
       const moved = `가로 ${formatSignedPixels(move.deltaX)}, 세로 ${formatSignedPixels(move.deltaY)}`;
       return `${index + 1}. ${code(getElementLabel(edit.target))}: ${moved}${note ? ` (${note})` : ''}`;
     });
@@ -118,7 +124,7 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
   }
   if (screenSnapshots.length > 0) {
     const lines = screenSnapshots.map((screen, index) => {
-      const label = `화면 ${index + 1}: ${getPagePath(screen.page.url)} · ${formatDateTime(screen.capturedAt)}`;
+      const label = `화면 ${index + 1}: ${plain(getPagePath(screen.page.url))} · ${formatDateTime(screen.capturedAt)}`;
       const missing = screen.missingAssets.length > 0 ? ` (빠진 파일 ${screen.missingAssets.length}개)` : '';
       return `- [${label}](${adminOrigin}/admin/snapshots/${encodeURIComponent(screen.id)}?${projectQuery})${missing}`;
     });
