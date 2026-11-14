@@ -11,10 +11,12 @@ export const FEEDBACK_STATUS_LABELS: Record<FeedbackStatus, string> = {
   open: '접수',
   in_progress: '진행 중',
   resolved: '완료',
+  rejected: '반려',
+  duplicate: '중복',
 };
 
 export const FEEDBACK_TYPES: FeedbackType[] = ['bug', 'improvement', 'question', 'other'];
-export const FEEDBACK_STATUSES: FeedbackStatus[] = ['open', 'in_progress', 'resolved'];
+export const FEEDBACK_STATUSES: FeedbackStatus[] = ['open', 'in_progress', 'resolved', 'rejected', 'duplicate'];
 
 const KOREA_UTC_OFFSET_MS = 9 * 60 * 60 * 1000;
 const MINUTE_MS = 60_000;

@@ -60,10 +60,16 @@ export function filterFeedbacks(items: Feedback[], query: FeedbackListQuery): Fe
   return sorted;
 }
 
+/** Feedbacks that can be the original of a duplicate: every other one that is not itself a duplicate, newest first. */
+export function filterDuplicateCandidates(items: Feedback[], feedbackId: string, keyword: string): Feedback[] {
+  const candidates = items.filter((item) => item.id !== feedbackId && item.status !== 'duplicate');
+  return filterFeedbacks(candidates, { ...DEFAULT_FEEDBACK_LIST_QUERY, keyword });
+}
+
 export type FeedbackStatusCounts = Record<StatusFilter, number>;
 
 export function countFeedbacksByStatus(items: Feedback[]): FeedbackStatusCounts {
-  const counts: FeedbackStatusCounts = { all: items.length, open: 0, in_progress: 0, resolved: 0 };
+  const counts: FeedbackStatusCounts = { all: items.length, open: 0, in_progress: 0, resolved: 0, rejected: 0, duplicate: 0 };
   for (const feedback of items) {
     counts[feedback.status] += 1;
   }

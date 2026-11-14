@@ -1,8 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 
+import { AdminSection } from '@/components/admin/AdminSection';
+import { DuplicateOriginalPicker } from '@/components/admin/DuplicateOriginalPicker';
+import { ShortcutKey } from '@/components/admin/ShortcutKey';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
+import { findAdminShortcut, type AdminShortcut } from '@/lib/admin-shortcuts';
+import { findBrowserReplyDraft, saveBrowserReplyDraft } from '@/lib/admin-reply-drafts';
+import { createFeedbackChanges } from '@/lib/feedback-changes';
 import { FEEDBACK_STATUS_LABELS, FEEDBACK_STATUSES } from '@/lib/feedback-display';
 import type { Feedback, FeedbackStatus, UpdateFeedbackInput } from '@/types/feedback';
 
@@ -13,6 +19,9 @@ interface FeedbackActionPanelProps {
   onSave: (changes: UpdateFeedbackInput) => Promise<boolean>;
 }
 
+// Statuses a single key press saves. A duplicate needs its original first, so its key only opens the picker.
+const SHORTCUT_STATUSES: Partial<Record<AdminShortcut, FeedbackStatus>> = { accept: 'in_progress', reject: 'rejected' };
+
 const SAVE_STATUS_MESSAGES: Record<SaveStatus, string> = {
   idle: '',
   saving: '저장하는 중이에요…',
@@ -22,25 +31,52 @@ const SAVE_STATUS_MESSAGES: Record<SaveStatus, string> = {
 
 export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, onSave }: FeedbackActionPanelProps) {
   const [status, setStatus] = useState<FeedbackStatus>(feedback.status);
-  const [reply, setReply] = useState(feedback.adminReply ?? '');
+  // A reply typed earlier and not saved comes back, so looking at another feedback does not lose it.
+  const [reply, setReply] = useState(() => findBrowserReplyDraft(feedback) ?? feedback.adminReply ?? '');
+  const [isDraftKept, setIsDraftKept] = useState(true);
+  const [duplicateOfId, setDuplicateOfId] = useState(feedback.duplicateOfId ?? '');
   const isSaving = saveStatus === 'saving';
-  const isChanged = status !== feedback.status || reply.trim() !== (feedback.adminReply ?? '');
+  const isOriginalMissing = status === 'duplicate' && duplicateOfId === '';
+  const changes = createFeedbackChanges(feedback, { status, reply, duplicateOfId });
+  const isChanged = Object.keys(changes).length > 0;
+  const isReplyUnsaved = changes.adminReply !== undefined;
 
-  async function handleSave() {
-    const changes: UpdateFeedbackInput = {};
-    if (status !== feedback.status) {
-      changes.status = status;
-    }
-    if (reply.trim() !== (feedback.adminReply ?? '')) {
-      changes.adminReply = reply.trim() === '' ? null : reply.trim();
-    }
-    await onSave(changes);
+  function handleReplyChange(nextReply: string) {
+    setReply(nextReply);
+    setIsDraftKept(saveBrowserReplyDraft(feedback, nextReply));
   }
 
-  return (
-    <section className="flex flex-col gap-3 rounded-2xl border border-(--admin-border) bg-(--admin-surface) p-4">
-      <h2 className="text-base font-bold">처리하기</h2>
+  const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+    const shortcut = findAdminShortcut(event);
+    if (isSaving || shortcut === null) {
+      return;
+    }
+    if (shortcut === 'duplicate') {
+      event.preventDefault();
+      setStatus('duplicate');
+      return;
+    }
+    const nextStatus = SHORTCUT_STATUSES[shortcut];
+    if (nextStatus === undefined) {
+      return;
+    }
+    // Saved together with a reply the admin has typed, so the key never drops it.
+    const shortcutChanges = createFeedbackChanges(feedback, { status: nextStatus, reply, duplicateOfId });
+    if (Object.keys(shortcutChanges).length === 0) {
+      return;
+    }
+    event.preventDefault();
+    void onSave(shortcutChanges);
+  });
 
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => handleShortcut(event);
+    document.addEventListener('keydown', listener);
+    return () => document.removeEventListener('keydown', listener);
+  }, []);
+
+  return (
+    <AdminSection sectionKey="actions" title="처리하기">
       <fieldset disabled={isSaving} className="flex flex-wrap gap-2">
         <legend className="mb-1 text-sm font-semibold">상태</legend>
         {FEEDBACK_STATUSES.map((option) => (
@@ -57,6 +93,21 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
           </label>
         ))}
       </fieldset>
+      <p className="hidden text-xs text-(--admin-text-muted) md:block">
+        단축키: <ShortcutKey>1</ShortcutKey> {FEEDBACK_STATUS_LABELS.in_progress} · <ShortcutKey>2</ShortcutKey> {FEEDBACK_STATUS_LABELS.duplicate} ·{' '}
+        <ShortcutKey>3</ShortcutKey> {FEEDBACK_STATUS_LABELS.rejected}
+      </p>
+
+      {status === 'duplicate' ? (
+        <DuplicateOriginalPicker
+          feedbackId={feedback.id}
+          value={duplicateOfId}
+          disabled={isSaving}
+          // Chosen just now, so the admin can start searching right away.
+          autoFocus={feedback.status !== 'duplicate'}
+          onChange={setDuplicateOfId}
+        />
+      ) : null}
 
       <label htmlFor="admin-reply" className="text-sm font-semibold">
         답변
@@ -66,16 +117,23 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
         rows={5}
         disabled={isSaving}
         value={reply}
-        onChange={(event) => setReply(event.target.value)}
+        onChange={(event) => handleReplyChange(event.target.value)}
         placeholder="작성자에게 보여줄 답변을 적어 주세요."
         className="rounded-[10px] border border-(--admin-border) p-3 focus:outline-2 focus:outline-(--admin-primary)"
       />
+      {isReplyUnsaved ? (
+        <p className="text-xs text-(--admin-warning)">
+          {isDraftKept
+            ? '아직 저장하지 않은 답변이에요. 다른 피드백을 보고 와도 이 탭을 닫기 전까지 남아 있어요.'
+            : '아직 저장하지 않은 답변이에요. 이 화면을 벗어나면 사라져요.'}
+        </p>
+      ) : null}
 
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={handleSave}
-          disabled={!isChanged || isSaving}
+          onClick={() => onSave(changes)}
+          disabled={!isChanged || isSaving || isOriginalMissing}
           className="min-h-11 rounded-[10px] bg-(--admin-primary) px-5 font-semibold text-white hover:bg-(--admin-primary-hover) disabled:opacity-50"
         >
           저장
@@ -89,6 +147,6 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
           </p>
         ) : null}
       </div>
-    </section>
+    </AdminSection>
   );
 }

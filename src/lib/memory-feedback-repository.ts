@@ -1,3 +1,4 @@
+import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import type { FeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import type { Feedback } from '@/types/feedback';
@@ -36,6 +37,7 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
         message: input.message,
         type: input.type,
         status: 'open',
+        duplicateOfId: null,
         reporter: input.reporter,
         page: input.page,
         attachments: {
@@ -68,17 +70,33 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
     },
 
     async update(projectKey, id, input) {
-      const item = getStore()
-        .get(projectKey)
-        ?.find((candidate) => candidate.id === id);
+      const items = getStore().get(projectKey) ?? [];
+      const item = items.find((candidate) => candidate.id === id);
       if (!item) {
         return null;
+      }
+      if (input.duplicateOfId && input.duplicateOfId !== item.duplicateOfId) {
+        const original = items.find((candidate) => candidate.id === input.duplicateOfId);
+        if (!original || original === item || original.status === 'duplicate') {
+          throw new FeedbackDuplicateTargetError();
+        }
       }
       if (input.status !== undefined) {
         item.status = input.status;
       }
       if (input.adminReply !== undefined) {
         item.adminReply = input.adminReply;
+      }
+      if (input.duplicateOfId !== undefined) {
+        item.duplicateOfId = input.duplicateOfId;
+      }
+      if (item.status === 'duplicate' && item.duplicateOfId !== null) {
+        // Duplicates of this feedback follow it to its original, so a duplicate never points at a duplicate.
+        for (const candidate of items) {
+          if (candidate.duplicateOfId === item.id) {
+            candidate.duplicateOfId = item.duplicateOfId;
+          }
+        }
       }
       item.updatedAt = new Date().toISOString();
       return structuredClone(item);

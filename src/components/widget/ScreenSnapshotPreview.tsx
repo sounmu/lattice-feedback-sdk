@@ -19,10 +19,10 @@ export function ScreenSnapshotPreview({ capture, title, onClose }: ScreenSnapsho
   const loadAssetUrls = useCallback(async () => assetFiles.map((file) => URL.createObjectURL(file)), [assetFiles]);
 
   return (
-    <section aria-label={`${title} 미리보기`} className="flex w-full min-w-0 flex-col gap-2 rounded border bg-gray-50 p-2">
+    <section aria-label={`${title} 미리보기`} className="flex w-full min-w-0 flex-col gap-2 rounded-xl border bg-gray-50 p-2">
       <div className="flex items-center justify-between gap-2">
         <h2 className="min-w-0 break-words text-xs font-semibold">{title} 미리보기</h2>
-        <button type="button" className="min-h-11 shrink-0 rounded border bg-white px-3 text-xs" onClick={onClose}>
+        <button type="button" className="min-h-11 shrink-0 rounded-[10px] border bg-white px-3 text-xs" onClick={onClose}>
           미리보기 닫기
         </button>
       </div>

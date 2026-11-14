@@ -101,6 +101,16 @@ describe('updateFeedbackInputSchema', () => {
     });
   });
 
+  it('takes the original only together with the duplicate status', () => {
+    const duplicateOfId = '00000000-0000-4000-8000-000000000001';
+
+    expect(updateFeedbackInputSchema.safeParse({ status: 'duplicate', duplicateOfId }).success).toBe(true);
+    expect(updateFeedbackInputSchema.safeParse({ status: 'rejected' }).success).toBe(true);
+    expect(updateFeedbackInputSchema.safeParse({ status: 'duplicate' }).success).toBe(false);
+    expect(updateFeedbackInputSchema.safeParse({ status: 'rejected', duplicateOfId }).success).toBe(false);
+    expect(updateFeedbackInputSchema.safeParse({ duplicateOfId }).success).toBe(false);
+  });
+
   it('rejects an unknown status', () => {
     expect(updateFeedbackInputSchema.safeParse({ status: 'closed' }).success).toBe(false);
   });
