@@ -42,7 +42,7 @@ const DEFAULT_PROJECT_KEY = 'demo';
 const UNAUTHORIZED_STATUS = 401;
 const ADMIN_TOKEN_STORAGE_KEY = 'lattice-feedback:admin-token';
 const ADMIN_TOKEN_EVENT = 'lattice-feedback:admin-token-change';
-const BUTTON_CLASS = 'min-h-11 rounded border bg-white px-3 py-2 text-sm aria-pressed:bg-gray-900 aria-pressed:text-white';
+const BUTTON_CLASS = 'min-h-11 rounded-[10px] border bg-white px-3 py-2 text-sm aria-pressed:bg-gray-900 aria-pressed:text-white';
 const REPLAY_TRUNCATED_MESSAGE =
   `기록 한도(${MAX_REPLAY_DURATION_MS / 60_000}분·이벤트 수), 페이지 제한 또는 저장 중단으로 일부 구간이 재생에 포함되지 않았습니다.`;
 
@@ -449,7 +449,7 @@ function AdminTokenForm() {
         id="admin-token"
         type="password"
         autoComplete="off"
-        className="min-h-11 rounded border bg-white p-2 text-sm"
+        className="min-h-11 rounded-[10px] border bg-white p-2 text-sm"
         value={value}
         onChange={(event) => setValue(event.target.value)}
       />
@@ -782,7 +782,7 @@ export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = f
           </span>
         )}
       </div>
-      <div ref={frameRef} className="w-full overflow-auto rounded border bg-white">
+      <div ref={frameRef} className="w-full overflow-auto rounded-xl border bg-white">
         <div className="overflow-hidden" style={{ width: viewportWidth * scale, height: viewportHeight * scale }}>
           <div
             className="relative"
