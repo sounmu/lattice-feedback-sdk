@@ -90,6 +90,14 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
       if (input.duplicateOfId !== undefined) {
         item.duplicateOfId = input.duplicateOfId;
       }
+      if (item.status === 'duplicate' && item.duplicateOfId !== null) {
+        // Duplicates of this feedback follow it to its original, so a duplicate never points at a duplicate.
+        for (const candidate of items) {
+          if (candidate.duplicateOfId === item.id) {
+            candidate.duplicateOfId = item.duplicateOfId;
+          }
+        }
+      }
       item.updatedAt = new Date().toISOString();
       return structuredClone(item);
     },

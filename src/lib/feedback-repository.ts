@@ -11,7 +11,8 @@ export interface FeedbackRepository {
   find(projectKey: string, id: string): Promise<Feedback | null>;
   /**
    * Throws FeedbackDuplicateTargetError when a new duplicateOfId cannot be an original. The store checks and
-   * writes in one step, so two admins cannot point two feedbacks at each other.
+   * writes in one step, so two admins cannot point two feedbacks at each other. When a feedback that has
+   * duplicates becomes a duplicate itself, the store moves those duplicates to its original in the same step.
    */
   update(projectKey: string, id: string, input: UpdateFeedbackInput): Promise<Feedback | null>;
 }
