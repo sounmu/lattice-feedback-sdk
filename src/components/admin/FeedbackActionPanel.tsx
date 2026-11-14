@@ -6,6 +6,7 @@ import { DuplicateOriginalPicker } from '@/components/admin/DuplicateOriginalPic
 import { ShortcutKey } from '@/components/admin/ShortcutKey';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
 import { findAdminShortcut, type AdminShortcut } from '@/lib/admin-shortcuts';
+import { findBrowserReplyDraft, saveBrowserReplyDraft } from '@/lib/admin-reply-drafts';
 import { createFeedbackChanges } from '@/lib/feedback-changes';
 import { FEEDBACK_STATUS_LABELS, FEEDBACK_STATUSES } from '@/lib/feedback-display';
 import type { Feedback, FeedbackStatus, UpdateFeedbackInput } from '@/types/feedback';
@@ -29,12 +30,20 @@ const SAVE_STATUS_MESSAGES: Record<SaveStatus, string> = {
 
 export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, onSave }: FeedbackActionPanelProps) {
   const [status, setStatus] = useState<FeedbackStatus>(feedback.status);
-  const [reply, setReply] = useState(feedback.adminReply ?? '');
+  // A reply typed earlier and not saved comes back, so looking at another feedback does not lose it.
+  const [reply, setReply] = useState(() => findBrowserReplyDraft(feedback) ?? feedback.adminReply ?? '');
+  const [isDraftKept, setIsDraftKept] = useState(true);
   const [duplicateOfId, setDuplicateOfId] = useState(feedback.duplicateOfId ?? '');
   const isSaving = saveStatus === 'saving';
   const isOriginalMissing = status === 'duplicate' && duplicateOfId === '';
   const changes = createFeedbackChanges(feedback, { status, reply, duplicateOfId });
   const isChanged = Object.keys(changes).length > 0;
+  const isReplyUnsaved = changes.adminReply !== undefined;
+
+  function handleReplyChange(nextReply: string) {
+    setReply(nextReply);
+    setIsDraftKept(saveBrowserReplyDraft(feedback, nextReply));
+  }
 
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
     const shortcut = findAdminShortcut(event);
@@ -109,10 +118,17 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
         rows={5}
         disabled={isSaving}
         value={reply}
-        onChange={(event) => setReply(event.target.value)}
+        onChange={(event) => handleReplyChange(event.target.value)}
         placeholder="작성자에게 보여줄 답변을 적어 주세요."
         className="rounded-[10px] border border-(--admin-border) p-3 focus:outline-2 focus:outline-(--admin-primary)"
       />
+      {isReplyUnsaved ? (
+        <p className="text-xs text-(--admin-warning)">
+          {isDraftKept
+            ? '아직 저장하지 않은 답변이에요. 다른 피드백을 보고 와도 이 탭을 닫기 전까지 남아 있어요.'
+            : '아직 저장하지 않은 답변이에요. 이 화면을 벗어나면 사라져요.'}
+        </p>
+      ) : null}
 
       <div className="flex items-center gap-3">
         <button
