@@ -100,23 +100,47 @@ describe('flow recorder', () => {
     }
   });
 
+  it('records a generic element by tag when it has no configured feedback id', () => {
+    const { recorder, completed } = createHarness({
+      isTargetAllowed: (label) => label === 'td',
+      findTarget: () => ({
+        selector: 'html > body > table > tbody > tr > td',
+        feedbackId: null,
+        tagName: 'td',
+        rect: { x: 0, y: 0, width: 100, height: 24 },
+      }),
+    });
+    recorder.start();
+
+    dispatch('click', { target: fakeTarget('unlisted-cell') });
+    recorder.stop();
+
+    expect(completed[0].events).toEqual([
+      { type: 'click', offsetMs: 0, path: '/contracts', targetLabel: 'td' },
+    ]);
+  });
+
   it('restores across reload and document navigation with monotonic offsets despite clock changes', () => {
     const first = createHarness();
     first.recorder.start();
+    const sessionId = first.lastState().sessionId;
+    expect(sessionId).toEqual(expect.any(String));
     clock += 1_000;
     dispatch('click', { target: fakeTarget('save-button') });
 
     clock -= 600;
     vi.spyOn(performance, 'getEntriesByType').mockReturnValue([createFlowNavigationEntry('reload')]);
     const reloaded = createHarness();
-    expect(reloaded.lastState()).toMatchObject({ recording: true, eventCount: 2, storageAvailable: true });
+    expect(reloaded.lastState()).toMatchObject({ recording: true, sessionId, eventCount: 2, storageAvailable: true });
 
     clock += 5_000;
     location.pathname = '/contracts/new';
     vi.spyOn(performance, 'getEntriesByType').mockReturnValue([createFlowNavigationEntry('navigate')]);
     const navigated = createHarness();
+    expect(navigated.lastState().sessionId).toBe(sessionId);
     dispatch('click', { target: fakeTarget('save-button') });
     navigated.recorder.stop();
+    expect(navigated.lastState().sessionId).toBeNull();
 
     expect(first.completed).toHaveLength(0);
     expect(reloaded.completed).toHaveLength(0);

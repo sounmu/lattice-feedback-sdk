@@ -6,12 +6,14 @@ import {
   createReplayTruncatedEvent,
   findCommentPins,
   findEditMoves,
+  findUnshownEditIndexes,
   hasReplayEvents,
   isCapturedScreen,
   isReplayTruncated,
   reconcileScreenMarks,
   REPLAY_TRUNCATED_EVENT_TAG,
 } from '@/lib/screen-snapshot';
+import { createScreenSnapshotInputSchema } from '@/lib/validation/screen-snapshot-schema';
 import type { ScreenCommentPin, ScreenEditMove, ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
 const MOVE: ScreenEditMove = {
@@ -83,6 +85,12 @@ it('drops the marks of deleted comments and edits from a saved screen and renumb
   expect(reconcileScreenMarks(events, { comments: ['comment-9'], edits: [] })).toBeNull();
 });
 
+it('lists the edits a saved screen does not show, by their position in the feedback', () => {
+  expect(findUnshownEditIndexes(3, [{ ...MOVE, number: 2 }])).toEqual([0, 2]);
+  expect(findUnshownEditIndexes(1, [{ ...MOVE, number: 1 }])).toEqual([]);
+  expect(findUnshownEditIndexes(2, [])).toEqual([0, 1]);
+});
+
 it('accepts the page changes of a recorded Flow and tells a replay apart from a still screen', () => {
   const replay = createScreen([{ type: 3, timestamp: 2, data: { source: 2, type: 2, id: 5, x: 10, y: 20 } }]);
   const still = createScreen([]);
@@ -103,4 +111,16 @@ it('accepts the marker of a replay that lost its later part and tells such a rep
   expect(isReplayTruncated(createScreen([change]).events as ScreenSnapshotEvent[])).toBe(false);
   expect(isCapturedScreen(malformed)).toBe(false);
   expect(isReplayTruncated(malformed.events as ScreenSnapshotEvent[])).toBe(false);
+});
+
+it('accepts a Flow that went through several documents, in the SDK guard and on the server, and plays it', () => {
+  const nextPage = (createScreenSnapshotBody().events as ScreenSnapshotEvent[]).map((event) => ({ ...event, timestamp: 5 }));
+  const flow = createScreen([{ type: 3, timestamp: 2, data: { source: 2 } }, ...nextPage, createReplayTruncatedEvent(5)]);
+  const pagesOnly = createScreen(nextPage);
+
+  expect(isCapturedScreen(flow)).toBe(true);
+  expect(createScreenSnapshotInputSchema.safeParse(flow).success).toBe(true);
+  expect(isCapturedScreen(pagesOnly)).toBe(true);
+  expect(createScreenSnapshotInputSchema.safeParse(pagesOnly).success).toBe(true);
+  expect(hasReplayEvents(pagesOnly.events as ScreenSnapshotEvent[])).toBe(true);
 });

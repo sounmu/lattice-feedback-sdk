@@ -91,6 +91,9 @@ export const createScreenSnapshotInputSchema = z.object({
       editMoveEventSchema,
       replayTruncatedEventSchema,
       createEventSchema(RRWEB_INCREMENTAL_EVENT_TYPE),
+      // A Flow that went through several documents carries a Meta and FullSnapshot pair for each.
+      createEventSchema(RRWEB_META_EVENT_TYPE),
+      createEventSchema(RRWEB_FULL_SNAPSHOT_EVENT_TYPE),
     ]))
     // One more for the truncation marker a cut-off replay ends with.
     .refine((events) => events.length <= 2 + MAX_SCREEN_MARK_EVENTS + MAX_REPLAY_EVENTS + 1, { message: 'too many events' }),

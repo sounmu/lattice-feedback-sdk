@@ -15,9 +15,18 @@ import {
 } from '@/components/admin/ScreenMarkOverlay';
 import { MAX_REPLAY_DURATION_MS } from '@/lib/feedback-limits';
 import { GZIP_MEDIA_TYPE, isGzipBody, isGzipSupported } from '@/lib/gzip';
+import {
+  findAdjacentStep,
+  findReplaySteps,
+  getCurrentStepIndex,
+  getViewportAt,
+  type ReplayStep,
+  type ReplayStepKind,
+} from '@/lib/screen-preview';
 import { findCommentPins, findEditMoves, hasReplayEvents, isReplayTruncated } from '@/lib/screen-snapshot';
 import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
 import type {
+  CapturedScreen,
   MissingSnapshotAssetReason,
   ScreenCommentPin,
   ScreenEditMove,
@@ -35,7 +44,7 @@ const ADMIN_TOKEN_STORAGE_KEY = 'lattice-feedback:admin-token';
 const ADMIN_TOKEN_EVENT = 'lattice-feedback:admin-token-change';
 const BUTTON_CLASS = 'min-h-11 rounded border bg-white px-3 py-2 text-sm aria-pressed:bg-gray-900 aria-pressed:text-white';
 const REPLAY_TRUNCATED_MESSAGE =
-  `기록 한도(${MAX_REPLAY_DURATION_MS / 60_000}분·이벤트 수)를 넘었거나 허용되지 않은 페이지로 이동해 뒷부분이 재생에 포함되지 않았습니다.`;
+  `기록 한도(${MAX_REPLAY_DURATION_MS / 60_000}분·이벤트 수), 페이지 제한 또는 저장 중단으로 일부 구간이 재생에 포함되지 않았습니다.`;
 
 const MISSING_ASSET_REASON_LABELS: Record<MissingSnapshotAssetReason, string> = {
   fetch_failed: '가져오지 못함',
@@ -97,7 +106,10 @@ function scrollSavedScreen(frame: HTMLIFrameElement, event: WheelEvent): void {
   }
   const bounds = frame.getBoundingClientRect();
   const scale = bounds.width / frame.clientWidth;
-  let target = frameDocument.elementFromPoint((event.clientX - bounds.left) / scale, (event.clientY - bounds.top) / scale);
+  const x = (event.clientX - bounds.left) / scale;
+  const y = (event.clientY - bounds.top) / scale;
+  // Before the page is laid out the frame has no width, so there is no point to look up.
+  let target = Number.isFinite(x) && Number.isFinite(y) ? frameDocument.elementFromPoint(x, y) : null;
   while (target && !canScroll(target)) {
     target = target.parentElement;
   }
@@ -341,12 +353,26 @@ interface ReplayControlsProps {
   isPlaying: boolean;
   currentMs: number;
   totalMs: number;
+  steps: ReplayStep[];
   onPlay: () => void;
   onPause: () => void;
   onSeek: (milliseconds: number) => void;
+  onStep: (milliseconds: number) => void;
 }
 
-function ReplayControls({ isPlaying, currentMs, totalMs, onPlay, onPause, onSeek }: ReplayControlsProps) {
+const REPLAY_STEP_LABELS: Record<ReplayStepKind, string> = {
+  start: '시작',
+  screen: '화면 전환',
+  click: '클릭',
+  input: '입력',
+  scroll: '스크롤',
+};
+const STEP_BUTTON_CLASS = `${BUTTON_CLASS} disabled:opacity-50`;
+
+function ReplayControls({ isPlaying, currentMs, totalMs, steps, onPlay, onPause, onSeek, onStep }: ReplayControlsProps) {
+  const stepIndex = getCurrentStepIndex(steps, currentMs);
+  const previousStep = findAdjacentStep(steps, currentMs, 'previous');
+  const nextStep = findAdjacentStep(steps, currentMs, 'next');
   return (
     <div className="flex flex-wrap items-center gap-2" aria-label="흐름 재생">
       <button type="button" className={BUTTON_CLASS} onClick={isPlaying ? onPause : onPlay}>
@@ -355,13 +381,32 @@ function ReplayControls({ isPlaying, currentMs, totalMs, onPlay, onPause, onSeek
       <button type="button" className={BUTTON_CLASS} onClick={() => onSeek(0)}>
         처음부터
       </button>
+      <button
+        type="button"
+        className={STEP_BUTTON_CLASS}
+        disabled={!previousStep}
+        onClick={() => previousStep && onStep(previousStep.atMs)}
+      >
+        이전 단계
+      </button>
+      <button
+        type="button"
+        className={STEP_BUTTON_CLASS}
+        disabled={!nextStep}
+        onClick={() => nextStep && onStep(nextStep.atMs)}
+      >
+        다음 단계
+      </button>
+      <span className="text-xs text-gray-600">
+        단계 {stepIndex + 1}/{steps.length} · {REPLAY_STEP_LABELS[steps[stepIndex].kind]}
+      </span>
       <input
         type="range"
         aria-label="재생 위치"
         className="min-w-48 flex-1"
         min={0}
         max={Math.max(totalMs, 1)}
-        step={100}
+        step={1}
         value={Math.min(currentMs, totalMs)}
         onChange={(event) => onSeek(Number(event.target.value))}
       />
@@ -369,7 +414,7 @@ function ReplayControls({ isPlaying, currentMs, totalMs, onPlay, onPause, onSeek
         {formatPlaybackTime(currentMs)} / {formatPlaybackTime(totalMs)}
       </span>
       <span className="w-full text-xs text-gray-600">
-        흐름 기록 동안의 화면 변화를 재생합니다. 입력값은 가려져 있으며, 새로고침·페이지 이동 전의 구간은 포함되지 않습니다.
+        기록한 조작과 페이지 이동 전후의 화면을 재생합니다. 입력값은 가려져 있습니다.
       </span>
     </div>
   );
@@ -406,9 +451,15 @@ function AdminTokenForm() {
 }
 
 interface ScreenReplayProps {
-  snapshot: ScreenSnapshot;
-  projectKey: string;
-  token: string;
+  /** A saved screen, or one captured in this browser and not sent yet. */
+  screen: Pick<CapturedScreen, 'events' | 'page'>;
+  /**
+   * A URL for each asset file of the screen, in order; null for a file that could not be loaded. The
+   * replay revokes them when it closes. Keep the function's identity stable: a new one rebuilds the page.
+   */
+  loadAssetUrls: () => Promise<(string | null)[]>;
+  /** Opens with edited elements already at their proposed position. */
+  initiallyShowsProposed?: boolean;
 }
 
 // A long Flow replay arrives as a gzip file, because the platform limits how large a response may be.
@@ -421,6 +472,28 @@ async function readSnapshotResponse(response: Response): Promise<ScreenSnapshotD
 }
 
 // Asset files need the admin token, so they are fetched here and handed to the replay as blob: URLs.
+export type SavedScreenResult = { snapshot: ScreenSnapshot } | { status: number };
+
+/** Reads one saved screen with the admin token. Status 0 means the request never reached the server. */
+export async function fetchSavedScreen(id: string, projectKey: string, token: string, signal?: AbortSignal): Promise<SavedScreenResult> {
+  try {
+    const response = await fetch(`/api/snapshots/${encodeURIComponent(id)}?projectKey=${encodeURIComponent(projectKey)}`, {
+      headers: { authorization: `Bearer ${token}`, accept: isGzipSupported() ? GZIP_MEDIA_TYPE : 'application/json' },
+      signal,
+    });
+    if (!response.ok) {
+      return { status: response.status };
+    }
+    const body = await readSnapshotResponse(response);
+    return { snapshot: body.snapshot };
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    return { status: 0 };
+  }
+}
+
 async function fetchAssetUrl(hash: string, projectKey: string, token: string): Promise<string | null> {
   try {
     const response = await fetch(`/api/snapshots/assets/${hash}?projectKey=${encodeURIComponent(projectKey)}`, {
@@ -435,27 +508,31 @@ async function fetchAssetUrl(hash: string, projectKey: string, token: string): P
   }
 }
 
-function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
+// Shared by the admin viewer and the widget's preview. It only draws what it is handed: reading a saved
+// screen from the server, and the admin token that needs, stay with the caller.
+export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = false }: ScreenReplayProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [unloadedAssetCount, setUnloadedAssetCount] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
-  const { viewportWidth, viewportHeight } = snapshot.page;
-  const pins = useMemo(() => findCommentPins(snapshot.events), [snapshot]);
-  const moves = useMemo(() => findEditMoves(snapshot.events), [snapshot]);
+  const pins = useMemo(() => findCommentPins(screen.events), [screen]);
+  const moves = useMemo(() => findEditMoves(screen.events), [screen]);
   const [pinBoxes, setPinBoxes] = useState<PinBox[]>([]);
   const [moveBoxes, setMoveBoxes] = useState<MoveBox[]>([]);
   const [selectedPin, setSelectedPin] = useState<number | null>(null);
   const [showsProposed, setShowsProposed] = useState(false);
   const replayerRef = useRef<Replayer | null>(null);
-  const isReplay = useMemo(() => hasReplayEvents(snapshot.events), [snapshot]);
-  const isTruncated = useMemo(() => isReplayTruncated(snapshot.events), [snapshot]);
+  const isReplay = useMemo(() => hasReplayEvents(screen.events), [screen]);
+  const isTruncated = useMemo(() => isReplayTruncated(screen.events), [screen]);
+  const steps = useMemo(() => findReplaySteps(screen.events), [screen]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [totalMs, setTotalMs] = useState(0);
   const progressFrame = useRef<number | null>(null);
   const showsProposedRef = useRef(false);
+  // A recorded Flow can cross pages and window sizes, so its stage follows the size at the current moment.
+  const { viewportWidth, viewportHeight } = isReplay ? getViewportAt(screen.events, currentMs, screen.page) : screen.page;
 
   const measureMarks = useCallback(() => {
     const replayer = replayerRef.current;
@@ -519,6 +596,18 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
     setCurrentMs(milliseconds);
   }
 
+  // Stepping is for looking at one moment, so it also stops the playback there.
+  function stepTo(milliseconds: number) {
+    const replayer = replayerRef.current;
+    if (!replayer) {
+      return;
+    }
+    replayer.pause(milliseconds + 1);
+    stopProgress();
+    setIsPlaying(false);
+    setCurrentMs(milliseconds);
+  }
+
   function toggleProposed() {
     const next = !showsProposedRef.current;
     showsProposedRef.current = next;
@@ -562,6 +651,10 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
       frameDocument = replayer?.iframe.contentDocument ?? null;
       frameDocument?.addEventListener('scroll', measurePins, { capture: true, passive: true });
+      // A rebuilt page has no clones yet, so a proposal that is shown is drawn again on it.
+      if (replayer && showsProposedRef.current) {
+        showProposedPositions(replayer, moves, true);
+      }
       void frameDocument?.fonts.ready.then(measurePins);
       measurePins();
     }
@@ -577,7 +670,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       // Loaded in the browser only: rrweb expects a DOM when its module is evaluated.
       const [{ Replayer: ReplayerClass }, urls] = await Promise.all([
         import('@rrweb/replay'),
-        Promise.all(snapshot.assetHashes.map((hash) => fetchAssetUrl(hash, projectKey, token))),
+        loadAssetUrls(),
       ]);
       assetUrls = urls;
       if (isCancelled) {
@@ -586,7 +679,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       }
       setUnloadedAssetCount(urls.filter((url) => url === null).length);
       const events = JSON.parse(
-        resolveAssetReferences(JSON.stringify(snapshot.events), (index) => urls[index] ?? null),
+        resolveAssetReferences(JSON.stringify(screen.events), (index) => urls[index] ?? null),
       ) as ReplayerEvents;
       // rrweb strips scripts and rebuilds into an iframe sandboxed without allow-scripts.
       replayer = new ReplayerClass(events, {
@@ -613,7 +706,9 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
         setCurrentMs(0);
         setIsPlaying(false);
       }
-      showsProposedRef.current = false;
+      const showsProposedAtStart = initiallyShowsProposed && moves.length > 0;
+      showsProposedRef.current = showsProposedAtStart;
+      setShowsProposed(showsProposedAtStart);
       if (hasMarks) {
         followMarks();
       }
@@ -631,7 +726,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [snapshot, projectKey, token, pins, moves, measureMarks, isReplay]);
+  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -642,7 +737,16 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
   return (
     <div className="flex flex-col gap-2">
       {isReplay && (
-        <ReplayControls isPlaying={isPlaying} currentMs={currentMs} totalMs={totalMs} onPlay={play} onPause={pause} onSeek={seek} />
+        <ReplayControls
+          isPlaying={isPlaying}
+          currentMs={currentMs}
+          totalMs={totalMs}
+          steps={steps}
+          onPlay={play}
+          onPause={pause}
+          onSeek={seek}
+          onStep={stepTo}
+        />
       )}
       {isTruncated && (
         <p role="alert" className="text-xs text-amber-700">
@@ -696,6 +800,21 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
   );
 }
 
+interface AdminScreenReplayProps extends Pick<ScreenReplayProps, 'initiallyShowsProposed'> {
+  snapshot: ScreenSnapshot;
+  projectKey: string;
+  token: string;
+}
+
+// The saved files are read with the admin token here, so the shared replay never sees it.
+export function AdminScreenReplay({ snapshot, projectKey, token, initiallyShowsProposed }: AdminScreenReplayProps) {
+  const loadAssetUrls = useCallback(
+    () => Promise.all(snapshot.assetHashes.map((hash) => fetchAssetUrl(hash, projectKey, token))),
+    [snapshot, projectKey, token],
+  );
+  return <ScreenReplay screen={snapshot} loadAssetUrls={loadAssetUrls} initiallyShowsProposed={initiallyShowsProposed} />;
+}
+
 function ScreenSnapshotDetails({ snapshot }: { snapshot: ScreenSnapshot }) {
   const { page, missingAssets } = snapshot;
   return (
@@ -734,26 +853,10 @@ export function ScreenSnapshotViewer() {
     }
     const controller = new AbortController();
 
-    async function load() {
-      try {
-        const response = await fetch(`/api/snapshots/${encodeURIComponent(id)}?projectKey=${encodeURIComponent(projectKey)}`, {
-          headers: { authorization: `Bearer ${token}`, accept: isGzipSupported() ? GZIP_MEDIA_TYPE : 'application/json' },
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          setResult({ key: requestKey, status: response.status });
-          return;
-        }
-        const body = await readSnapshotResponse(response);
-        setResult({ key: requestKey, snapshot: body.snapshot });
-      } catch {
-        if (!controller.signal.aborted) {
-          setResult({ key: requestKey, status: 0 });
-        }
-      }
-    }
-
-    void load();
+    fetchSavedScreen(id, projectKey, token, controller.signal).then(
+      (loaded) => setResult({ key: requestKey, ...loaded }),
+      () => undefined,
+    );
     return () => controller.abort();
   }, [id, projectKey, token, requestKey]);
 
@@ -777,7 +880,7 @@ export function ScreenSnapshotViewer() {
     return (
       <>
         <ScreenSnapshotDetails snapshot={result.snapshot} />
-        <ScreenReplay snapshot={result.snapshot} projectKey={projectKey} token={token} />
+        <AdminScreenReplay snapshot={result.snapshot} projectKey={projectKey} token={token} />
       </>
     );
   }

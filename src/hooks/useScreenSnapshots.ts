@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ScreenCaptureResult } from '@/hooks/useHostBridge';
 import { addMarkedScreen, type MarkedScreens } from '@/lib/marked-screens';
 import { isCaptureCurrent, type CaptureSource } from '@/lib/screen-capture-generation';
+import { keepListedCaptures } from '@/lib/screen-preview';
 import { findCommentPins, findEditMoves, isReplayTruncated, reconcileScreenMarks, type LiveMarkKeys } from '@/lib/screen-snapshot';
 import {
   MAX_SCREEN_SNAPSHOT_BYTES,
@@ -35,11 +36,11 @@ interface UseScreenSnapshotsOptions {
 
 // An SDK build without screen saving never answers, so the request must not wait forever.
 const CAPTURE_TIMEOUT_MS = 30_000;
-const SAVE_FAILED_MESSAGE = '화면을 저장하지 못했습니다. 다시 시도해 주세요.';
-const PAGE_NOT_ALLOWED_MESSAGE = '이 페이지에서는 화면을 저장할 수 없습니다.';
+const SAVE_FAILED_MESSAGE = '화면을 저장하지 못했어요. 다시 시도해 주세요.';
+const PAGE_NOT_ALLOWED_MESSAGE = '이 페이지에서는 화면을 저장할 수 없어요.';
 const PAYLOAD_TOO_LARGE_STATUS = 413;
-const FLOW_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 흐름 재생을 저장하지 못했습니다.';
-const MARKED_SCREEN_FULL_MESSAGE = '저장할 수 있는 화면 수를 넘어 코멘트·편집 위치를 화면에 표시하지 못했습니다.';
+const FLOW_SCREEN_FULL_MESSAGE = `저장한 화면이 ${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}개라 흐름 재생을 저장하지 못했어요. 필요 없는 화면을 지워 주세요.`;
+const MARKED_SCREEN_FULL_MESSAGE = `저장한 화면이 ${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}개라 위치를 화면에 표시하지 못했어요. 필요 없는 화면을 지워 주세요.`;
 
 function findMarkKeys(events: readonly ScreenSnapshotEvent[]): string[] {
   return [...findCommentPins(events).map((pin) => pin.key), ...findEditMoves(events).map((move) => move.key)];
@@ -120,13 +121,13 @@ async function uploadAssetFiles(
 function getUploadErrorMessage(status: number): string {
   switch (status) {
     case PAYLOAD_TOO_LARGE_STATUS:
-      return '화면이 너무 커서 저장할 수 없습니다.';
+      return '화면이 너무 커서 저장할 수 없어요.';
     case 403:
       return PAGE_NOT_ALLOWED_MESSAGE;
     case 429:
-      return '화면을 너무 자주 저장했습니다. 잠시 후 다시 시도해 주세요.';
+      return '화면을 너무 자주 저장했어요. 잠시 후 다시 시도해 주세요.';
     case 503:
-      return '화면 저장소를 사용할 수 없습니다. 화면 없이도 피드백을 보낼 수 있습니다.';
+      return '지금은 화면을 저장할 수 없어요. 화면 없이도 보낼 수 있어요.';
     default:
       return SAVE_FAILED_MESSAGE;
   }
@@ -167,6 +168,10 @@ export function useScreenSnapshots({
   const markedScreenIds = useMemo(() => new Set(marksByScreen.keys()), [marksByScreen]);
   // Uploads finish asynchronously, so they read and write the latest screens through this ref.
   const screensRef = useRef(screens);
+  // What each listed screen was saved from, kept in this browser so the reporter can look at it before
+  // sending. It is dropped together with its screen.
+  const [captures, setCaptures] = useState<ReadonlyMap<string, ScreenCapture>>(new Map());
+  const capturesRef = useRef(captures);
   const [pendingCount, setPendingCount] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -200,6 +205,14 @@ export function useScreenSnapshots({
         savedMarkedScreens.current.delete(id);
       }
     }
+    // A screen that left the draft lets go of its events and files.
+    capturesRef.current = keepListedCaptures(capturesRef.current, next.snapshots);
+    setCaptures(capturesRef.current);
+  }
+
+  // Called just before the screen is committed, so a capture is never kept for a screen that is not listed.
+  function keepCapture(id: string, capture: ScreenCapture) {
+    capturesRef.current = new Map(capturesRef.current).set(id, capture);
   }
 
   function isJobCurrent(job: UploadJob, jobGeneration: number): boolean {
@@ -242,6 +255,7 @@ export function useScreenSnapshots({
     if (source === 'marks') {
       savedMarkedScreens.current.set(created.id, { screen: pinnedScreen, assetHashes });
     }
+    keepCapture(created.id, { screen: pinnedScreen, assetFiles });
     commitScreens(next);
   }
 
@@ -273,6 +287,11 @@ export function useScreenSnapshots({
       const marks = new Map([...latest.marksByScreen].filter(([screenId]) => screenId !== id));
       marks.set(created.id, findMarkKeys(screen.events));
       savedMarkedScreens.current.set(created.id, { screen, assetHashes: saved.assetHashes });
+      // The screen saved again shows the remaining marks; its files are the same ones.
+      const capture = capturesRef.current.get(id);
+      if (capture) {
+        keepCapture(created.id, { screen, assetFiles: capture.assetFiles });
+      }
       commitScreens({
         snapshots: latest.snapshots.map((snapshot) => (snapshot.id === id ? created : snapshot)),
         marksByScreen: marks,
@@ -446,6 +465,6 @@ export function useScreenSnapshots({
   }, []);
 
   return {
-    snapshots, markedScreenIds, flowScreenIds, truncatedFlowScreenIds, captureFlow, removeFlowScreens, status, errorMessage, canCapture, capture, captureForMarks, syncMarkKeys, remove, reset,
+    snapshots, captures, markedScreenIds, flowScreenIds, truncatedFlowScreenIds, captureFlow, removeFlowScreens, status, errorMessage, canCapture, capture, captureForMarks, syncMarkKeys, remove, reset,
   };
 }

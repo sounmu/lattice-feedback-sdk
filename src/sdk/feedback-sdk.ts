@@ -53,7 +53,9 @@ export class FeedbackSdk {
       return;
     }
     this.projectKey = projectKey;
-    this.capturePolicy = findCapturePolicy(options.capturePolicy);
+    this.capturePolicy = options.capturePolicy === undefined
+      ? null
+      : findCapturePolicy(options.capturePolicy) ?? { allowedPaths: [], targets: [] };
     window.addEventListener('message', this.handleMessage);
     this.stopHistoryTracking = trackHistory(this.handleNavigation);
     if (document.body) {
@@ -273,12 +275,12 @@ export class FeedbackSdk {
   }
 
   private async saveFlowReplay(requestId: string): Promise<void> {
-    const replay = this.captureController?.takeFlowReplay() ?? null;
-    if (!replay) {
-      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
-      return;
-    }
     try {
+      const replay = await this.captureController?.takeFlowReplay();
+      if (!replay) {
+        this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
+        return;
+      }
       this.postToWidget(createHostToWidgetMessage('screen:captured', { ...(await captureRecording(replay, HOST_ELEMENT_TAG_NAME)), requestId }));
     } catch (error) {
       console.warn(`${LOG_PREFIX} Saving the Flow replay failed.`, error);

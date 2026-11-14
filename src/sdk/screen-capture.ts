@@ -16,7 +16,6 @@ import {
   createEditMoveEvent,
   createReplayTruncatedEvent,
   RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
-  RRWEB_INCREMENTAL_EVENT_TYPE,
   RRWEB_META_EVENT_TYPE,
   SCREEN_SNAPSHOT_FORMAT,
 } from '@/lib/screen-snapshot';
@@ -26,8 +25,7 @@ import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { ReplayRecording } from '@/sdk/flow-replay-recorder';
-import { createReplayAssetRoot } from '@/sdk/replay-assets';
-import { sanitizeReplayEvents, trimReplayStart } from '@/sdk/replay-sanitize';
+import { createSegmentedReplayAssetRoot } from '@/sdk/replay-assets';
 import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
 
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
@@ -151,16 +149,9 @@ export async function captureScreen(
     scrollX: page.scrollX,
     scrollY: page.scrollY,
   });
-  const loadedFontFamilies = new Set<string>();
-  document.fonts.forEach((fontFace) => {
-    if (fontFace.status === 'loaded') {
-      loadedFontFamilies.add(normalizeFontFamily(fontFace.family));
-    }
-  });
-
   const { assetFiles, missingAssets } = await extractSnapshotAssets(node, {
     pageOrigin: window.location.origin,
-    loadedFontFamilies,
+    loadedFontFamilies: findLoadedFontFamilies(),
     usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
     fetchAsset: fetchSameOriginAsset,
     maxDurationMs: ASSET_COLLECTION_DURATION_MS,
@@ -199,7 +190,8 @@ export async function captureScreen(
   return { screen, assetFiles };
 }
 
-function findLoadedFontFamilies(): Set<string> {
+/** Normalized families of the fonts the current document has loaded. */
+export function findLoadedFontFamilies(): Set<string> {
   const families = new Set<string>();
   document.fonts.forEach((fontFace) => {
     if (fontFace.status === 'loaded') {
@@ -210,28 +202,23 @@ function findLoadedFontFamilies(): Set<string> {
 }
 
 /**
- * Turns a recorded Flow into a saved screen: its first full snapshot plus the page changes after it.
- * The same exclusions as a still screen are applied to every recorded node and attribute change, and the
- * fonts and images they refer to are pulled out as files. A recording that lost its later part ends with a
- * marker event.
+ * Turns a recorded Flow into a saved screen: for each document it went through, the full snapshot and the
+ * page changes after it, in order. The same exclusions as a still screen were applied as each event was
+ * recorded; here the fonts and images they refer to are pulled out as files. A marker event stands where
+ * recorded events were lost, and at the end of a recording that lost its later part.
  */
 export async function captureRecording(recording: ReplayRecording, sdkSelector: string): Promise<ScreenCapture> {
-  const [meta, full, ...rest] = trimReplayStart(recording.events, recording.page.url);
-  if (meta?.type !== RRWEB_META_EVENT_TYPE || full?.type !== RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
-    throw new Error('The recording does not start with a full snapshot.');
-  }
-  // A later Meta or FullSnapshot (a checkout) is not expected; only the changes are kept after the first pair.
-  const events = [meta, full, ...rest.filter((event) => event.type === RRWEB_INCREMENTAL_EVENT_TYPE)];
-  const elements = sanitizeReplayEvents(events);
+  const { segments } = recording;
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
-  const assetRoot = createReplayAssetRoot(events, elements);
+  const assetRoot = createSegmentedReplayAssetRoot(segments);
   const { assetFiles, missingAssets } = await extractSnapshotAssets(assetRoot.root, {
     pageOrigin: window.location.origin,
-    loadedFontFamilies: findLoadedFontFamilies(),
-    // Images the page showed while recording count too, not only those still shown at the end.
-    usedCssImageUrls: new Set([...recording.usedCssImageUrls, ...findUsedCssImageUrls(excludedSelector)]),
+    // Fonts of every document the Flow went through, not only of the one it ended on.
+    loadedFontFamilies: new Set([...segments.flatMap((segment) => segment.loadedFontFamilies), ...findLoadedFontFamilies()]),
+    // Images the pages showed while recording count too, not only those still shown at the end.
+    usedCssImageUrls: new Set([...segments.flatMap((segment) => segment.usedCssImageUrls), ...findUsedCssImageUrls(excludedSelector)]),
     // As for a saved screen, the file the browser chose from srcset or <picture> is the one kept.
-    findLiveImage: (serialized) => (serialized.id === undefined ? null : recording.liveImageSources.get(serialized.id) ?? null),
+    findLiveImage: (serialized) => assetRoot.liveImages.get(serialized) ?? null,
     fetchAsset: fetchSameOriginAsset,
     maxDurationMs: ASSET_COLLECTION_DURATION_MS,
     matchesMedia: (query) => window.matchMedia(query).matches,
@@ -240,6 +227,10 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
     maxAssetCount: MAX_SNAPSHOT_ASSETS,
   });
   assetRoot.applyRewrites();
+  const events = segments.flatMap(({ events: [meta, full, ...changes], gapBefore }) => {
+    const marker = gapBefore ? [createReplayTruncatedEvent(full.timestamp)] : [];
+    return [meta, full, ...marker, ...changes];
+  });
   if (recording.truncated) {
     events.push(createReplayTruncatedEvent(events[events.length - 1].timestamp));
   }

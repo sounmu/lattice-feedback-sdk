@@ -4,6 +4,8 @@ import { createCaptureCommand } from '@/lib/capture-protocol';
 import type { CapturePolicy } from '@/lib/capture-policy';
 import type { ElementSelectionOptions } from '@/sdk/element-selection';
 import type { ElementDragOptions } from '@/sdk/element-drag';
+import type { CommentEditorCallbacks } from '@/sdk/comment-overlay';
+import type { ReplaySession } from '@/sdk/flow-replay-recorder';
 import type { FlowRecorderOptions } from '@/sdk/flow-recorder';
 import type { CaptureState } from '@/types/sdk-message';
 import type { FlowAttachment } from '@/types/feedback';
@@ -11,11 +13,20 @@ import type { FlowAttachment } from '@/types/feedback';
 const engines = vi.hoisted(() => ({
   select: vi.fn(), drag: vi.fn(), flow: vi.fn(), render: vi.fn(), removeStatus: vi.fn(),
   cancelSelection: vi.fn(), cancelDrag: vi.fn(), destroyFlow: vi.fn(), replay: vi.fn(),
+  renderPins: vi.fn(), openEditor: vi.fn(), closeEditor: vi.fn(), destroyComments: vi.fn(),
 }));
 vi.mock('@/sdk/element-selection', () => ({ startElementSelection: engines.select }));
 vi.mock('@/sdk/element-drag', () => ({ startElementDrag: engines.drag }));
 vi.mock('@/sdk/flow-recorder', () => ({ createFlowRecorder: engines.flow }));
 vi.mock('@/sdk/flow-replay-recorder', () => ({ startReplayRecording: engines.replay }));
+vi.mock('@/sdk/comment-overlay', () => ({
+  createCommentOverlay: () => ({
+    renderPins: engines.renderPins,
+    openEditor: engines.openEditor,
+    closeEditor: engines.closeEditor,
+    destroy: engines.destroyComments,
+  }),
+}));
 vi.mock('@/sdk/capture-status', () => ({
   createCaptureStatus: () => ({ render: engines.render, destroy: engines.removeStatus }),
 }));
@@ -25,21 +36,32 @@ const FLOW: FlowAttachment = { startedAt: '2026-11-12T12:00:00Z', endedAt: '2026
 let selectionOptions: ElementSelectionOptions | undefined;
 let dragOptions: ElementDragOptions | undefined;
 let restoredFlow = false;
+let commentCallbacks: CommentEditorCallbacks | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
   selectionOptions = undefined;
   dragOptions = undefined;
   restoredFlow = false;
+  commentCallbacks = undefined;
+  engines.openEditor.mockImplementation((_target, _point, callbacks: CommentEditorCallbacks) => {
+    commentCallbacks = callbacks;
+  });
   vi.stubGlobal('window', { location: { pathname: '/' } });
   vi.stubGlobal('document', { createElement: () => ({ attachShadow: () => ({}) }) });
   engines.select.mockImplementation((options: ElementSelectionOptions) => {
     selectionOptions = options;
     return { cancel: engines.cancelSelection };
   });
-  engines.replay.mockImplementation(() => {
-    const replay = { startedAt: '2026-11-13T00:00:00.000Z', page: {}, events: [{}, {}], truncated: false };
-    return { stop: () => replay, cutOff: () => ({ ...replay, truncated: true }), discard: vi.fn() };
+  engines.replay.mockImplementation((_selector, session: ReplaySession) => {
+    const replay = {
+      startedAt: '2026-11-13T00:00:00.000Z', page: {}, segments: [{ events: [{}, {}] }], truncated: false,
+    };
+    return {
+      stop: async () => session.recordPage ? replay : null,
+      cutOff: () => { replay.truncated = true; },
+      discard: vi.fn(),
+    };
   });
   engines.drag.mockImplementation((_selection, options: ElementDragOptions) => {
     dragOptions = options;
@@ -47,7 +69,8 @@ beforeEach(() => {
   });
   engines.flow.mockImplementation((options: FlowRecorderOptions) => {
     const state = (recording: boolean) => options.onStateChange({
-      recording, eventCount: 0, storageAvailable: true, errorMessage: null,
+      recording, sessionId: recording ? 'flow-test-session' : null,
+      eventCount: 0, storageAvailable: true, errorMessage: null,
     });
     state(restoredFlow);
     return {
@@ -121,6 +144,28 @@ it('keeps the live element of each comment for pinning on saved screens', () => 
   controller.destroy();
 });
 
+it('adds comments from the page editor and stays ready to select another element', () => {
+  const { controller, states } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'comment' } }));
+
+  for (const comment of ['first remark', 'second remark']) {
+    selectTarget();
+    if (!commentCallbacks) throw new Error('The on-page editor did not open.');
+    commentCallbacks.onSubmit(comment);
+  }
+
+  expect(states.at(-1)?.attachments.comments.map(({ comment }) => comment)).toEqual(['first remark', 'second remark']);
+  expect(states.at(-1)?.activeMode).toBe('comment');
+  expect(controller.getCommentPinSources().map(({ number, comment }) => ({ number, comment }))).toEqual([
+    { number: 1, comment: 'first remark' },
+    { number: 2, comment: 'second remark' },
+  ]);
+  controller.cancelTransient();
+  expect(states.at(-1)?.attachments.comments).toHaveLength(2);
+  controller.destroy();
+  expect(engines.destroyComments).toHaveBeenCalledOnce();
+});
+
 it('keeps the dragged element of each edit for marking on saved screens', () => {
   const { controller } = createHarness();
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'edit' } }));
@@ -181,22 +226,22 @@ it('publishes Flow completion atomically without a submit-ready empty attachment
   controller.destroy();
 });
 
-it('keeps the replay of a completed Flow for one save and drops it on cancel', () => {
+it('keeps the replay of a completed Flow for one save and drops it on cancel', async () => {
   const { controller } = createHarness();
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
   controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
 
-  expect(controller.takeFlowReplay()?.events).toHaveLength(2);
-  expect(controller.takeFlowReplay()).toBeNull();
+  expect((await controller.takeFlowReplay())?.segments[0].events).toHaveLength(2);
+  expect(await controller.takeFlowReplay()).toBeNull();
 
   controller.handleCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind: 'flow', index: 0 } }));
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
   controller.handleCommand(createCaptureCommand({ type: 'capture:cancel', payload: {} }));
-  expect(controller.takeFlowReplay()).toBeNull();
+  expect(await controller.takeFlowReplay()).toBeNull();
   controller.destroy();
 });
 
-it('cuts the replay off on a page the policy leaves out and still hands it over when the Flow completes', () => {
+it('cuts the replay off on a page the policy leaves out and still hands it over when the Flow completes', async () => {
   const { controller } = createHarness();
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
   visit('/orders');
@@ -205,22 +250,22 @@ it('cuts the replay off on a page the policy leaves out and still hands it over 
   controller.pageChanged();
   controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
 
-  expect(controller.takeFlowReplay()?.truncated).toBe(true);
+  expect((await controller.takeFlowReplay())?.truncated).toBe(true);
   expect(engines.replay).toHaveBeenCalledOnce();
   controller.destroy();
 });
 
-it('keeps the replay whole across page changes the policy allows', () => {
+it('keeps the replay whole across page changes the policy allows', async () => {
   const { controller } = createHarness();
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
   controller.pageChanged();
   controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
 
-  expect(controller.takeFlowReplay()?.truncated).toBe(false);
+  expect((await controller.takeFlowReplay())?.truncated).toBe(false);
   controller.destroy();
 });
 
-it('records no replay for a Flow restored on a page the policy leaves out, even back on an allowed page', () => {
+it('restores earlier replay data without recording a disallowed document', async () => {
   restoredFlow = true;
   visit('/orders');
   const { controller } = createHarness();
@@ -228,16 +273,19 @@ it('records no replay for a Flow restored on a page the policy leaves out, even 
   controller.pageChanged();
   controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
 
-  expect(engines.replay).not.toHaveBeenCalled();
-  expect(controller.takeFlowReplay()).toBeNull();
+  expect(engines.replay).toHaveBeenCalledExactlyOnceWith('lattice-feedback-root', {
+    projectKey: 'demo', sessionId: 'flow-test-session', resumed: true, recordPage: false,
+  });
+  expect(await controller.takeFlowReplay()).toBeNull();
   controller.destroy();
 });
 
-it('rejects capture without a policy and ignores commands after destroy', () => {
+it('allows capture without an explicit policy and ignores commands after destroy', () => {
   const { controller, states } = createHarness(null);
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'comment' } }));
-  expect(states.at(-1)?.enabled).toBe(false);
-  expect(engines.select).not.toHaveBeenCalled();
+  expect(states.at(-1)?.enabled).toBe(true);
+  expect(states.at(-1)?.activeMode).toBe('comment');
+  expect(engines.select).toHaveBeenCalledOnce();
   controller.destroy();
   const count = states.length;
   controller.sync();

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getFeedbackDetail, updateFeedback } from '@/lib/admin-api';
 import { findAdminLoadStatus, type AdminLoadStatus } from '@/lib/admin-load-status';
@@ -22,6 +22,13 @@ interface UseFeedbackDetailInput {
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed';
 
+interface SaveState {
+  /** Which project, token and feedback this save was made for. */
+  requestKey: string;
+  status: SaveStatus;
+  errorMessage: string;
+}
+
 interface UseFeedbackDetailResult {
   status: AdminLoadStatus;
   detail: FeedbackDetailResponse | null;
@@ -33,9 +40,13 @@ interface UseFeedbackDetailResult {
 
 export function useFeedbackDetail({ projectKey, token, id }: UseFeedbackDetailInput): UseFeedbackDetailResult {
   const [state, setState] = useState<FeedbackDetailState | null>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const [saveErrorMessage, setSaveErrorMessage] = useState('');
+  const [saveState, setSaveState] = useState<SaveState | null>(null);
   const requestKey = JSON.stringify([projectKey, token, id]);
+  const latestRequestKey = useRef(requestKey);
+
+  useEffect(() => {
+    latestRequestKey.current = requestKey;
+  }, [requestKey]);
 
   useEffect(() => {
     if (!token) {
@@ -59,16 +70,18 @@ export function useFeedbackDetail({ projectKey, token, id }: UseFeedbackDetailIn
 
   const save = useCallback(
     async (changes: UpdateFeedbackInput): Promise<boolean> => {
-      setSaveStatus('saving');
+      setSaveState({ requestKey, status: 'saving', errorMessage: '' });
       const result = await updateFeedback({ projectKey, token, id, changes });
-      if (!result.ok) {
-        setSaveStatus('failed');
-        setSaveErrorMessage(result.message);
+      // Settle this save even if the admin moved on, so coming back does not find the form still locked.
+      const settled: SaveState = result.ok
+        ? { requestKey, status: 'saved', errorMessage: '' }
+        : { requestKey, status: 'failed', errorMessage: result.message };
+      setSaveState((previous) => (previous?.requestKey === requestKey ? settled : previous));
+      // The token, project or feedback changed while saving: the page now shows another request.
+      if (latestRequestKey.current !== requestKey || !result.ok) {
         return false;
       }
       setState({ requestKey, detail: result.data, errorStatus: null, errorMessage: '' });
-      setSaveStatus('saved');
-      setSaveErrorMessage('');
       return true;
     },
     [projectKey, token, id, requestKey],
@@ -77,13 +90,14 @@ export function useFeedbackDetail({ projectKey, token, id }: UseFeedbackDetailIn
   // A result for another project, token or feedback must never be shown under the current one.
   const currentState = state?.requestKey === requestKey ? state : null;
   const snapshot = currentState && { hasData: currentState.detail !== null, errorStatus: currentState.errorStatus };
+  const currentSaveState = saveState?.requestKey === requestKey ? saveState : null;
 
   return {
     status: findAdminLoadStatus(token, snapshot),
     detail: currentState?.detail ?? null,
     errorMessage: currentState?.errorMessage ?? '',
-    saveStatus,
-    saveErrorMessage,
+    saveStatus: currentSaveState?.status ?? 'idle',
+    saveErrorMessage: currentSaveState?.errorMessage ?? '',
     save,
   };
 }
