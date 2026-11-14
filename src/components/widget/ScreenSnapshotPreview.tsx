@@ -30,6 +30,11 @@ export function ScreenSnapshotPreview({ capture, title, onClose }: ScreenSnapsho
         관리자에게 전달될 화면을 이 브라우저에 보관된 자료로 보여 줍니다.
       </p>
       <ScreenReplay screen={screen} loadAssetUrls={loadAssetUrls} />
+      {screen.missingAssets.some((item) => item.reason === 'text_masked' || item.reason === 'text_index_incomplete') && (
+        <p className="break-words text-xs text-gray-600">
+          데이터로 추정하거나 정적 출처를 확인하지 못한 텍스트는 전송 전에 ●로 가렸습니다.
+        </p>
+      )}
     </section>
   );
 }

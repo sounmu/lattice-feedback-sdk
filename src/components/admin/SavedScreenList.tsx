@@ -17,7 +17,7 @@ export function SavedScreenList({ screens, projectKey }: SavedScreenListProps) {
             <p className="truncate font-medium">{screen.page.title || getPagePath(screen.page.url)}</p>
             <p className="text-xs text-(--admin-text-muted)">
               {getPagePath(screen.page.url)} · {formatDateTime(screen.capturedAt)}
-              {screen.missingAssets.length > 0 ? ` · 빠진 파일 ${screen.missingAssets.length}개` : ''}
+              {screen.missingAssets.length > 0 ? ` · 가림·누락 기록 ${screen.missingAssets.length}개` : ''}
             </p>
           </div>
           <Link

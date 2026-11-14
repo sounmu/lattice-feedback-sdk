@@ -51,6 +51,8 @@ const MISSING_ASSET_REASON_LABELS: Record<MissingSnapshotAssetReason, string> = 
   too_large: '파일이 너무 큼',
   budget_exceeded: '전체 용량 한도 초과',
   timed_out: '저장 시간 초과',
+  text_masked: '데이터로 추정한 텍스트를 브라우저에서 가림',
+  text_index_incomplete: '정적 텍스트 확인이 불완전하여 불확실한 텍스트를 가림',
 };
 
 function subscribeToAdminToken(listener: () => void): () => void {
@@ -836,7 +838,7 @@ function ScreenSnapshotDetails({ snapshot }: { snapshot: ScreenSnapshot }) {
       </p>
       {missingAssets.length > 0 && (
         <details className="text-xs text-amber-700">
-          <summary>저장하지 못한 글꼴·이미지 {missingAssets.length}개</summary>
+          <summary>가림·누락 기록 {missingAssets.length}개</summary>
           <ul className="mt-1 flex flex-col gap-1">
             {missingAssets.map((asset) => (
               <li key={asset.url} className="break-all">
