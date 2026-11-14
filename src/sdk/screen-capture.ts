@@ -11,16 +11,33 @@ import {
   MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
   truncateText,
 } from '@/lib/feedback-limits';
-import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_META_EVENT_TYPE, SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
+import {
+  createCommentPinEvent,
+  createEditMoveEvent,
+  createReplayTruncatedEvent,
+  RRWEB_FULL_SNAPSHOT_EVENT_TYPE,
+  RRWEB_META_EVENT_TYPE,
+  SCREEN_SNAPSHOT_FORMAT,
+} from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
 import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError } from '@/sdk/snapshot-assets';
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
+import type { ReplayRecording } from '@/sdk/flow-replay-recorder';
+import { createSegmentedReplayAssetRoot } from '@/sdk/replay-assets';
+import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
+
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
 
-const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
-const MASKED_SELECTOR = '[data-lattice-mask]';
+/** Comments and proposed moves to mark on the saved screen. */
+export interface ScreenMarkSources {
+  comments: readonly CommentPinSource[];
+  edits: readonly EditMoveSource[];
+}
+
+export const BLOCKED_SELECTOR = '[data-lattice-block], [data-lattice-overlay]';
+export const MASKED_SELECTOR = '[data-lattice-mask]';
 const ASSET_FETCH_TIMEOUT_MS = 10_000;
 // The widget waits 30 s for the capture; this leaves time to serialize and answer.
 const ASSET_COLLECTION_DURATION_MS = 15_000;
@@ -72,7 +89,7 @@ async function fetchSameOriginAsset(url: string, maxBytes: number, timeoutMs: nu
 
 // CSS images that captured elements actually show. Elements in a blocked region are skipped, so a
 // stylesheet shared with them cannot carry their images into the saved screen.
-function findUsedCssImageUrls(excludedSelector: string): Set<string> {
+export function findUsedCssImageUrls(excludedSelector: string): Set<string> {
   const urls = new Set<string>();
   for (const element of document.querySelectorAll('*')) {
     if (element.closest(excludedSelector)) {
@@ -90,7 +107,10 @@ function findUsedCssImageUrls(excludedSelector: string): Set<string> {
   return urls;
 }
 
-export async function captureScreen(sdkSelector: string): Promise<ScreenCapture> {
+export async function captureScreen(
+  sdkSelector: string,
+  marks: ScreenMarkSources = { comments: [], edits: [] },
+): Promise<ScreenCapture> {
   const capturedAt = Date.now();
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
   const mirror = createMirror();
@@ -123,16 +143,15 @@ export async function captureScreen(sdkSelector: string): Promise<ScreenCapture>
     scrollX: window.scrollX,
     scrollY: window.scrollY,
   };
-  const loadedFontFamilies = new Set<string>();
-  document.fonts.forEach((fontFace) => {
-    if (fontFace.status === 'loaded') {
-      loadedFontFamilies.add(normalizeFontFamily(fontFace.family));
-    }
+  const moves = createEditMoves(marks.edits, (element) => mirror.getId(element));
+  const pins = createCommentPins(marks.comments, {
+    findNodeId: (element) => mirror.getId(element),
+    scrollX: page.scrollX,
+    scrollY: page.scrollY,
   });
-
   const { assetFiles, missingAssets } = await extractSnapshotAssets(node, {
     pageOrigin: window.location.origin,
-    loadedFontFamilies,
+    loadedFontFamilies: findLoadedFontFamilies(),
     usedCssImageUrls: findUsedCssImageUrls(excludedSelector),
     fetchAsset: fetchSameOriginAsset,
     maxDurationMs: ASSET_COLLECTION_DURATION_MS,
@@ -163,7 +182,63 @@ export async function captureScreen(sdkSelector: string): Promise<ScreenCapture>
         timestamp: capturedAt,
         data: { node, initialOffset: { left: page.scrollX, top: page.scrollY } },
       },
+      ...pins.map((pin) => createCommentPinEvent(pin, capturedAt)),
+      ...moves.map((move) => createEditMoveEvent(move, capturedAt)),
     ],
+    missingAssets,
+  };
+  return { screen, assetFiles };
+}
+
+/** Normalized families of the fonts the current document has loaded. */
+export function findLoadedFontFamilies(): Set<string> {
+  const families = new Set<string>();
+  document.fonts.forEach((fontFace) => {
+    if (fontFace.status === 'loaded') {
+      families.add(normalizeFontFamily(fontFace.family));
+    }
+  });
+  return families;
+}
+
+/**
+ * Turns a recorded Flow into a saved screen: for each document it went through, the full snapshot and the
+ * page changes after it, in order. The same exclusions as a still screen were applied as each event was
+ * recorded; here the fonts and images they refer to are pulled out as files. A marker event stands where
+ * recorded events were lost, and at the end of a recording that lost its later part.
+ */
+export async function captureRecording(recording: ReplayRecording, sdkSelector: string): Promise<ScreenCapture> {
+  const { segments } = recording;
+  const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
+  const assetRoot = createSegmentedReplayAssetRoot(segments);
+  const { assetFiles, missingAssets } = await extractSnapshotAssets(assetRoot.root, {
+    pageOrigin: window.location.origin,
+    // Fonts of every document the Flow went through, not only of the one it ended on.
+    loadedFontFamilies: new Set([...segments.flatMap((segment) => segment.loadedFontFamilies), ...findLoadedFontFamilies()]),
+    // Images the pages showed while recording count too, not only those still shown at the end.
+    usedCssImageUrls: new Set([...segments.flatMap((segment) => segment.usedCssImageUrls), ...findUsedCssImageUrls(excludedSelector)]),
+    // As for a saved screen, the file the browser chose from srcset or <picture> is the one kept.
+    findLiveImage: (serialized) => assetRoot.liveImages.get(serialized) ?? null,
+    fetchAsset: fetchSameOriginAsset,
+    maxDurationMs: ASSET_COLLECTION_DURATION_MS,
+    matchesMedia: (query) => window.matchMedia(query).matches,
+    maxAssetBytes: MAX_SNAPSHOT_ASSET_BYTES,
+    maxTotalBytes: MAX_SNAPSHOT_ASSETS_TOTAL_BYTES,
+    maxAssetCount: MAX_SNAPSHOT_ASSETS,
+  });
+  assetRoot.applyRewrites();
+  const events = segments.flatMap(({ events: [meta, full, ...changes], gapBefore }) => {
+    const marker = gapBefore ? [createReplayTruncatedEvent(full.timestamp)] : [];
+    return [meta, full, ...marker, ...changes];
+  });
+  if (recording.truncated) {
+    events.push(createReplayTruncatedEvent(events[events.length - 1].timestamp));
+  }
+  const screen: CapturedScreen = {
+    format: SCREEN_SNAPSHOT_FORMAT,
+    capturedAt: recording.startedAt,
+    page: recording.page,
+    events,
     missingAssets,
   };
   return { screen, assetFiles };

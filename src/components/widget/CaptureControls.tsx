@@ -1,22 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
-import { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS } from '@/lib/feedback-limits';
-import type { EditAttachment, ElementTarget, FlowEventType } from '@/types/feedback';
+import { CameraIcon, CheckIcon, FlowIcon, MoveIcon, PinIcon } from '@/components/widget/WidgetIcons';
+import {
+  AttachmentCard,
+  DANGER_BUTTON_CLASS,
+  PRIMARY_BUTTON_CLASS,
+  SECONDARY_BUTTON_CLASS,
+  WidgetBanner,
+  WidgetBody,
+  WidgetFooter,
+  WidgetHeader,
+} from '@/components/widget/WidgetLayout';
+import {
+  MAX_COMMENT_LENGTH,
+  MAX_COMMENTS,
+  MAX_EDITS,
+  MAX_REPLAY_DURATION_MS,
+  MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK,
+} from '@/lib/feedback-limits';
+import type { EditAttachment, ElementTarget, FlowAttachment, FlowEventType } from '@/types/feedback';
 import type { AttachmentKind, CaptureMode, CaptureState } from '@/types/sdk-message';
 
-interface CaptureControlsProps extends Pick<CaptureState, 'attachments' | 'activeMode' | 'selection' | 'enabled'> {
-  disabled: boolean;
-  onStart: (mode: CaptureMode) => void;
-  onCancel: () => void;
-  onStopFlow: () => void;
-  onAddComment: (comment: string) => void;
-  onRemove: (kind: AttachmentKind, index: number) => void;
-}
+type Attachments = CaptureState['attachments'];
 
 const MAX_TARGET_LABEL_LENGTH = 60;
 const MAX_FLOW_LABELS = 5;
+const MAX_FLOWS = 1;
+const MAX_REPLAY_MINUTES = Math.round(MAX_REPLAY_DURATION_MS / 60000);
 
 const MODE_LABELS: Record<CaptureMode, string> = {
   comment: '요소 코멘트',
@@ -24,10 +36,10 @@ const MODE_LABELS: Record<CaptureMode, string> = {
   flow: '흐름 기록',
 };
 
-const MODE_STATUS: Record<CaptureMode, string> = {
-  comment: '페이지에서 코멘트할 요소를 클릭하세요.',
-  edit: '페이지에서 요소를 끌어 원하는 위치를 보여주세요.',
-  flow: '흐름 기록 중: 클릭, 화면 이동, 입력 발생 여부만 기록합니다. 입력값은 수집하지 않습니다.',
+const MODE_ICONS: Record<CaptureMode, ReactNode> = {
+  comment: <PinIcon />,
+  edit: <MoveIcon />,
+  flow: <FlowIcon />,
 };
 
 const FLOW_EVENT_LABELS: Record<FlowEventType, string> = {
@@ -38,10 +50,7 @@ const FLOW_EVENT_LABELS: Record<FlowEventType, string> = {
 
 const MODES: CaptureMode[] = ['comment', 'edit', 'flow'];
 
-const BUTTON_CLASS = 'min-h-11 rounded border px-3 py-2 text-sm disabled:opacity-50';
-const ATTACHMENT_LABELS: Record<AttachmentKind, string> = { comments: '코멘트', edits: '위치 편집', flow: '흐름 기록' };
-
-function getTargetLabel(target: Pick<ElementTarget, 'feedbackId' | 'tagName'>): string {
+export function getTargetLabel(target: Pick<ElementTarget, 'feedbackId' | 'tagName'>): string {
   const label = target.feedbackId ?? target.tagName.toLowerCase();
   if (label.length <= MAX_TARGET_LABEL_LENGTH) {
     return label;
@@ -55,18 +64,208 @@ function getEditSummary(edit: EditAttachment): string {
   return `${getTargetLabel(edit.target)} (가로 ${deltaX}px, 세로 ${deltaY}px 이동)`;
 }
 
-export function CaptureControls({
+function getFlowSequence(flow: FlowAttachment): string {
+  const labels = flow.events.slice(0, MAX_FLOW_LABELS).map((event) => FLOW_EVENT_LABELS[event.type]);
+  if (flow.events.length > MAX_FLOW_LABELS) {
+    return `${labels.join(' → ')} → …`;
+  }
+  return labels.join(' → ');
+}
+
+export function countAttachments(attachments: Attachments): number {
+  return attachments.comments.length + attachments.edits.length + (attachments.flow ? 1 : 0);
+}
+
+/** How many screens the draft holds, and whether one more is being saved right now. */
+interface ScreenSlots {
+  screenCount: number;
+  isSavingScreen: boolean;
+}
+
+export function findStartBlocker(mode: CaptureMode, attachments: Attachments, { screenCount, isSavingScreen }: ScreenSlots): string | null {
+  if (mode === 'comment' && attachments.comments.length >= MAX_COMMENTS) {
+    return `코멘트는 최대 ${MAX_COMMENTS}개까지 첨부할 수 있어요.`;
+  }
+  if (mode === 'edit' && attachments.edits.length >= MAX_EDITS) {
+    return `위치 편집은 최대 ${MAX_EDITS}개까지 첨부할 수 있어요.`;
+  }
+  if (mode === 'flow' && attachments.flow !== null) {
+    return '흐름 기록은 1개만 첨부할 수 있어요. 기존 기록을 지운 뒤 다시 시작해 주세요.';
+  }
+  // A finished Flow is attached as a replay screen. Without a free slot it could not be attached, and
+  // freeing one afterwards would not bring the replay back.
+  if (mode === 'flow' && screenCount >= MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK) {
+    return `저장한 화면이 ${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}개라 흐름 재생을 붙일 자리가 없어요. 화면을 하나 지운 뒤 시작해 주세요.`;
+  }
+  if (mode === 'flow' && isSavingScreen) {
+    return '화면을 저장하는 중이에요. 끝난 뒤 흐름 기록을 시작해 주세요.';
+  }
+  return null;
+}
+
+function getModeUsage(mode: CaptureMode, attachments: Attachments): string {
+  if (mode === 'comment') {
+    return `${attachments.comments.length}/${MAX_COMMENTS}`;
+  }
+  if (mode === 'edit') {
+    return `${attachments.edits.length}/${MAX_EDITS}`;
+  }
+  return `${attachments.flow ? 1 : 0}/${MAX_FLOWS}`;
+}
+
+interface ToolButtonProps {
+  icon: ReactNode;
+  label: string;
+  usage: string | null;
+  blocker: string | null;
+  title: string;
+  disabled: boolean;
+  onClick: () => void;
+}
+
+function ToolButton({ icon, label, usage, blocker, title, disabled, onClick }: ToolButtonProps) {
+  return (
+    <button
+      type="button"
+      title={blocker ?? title}
+      className="flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-[10px] border border-fw-border bg-fw-surface px-1 py-1.5 text-xs text-fw-text hover:bg-fw-primary-weak disabled:opacity-40"
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <span className="text-fw-primary">{icon}</span>
+      <span>{label}</span>
+      {usage ? <span className="text-fw-muted">{usage}</span> : null}
+      {blocker ? <span className="sr-only">{blocker}</span> : null}
+    </button>
+  );
+}
+
+interface CaptureToolBarProps {
+  attachments: Attachments | null;
+  enabled: boolean;
+  disabled: boolean;
+  screenCount: number;
+  isSavingScreen: boolean;
+  canCaptureScreen: boolean;
+  /** What the screen tool does, shown as its tooltip. */
+  screenToolTitle: string;
+  onStart: (mode: CaptureMode) => void;
+  onCaptureScreen: () => void;
+}
+
+export function CaptureToolBar({
   attachments,
-  activeMode,
-  selection,
   enabled,
   disabled,
+  screenCount,
+  isSavingScreen,
+  canCaptureScreen,
+  screenToolTitle,
   onStart,
+  onCaptureScreen,
+}: CaptureToolBarProps) {
+  const showUsage = screenCount > 0 || (attachments !== null && countAttachments(attachments) > 0);
+
+  return (
+    <section aria-label="화면으로 보여주기" className="flex flex-col gap-1.5">
+      <p className="text-xs text-fw-sub">화면으로 보여주기 (선택)</p>
+      <div className="grid grid-cols-4 gap-1.5">
+        {MODES.map((mode) => {
+          const blocker = attachments ? findStartBlocker(mode, attachments, { screenCount, isSavingScreen }) : null;
+          return (
+            <ToolButton
+              key={mode}
+              icon={MODE_ICONS[mode]}
+              label={MODE_LABELS[mode]}
+              usage={showUsage && attachments ? getModeUsage(mode, attachments) : null}
+              blocker={blocker}
+              title={MODE_LABELS[mode]}
+              disabled={disabled || !enabled || attachments === null || blocker !== null}
+              onClick={() => onStart(mode)}
+            />
+          );
+        })}
+        <ToolButton
+          icon={<CameraIcon />}
+          label="화면 저장"
+          usage={showUsage ? `${screenCount}/${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}` : null}
+          blocker={null}
+          title={screenToolTitle}
+          disabled={disabled || !canCaptureScreen}
+          onClick={onCaptureScreen}
+        />
+      </div>
+    </section>
+  );
+}
+
+interface CaptureAttachmentCardsProps {
+  attachments: Attachments;
+  disabled: boolean;
+  onRemove: (kind: AttachmentKind, index: number) => void;
+}
+
+/** List items for the comments, edits and Flow, in that order. */
+export function CaptureAttachmentCards({ attachments, disabled, onRemove }: CaptureAttachmentCardsProps) {
+  return (
+    <>
+      {attachments.comments.map((comment, index) => (
+        <AttachmentCard
+          key={`comment-${index}`}
+          icon={<PinIcon className="size-4" />}
+          title={`코멘트 ${index + 1}`}
+          description={`${getTargetLabel(comment.target)} · ${comment.comment}`}
+          removeLabel={`코멘트 ${index + 1} 삭제`}
+          disabled={disabled}
+          onRemove={() => onRemove('comments', index)}
+        />
+      ))}
+      {attachments.edits.map((edit, index) => (
+        <AttachmentCard
+          key={`edit-${index}`}
+          icon={<MoveIcon className="size-4" />}
+          title={`위치 편집 ${index + 1}`}
+          description={getEditSummary(edit)}
+          removeLabel={`위치 편집 ${index + 1} 삭제`}
+          disabled={disabled}
+          onRemove={() => onRemove('edits', index)}
+        />
+      ))}
+      {attachments.flow ? (
+        <AttachmentCard
+          icon={<FlowIcon className="size-4" />}
+          title={`흐름 기록 · 이벤트 ${attachments.flow.events.length}개`}
+          description={getFlowSequence(attachments.flow) || '기록된 동작이 없어요'}
+          removeLabel="흐름 기록과 재생 화면 삭제"
+          disabled={disabled}
+          onRemove={() => onRemove('flow', 0)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+interface CaptureModeViewProps extends Pick<CaptureState, 'attachments' | 'selection' | 'flowEventCount'> {
+  activeMode: CaptureMode;
+  disabled: boolean;
+  onClose: () => void;
+  onCancel: () => void;
+  onStopFlow: () => void;
+  onAddComment: (comment: string) => void;
+}
+
+/** While a mode runs, the widget shows only the one thing to do and a way out. */
+export function CaptureModeView({
+  activeMode,
+  attachments,
+  selection,
+  flowEventCount,
+  disabled,
+  onClose,
   onCancel,
   onStopFlow,
   onAddComment,
-  onRemove,
-}: CaptureControlsProps) {
+}: CaptureModeViewProps) {
   const [commentDraft, setCommentDraft] = useState('');
   const selectionKey = selection ? `${selection.feedbackId ?? selection.tagName}:${selection.selector}` : null;
   const [draftSelection, setDraftSelection] = useState(selectionKey);
@@ -77,24 +276,8 @@ export function CaptureControls({
     setCommentDraft('');
   }
 
-  const isCommentFull = attachments.comments.length >= MAX_COMMENTS;
-  const isEditFull = attachments.edits.length >= MAX_EDITS;
-  const hasFlow = attachments.flow !== null;
   const trimmedDraft = commentDraft.trim();
-  const canAttachComment = !disabled && !isCommentFull && trimmedDraft.length > 0;
-
-  function findStartBlocker(mode: CaptureMode): string | null {
-    if (mode === 'comment' && isCommentFull) {
-      return `코멘트는 최대 ${MAX_COMMENTS}개까지 첨부할 수 있습니다.`;
-    }
-    if (mode === 'edit' && isEditFull) {
-      return `위치 편집은 최대 ${MAX_EDITS}개까지 첨부할 수 있습니다.`;
-    }
-    if (mode === 'flow' && hasFlow) {
-      return '흐름 기록은 1개만 첨부할 수 있습니다. 기존 기록을 삭제한 뒤 다시 시작하세요.';
-    }
-    return null;
-  }
+  const canAttachComment = !disabled && attachments.comments.length < MAX_COMMENTS && trimmedDraft.length > 0;
 
   function handleAttachComment() {
     if (!canAttachComment) {
@@ -109,132 +292,116 @@ export function CaptureControls({
     onCancel();
   }
 
-  function renderStatus() {
-    if (!enabled) {
-      return '이 페이지에서는 화면 맥락 첨부가 허용되지 않습니다. 텍스트만으로도 보낼 수 있습니다.';
-    }
-    if (activeMode === null) {
-      return '필요하면 화면 맥락을 첨부하세요. 여러 모드를 함께 사용할 수 있습니다.';
-    }
-    if (activeMode === 'comment' && selection) {
-      return `선택한 요소: ${getTargetLabel(selection)}`;
-    }
-    return MODE_STATUS[activeMode];
-  }
-
-  function renderCommentForm() {
-    if (activeMode !== 'comment' || !selection) {
-      return null;
-    }
+  if (activeMode === 'comment' && selection) {
     return (
-      <div className="flex flex-col gap-2">
-        <label className="text-xs text-gray-600" htmlFor="capture-comment">
-          {getTargetLabel(selection)}에 대한 코멘트 ({commentDraft.length}/{MAX_COMMENT_LENGTH})
-        </label>
-        <textarea
-          id="capture-comment"
-          autoFocus
-          className="min-h-20 w-full rounded border p-2 text-sm"
-          value={commentDraft}
-          maxLength={MAX_COMMENT_LENGTH}
-          disabled={disabled}
-          onChange={(event) => setCommentDraft(event.target.value)}
+      <>
+        <WidgetHeader
+          title="요소 코멘트"
+          subtitle={`코멘트 ${attachments.comments.length + 1}/${MAX_COMMENTS}`}
+          onBack={handleCancel}
+          onClose={onClose}
         />
-        <button type="button" className={BUTTON_CLASS} disabled={!canAttachComment} onClick={handleAttachComment}>
-          코멘트 첨부
-        </button>
-      </div>
+        <WidgetBody>
+          <WidgetBanner tone="info" title="요소를 골랐어요" icon={<CheckIcon className="size-4 text-fw-primary" />}>
+            선택한 요소{' '}
+            <code className="rounded bg-fw-surface px-1.5 py-0.5 font-mono text-xs">{getTargetLabel(selection)}</code>
+            <p className="mt-1">페이지 위 입력창이나 아래 칸에 의견을 적어 주세요.</p>
+          </WidgetBanner>
+        </WidgetBody>
+        <WidgetFooter>
+          <textarea
+            aria-label="이 요소에 대한 의견"
+            autoFocus
+            rows={3}
+            className="w-full resize-none rounded-xl border border-fw-border p-3 focus:outline-2 focus:outline-fw-primary"
+            value={commentDraft}
+            maxLength={MAX_COMMENT_LENGTH}
+            disabled={disabled}
+            onChange={(event) => setCommentDraft(event.target.value)}
+          />
+          <p className="flex justify-between text-xs text-fw-muted">
+            <span>이 요소에 대한 의견</span>
+            <span>
+              {commentDraft.length}/{MAX_COMMENT_LENGTH}
+            </span>
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
+              취소
+            </button>
+            <button type="button" className={PRIMARY_BUTTON_CLASS} disabled={!canAttachComment} onClick={handleAttachComment}>
+              코멘트 첨부
+            </button>
+          </div>
+        </WidgetFooter>
+      </>
     );
   }
 
-  function renderActiveControls() {
-    if (activeMode === null) {
-      return null;
-    }
+  if (activeMode === 'comment') {
     return (
-      <div className="flex flex-wrap gap-2">
-        {activeMode === 'flow' && (
-          <button type="button" className={BUTTON_CLASS} disabled={disabled} onClick={onStopFlow}>
-            기록 종료 및 첨부
+      <>
+        <WidgetHeader title="요소 코멘트" subtitle="Esc 키로도 취소할 수 있어요" onClose={onClose} />
+        <WidgetBody>
+          <WidgetBanner tone="info" title="페이지에서 요소를 클릭하세요" icon={<PinIcon className="size-4 text-fw-primary" />}>
+            마우스를 올리면 파란 테두리가 보여요. 클릭해도 원래 버튼은 실행되지 않아요. 고른 자리에서 바로 의견을 적을 수 있어요.
+          </WidgetBanner>
+        </WidgetBody>
+        <WidgetFooter>
+          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
+            요소 코멘트 취소
           </button>
-        )}
-        <button type="button" className={BUTTON_CLASS} onClick={handleCancel}>
-          {MODE_LABELS[activeMode]} 취소
-        </button>
-      </div>
+        </WidgetFooter>
+      </>
     );
   }
 
-  function renderAttachmentItem(summary: string, kind: AttachmentKind, index: number) {
-    const label = kind === 'flow' ? ATTACHMENT_LABELS[kind] : `${ATTACHMENT_LABELS[kind]} ${index + 1}`;
+  if (activeMode === 'edit') {
     return (
-      <li key={`${kind}-${index}`} className="flex items-start justify-between gap-2 rounded border p-2">
-        <span className="min-w-0 break-words text-xs">{summary}</span>
-        <button
-          type="button"
-          aria-label={`${label} 삭제`}
-          className="min-h-11 min-w-11 shrink-0 rounded border px-2 text-xs disabled:opacity-50"
-          disabled={disabled}
-          onClick={() => onRemove(kind, index)}
-        >
-          삭제
-        </button>
-      </li>
+      <>
+        <WidgetHeader title="위치 편집" subtitle={`위치 편집 ${attachments.edits.length + 1}/${MAX_EDITS}`} onClose={onClose} />
+        <WidgetBody>
+          <WidgetBanner tone="info" title="요소를 원하는 곳으로 끌어 놓으세요" icon={<MoveIcon className="size-4 text-fw-primary" />}>
+            다 옮겼으면 페이지 위의 <strong>변경 첨부</strong> 버튼을 눌러 주세요. 미리보기일 뿐이라 실제 화면과 데이터는 바뀌지 않아요.
+          </WidgetBanner>
+        </WidgetBody>
+        <WidgetFooter>
+          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
+            위치 편집 취소
+          </button>
+        </WidgetFooter>
+      </>
     );
   }
-
-  function renderFlowSummary(): string {
-    const events = attachments.flow?.events ?? [];
-    const labels = events.slice(0, MAX_FLOW_LABELS).map((event) => FLOW_EVENT_LABELS[event.type]);
-    const sequence = events.length > MAX_FLOW_LABELS ? `${labels.join(' → ')} → …` : labels.join(' → ');
-    return `흐름 기록 · 이벤트 ${events.length}개${sequence ? ` · ${sequence}` : ''}`;
-  }
-
-  const startBlockers = MODES.map(findStartBlocker).filter((blocker): blocker is string => blocker !== null);
 
   return (
-    <section aria-label="화면 맥락 첨부" className="flex w-full min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap gap-2">
-        {MODES.map((mode) => (
-          <button
-            key={mode}
-            type="button"
-            aria-pressed={activeMode === mode}
-            className={BUTTON_CLASS}
-            disabled={disabled || !enabled || activeMode !== null || findStartBlocker(mode) !== null}
-            onClick={() => onStart(mode)}
-          >
-            {MODE_LABELS[mode]}
+    <>
+      <WidgetHeader title="흐름 기록" subtitle={`평소처럼 페이지를 사용하세요 · 최대 ${MAX_REPLAY_MINUTES}분`} onClose={onClose} />
+      <WidgetBody>
+        <WidgetBanner
+          tone="danger"
+          title="기록 중"
+          icon={<span aria-hidden="true" className="widget-recording-dot mt-1 block size-2.5 rounded-full bg-fw-recording" />}
+        >
+          <span className="text-fw-text">
+            클릭, 화면 이동과 화면 변화를 기록해 담당자가 그대로 재생해 볼 수 있어요. <strong>입력한 값은 가려서 저장해요.</strong>
+          </span>
+        </WidgetBanner>
+        <WidgetBanner tone="warning">
+          다른 페이지로 이동하면 <strong>작성 중이던 글이 지워질 수 있어요.</strong> 기록을 마친 뒤 글을 써 주세요.
+        </WidgetBanner>
+        <p className="rounded-xl border border-fw-border bg-fw-surface p-3 text-fw-sub">지금까지 {flowEventCount}개 동작을 기록했어요.</p>
+      </WidgetBody>
+      <WidgetFooter>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
+            기록 취소
           </button>
-        ))}
-      </div>
-      <p role="status" aria-live="polite" className="break-words text-xs text-gray-600">
-        {renderStatus()}
-      </p>
-      {enabled && startBlockers.map((blocker) => (
-        <p key={blocker} className="text-xs text-amber-700">
-          {blocker}
-        </p>
-      ))}
-      {renderCommentForm()}
-      {renderActiveControls()}
-      <p className="text-xs text-gray-500">
-        코멘트 {attachments.comments.length}/{MAX_COMMENTS} · 위치 편집 {attachments.edits.length}/{MAX_EDITS} · 흐름{' '}
-        {hasFlow ? 1 : 0}/1
-      </p>
-      <ul className="flex flex-col gap-2" aria-label="첨부된 맥락">
-        {attachments.comments.map((comment, index) =>
-          renderAttachmentItem(
-            `코멘트 · ${getTargetLabel(comment.target)}: ${comment.comment}`,
-            'comments',
-            index,
-          ),
-        )}
-        {attachments.edits.map((edit, index) =>
-          renderAttachmentItem(`위치 편집 · ${getEditSummary(edit)}`, 'edits', index),
-        )}
-        {hasFlow && renderAttachmentItem(renderFlowSummary(), 'flow', 0)}
-      </ul>
-    </section>
+          <button type="button" className={DANGER_BUTTON_CLASS} disabled={disabled} onClick={onStopFlow}>
+            기록 종료 및 첨부
+          </button>
+        </div>
+      </WidgetFooter>
+    </>
   );
 }

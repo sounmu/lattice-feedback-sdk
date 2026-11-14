@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { MAX_SCREEN_SNAPSHOT_BYTES } from '@/lib/feedback-limits';
+import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES } from '@/lib/feedback-limits';
+import { InvalidGzipError } from '@/lib/gzip';
 import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { createApiErrorResponse } from '@/lib/http/api-error';
-import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyTextWithLimit } from '@/lib/http/read-body';
+import { BodyTooLargeError, isDeclaredBodyTooLarge, readEncodedBodyTextWithLimit } from '@/lib/http/read-body';
 import { consumeRateLimit, getClientAddress, RATE_LIMIT_RETRY_AFTER_SECONDS } from '@/lib/http/rate-limit';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
@@ -33,10 +34,13 @@ export async function POST(request: Request) {
 
   let rawBody: string;
   try {
-    rawBody = await readBodyTextWithLimit(request, MAX_SCREEN_SNAPSHOT_BYTES);
+    rawBody = await readEncodedBodyTextWithLimit(request, MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES);
   } catch (error) {
     if (error instanceof BodyTooLargeError) {
       return createPayloadTooLargeResponse();
+    }
+    if (error instanceof InvalidGzipError) {
+      return createApiErrorResponse(400, 'invalid_body', 'Request body is not valid gzip.');
     }
     throw error;
   }

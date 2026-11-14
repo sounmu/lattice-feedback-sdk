@@ -7,7 +7,7 @@ import { MAX_FEEDBACK_BYTES } from '@/lib/feedback-limits';
 
 export type SubmitStatus = 'idle' | 'submitting' | 'success' | 'error';
 
-const FALLBACK_ERROR_MESSAGE = '전송에 실패했습니다. 잠시 후 다시 시도해주세요.';
+const FALLBACK_ERROR_MESSAGE = '잠시 후 다시 시도해 주세요. 작성한 내용은 그대로 남아 있어요.';
 
 function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
   if (typeof value !== 'object' || value === null || !('error' in value)) {

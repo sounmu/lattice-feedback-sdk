@@ -5,7 +5,7 @@ import { createCaptureController } from '@/sdk/capture-controller';
 import { trackHistory } from '@/sdk/history-tracking';
 import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
-import { captureScreen } from '@/sdk/screen-capture';
+import { captureRecording, captureScreen } from '@/sdk/screen-capture';
 import { HOST_ELEMENT_STYLE, PANEL_OPEN_CLASS_NAME, SDK_STYLES } from '@/sdk/styles';
 import type { FeedbackSdkInitOptions } from '@/sdk/types';
 import type { FeedbackReporter } from '@/types/feedback';
@@ -14,6 +14,7 @@ import type { CaptureUpdateMessage, HostToWidgetMessage } from '@/types/sdk-mess
 const LOG_PREFIX = '[LatticeFeedback]';
 const HOST_ELEMENT_TAG_NAME = 'lattice-feedback-root';
 const IFRAME_TITLE = 'Feedback';
+const MAX_CONCURRENT_SCREEN_CAPTURES = 3;
 
 export class FeedbackSdk {
   private readonly appOrigin: string;
@@ -30,7 +31,8 @@ export class FeedbackSdk {
   private capturePolicy: CapturePolicy | null = null;
   private captureController: ReturnType<typeof createCaptureController> | null = null;
   private pendingResizeFrame: number | null = null;
-  private isCapturingScreen = false;
+  // Each save serializes the page as soon as it is asked, so a save asked during another keeps its own moment.
+  private activeScreenCaptures = 0;
 
   constructor(appOrigin: string) {
     this.appOrigin = appOrigin;
@@ -51,7 +53,9 @@ export class FeedbackSdk {
       return;
     }
     this.projectKey = projectKey;
-    this.capturePolicy = findCapturePolicy(options.capturePolicy);
+    this.capturePolicy = options.capturePolicy === undefined
+      ? null
+      : findCapturePolicy(options.capturePolicy) ?? { allowedPaths: [], targets: [] };
     window.addEventListener('message', this.handleMessage);
     this.stopHistoryTracking = trackHistory(this.handleNavigation);
     if (document.body) {
@@ -152,7 +156,7 @@ export class FeedbackSdk {
     this.hostElement = hostElement;
     this.panelElement = panelElement;
     this.captureController = createCaptureController({
-      projectKey, policy: this.capturePolicy, root: shadowRoot,
+      projectKey, policy: this.capturePolicy, root: shadowRoot, sdkSelector: HOST_ELEMENT_TAG_NAME,
       onUpdate: (state) => {
         if (this.isWidgetReady) this.postToWidget(createCaptureUpdate(state));
       },
@@ -246,23 +250,41 @@ export class FeedbackSdk {
   }
 
   // Saving is allowed on any page with the SDK unless the customer's policy restricts the paths.
-  private async saveScreen(): Promise<void> {
-    if (this.isCapturingScreen) {
+  private async saveScreen(requestId: string): Promise<void> {
+    if (this.activeScreenCaptures >= MAX_CONCURRENT_SCREEN_CAPTURES) {
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
       return;
     }
     if (this.capturePolicy && !this.capturePolicy.allowedPaths.includes(window.location.pathname)) {
-      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'page_not_allowed' }));
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'page_not_allowed' }));
       return;
     }
-    this.isCapturingScreen = true;
+    this.activeScreenCaptures += 1;
     try {
-      const capture = await captureScreen(HOST_ELEMENT_TAG_NAME);
-      this.postToWidget(createHostToWidgetMessage('screen:captured', capture));
+      const capture = await captureScreen(HOST_ELEMENT_TAG_NAME, {
+        comments: this.captureController?.getCommentPinSources() ?? [],
+        edits: this.captureController?.getEditMoveSources() ?? [],
+      });
+      this.postToWidget(createHostToWidgetMessage('screen:captured', { ...capture, requestId }));
     } catch (error) {
       console.warn(`${LOG_PREFIX} Saving the screen failed.`, error);
-      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { reason: 'capture_failed' }));
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
     } finally {
-      this.isCapturingScreen = false;
+      this.activeScreenCaptures -= 1;
+    }
+  }
+
+  private async saveFlowReplay(requestId: string): Promise<void> {
+    try {
+      const replay = await this.captureController?.takeFlowReplay();
+      if (!replay) {
+        this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
+        return;
+      }
+      this.postToWidget(createHostToWidgetMessage('screen:captured', { ...(await captureRecording(replay, HOST_ELEMENT_TAG_NAME)), requestId }));
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} Saving the Flow replay failed.`, error);
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
     }
   }
 
@@ -293,7 +315,10 @@ export class FeedbackSdk {
         this.captureController?.reset();
         break;
       case 'screen:capture':
-        void this.saveScreen();
+        void this.saveScreen(message.payload.requestId);
+        break;
+      case 'flow:capture':
+        void this.saveFlowReplay(message.payload.requestId);
         break;
       default: {
         const unhandledMessage: never = message;

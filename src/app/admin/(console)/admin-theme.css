@@ -1,0 +1,27 @@
+/* Admin console tokens. Values follow design/widget-ui/UX.md so the console matches the widget. */
+.admin-root {
+  --admin-primary: #3b5bfd;
+  --admin-primary-hover: #2f4ae0;
+  --admin-primary-weak: #eef1ff;
+  --admin-text: #1c2024;
+  --admin-text-sub: #60646c;
+  --admin-text-muted: #6f7280;
+  --admin-border: #e8e8ec;
+  --admin-surface: #ffffff;
+  --admin-surface-sub: #f9f9fb;
+  --admin-danger: #d1343a;
+  --admin-danger-weak: #fff0f0;
+  --admin-warning: #a35b00;
+  --admin-warning-weak: #fff8e6;
+  --admin-success: #30a46c;
+  --admin-success-weak: #e9f9ee;
+
+  min-height: 100vh;
+  background: var(--admin-surface-sub);
+  color: var(--admin-text);
+  font-family: 'Pretendard Variable', Pretendard, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}

@@ -75,6 +75,7 @@ const STATUS_STYLES = `
 `;
 
 const STOP_LABEL = '기록 종료';
+const FINISH_COMMENT_LABEL = '코멘트 완료';
 const CANCEL_LABEL = '취소';
 const SHOW_LABEL = '패널 열기';
 
@@ -83,14 +84,14 @@ function getStatusMessage(state: CaptureState, mode: CaptureMode): string {
   switch (mode) {
     case 'comment':
       if (state.selection) {
-        return `Comment: 패널에서 의견을 입력하세요 ${commentCount}`;
+        return `Comment: 선택한 위치에 의견을 입력하세요 ${commentCount}`;
       }
       return `Comment: 의견을 남길 요소를 클릭하세요 ${commentCount}`;
     case 'edit':
       return `Edit: 위치를 바꿀 요소를 클릭하세요 (${state.attachments.edits.length}/${MAX_EDITS})`;
     case 'flow':
       if (!state.enabled) return 'Flow 일시중지 · 허용된 화면에서 기록을 이어갑니다.';
-      return `Flow 기록 중 · 이벤트 ${state.flowEventCount}/${MAX_FLOW_EVENTS}`;
+      return `Flow 기록 중 · 화면 내용과 변화 포함 · 이벤트 ${state.flowEventCount}/${MAX_FLOW_EVENTS}`;
   }
 }
 
@@ -137,7 +138,8 @@ export function createCaptureStatus(options: CaptureStatusOptions): CaptureStatu
       }
       label.textContent = getStatusMessage(state, state.activeMode);
       if (state.errorMessage) label.textContent += ` · ${state.errorMessage}`;
-      stopButton.hidden = state.activeMode !== 'flow';
+      stopButton.hidden = state.activeMode === 'edit';
+      stopButton.textContent = state.activeMode === 'comment' ? FINISH_COMMENT_LABEL : STOP_LABEL;
       container.hidden = false;
     },
     destroy(): void {

@@ -57,8 +57,18 @@ it('keeps text submission available without a capture policy', async () => {
   expect(response.status).toBe(201);
 });
 
-it('denies attachments when capture is not configured', async () => {
+it('accepts same-origin attachments when no capture restriction is configured', async () => {
   vi.stubEnv('FEEDBACK_CAPTURE_POLICY', undefined);
+
+  const response = await POST(createJsonRequest('http://localhost:3000/api/feedback', 'POST',
+    createFeedbackBody({ attachments: { comments: [{ target: TARGET, comment: 'Feedback' }] } })));
+
+  expect(response.status).toBe(201);
+  expect((await response.json()).feedback.attachments.comments[0].target.feedbackId).toBe('save-button');
+});
+
+it.each(['{', '{}', '{"allowedPaths":"all"}'])('does not widen capture access for malformed policy %s', async (policy) => {
+  vi.stubEnv('FEEDBACK_CAPTURE_POLICY', policy);
 
   const response = await POST(createJsonRequest('http://localhost:3000/api/feedback', 'POST',
     createFeedbackBody({ attachments: { comments: [{ target: TARGET, comment: 'Feedback' }] } })));

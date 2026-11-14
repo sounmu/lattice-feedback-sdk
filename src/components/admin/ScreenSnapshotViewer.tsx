@@ -1,13 +1,35 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
 
+import {
+  CommentPinList,
+  CommentPinOverlay,
+  EditMoveList,
+  EditMoveOverlay,
+  type MoveBox,
+  type PinBox,
+} from '@/components/admin/ScreenMarkOverlay';
+import { MAX_REPLAY_DURATION_MS } from '@/lib/feedback-limits';
+import { GZIP_MEDIA_TYPE, isGzipBody, isGzipSupported } from '@/lib/gzip';
+import {
+  findAdjacentStep,
+  findReplaySteps,
+  getCurrentStepIndex,
+  getViewportAt,
+  type ReplayStep,
+  type ReplayStepKind,
+} from '@/lib/screen-preview';
+import { findCommentPins, findEditMoves, hasReplayEvents, isReplayTruncated } from '@/lib/screen-snapshot';
 import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
 import type {
+  CapturedScreen,
   MissingSnapshotAssetReason,
+  ScreenCommentPin,
+  ScreenEditMove,
   ScreenSnapshot,
   ScreenSnapshotDetailResponse,
 } from '@/types/screen-snapshot';
@@ -21,6 +43,8 @@ const UNAUTHORIZED_STATUS = 401;
 const ADMIN_TOKEN_STORAGE_KEY = 'lattice-feedback:admin-token';
 const ADMIN_TOKEN_EVENT = 'lattice-feedback:admin-token-change';
 const BUTTON_CLASS = 'min-h-11 rounded border bg-white px-3 py-2 text-sm aria-pressed:bg-gray-900 aria-pressed:text-white';
+const REPLAY_TRUNCATED_MESSAGE =
+  `기록 한도(${MAX_REPLAY_DURATION_MS / 60_000}분·이벤트 수), 페이지 제한 또는 저장 중단으로 일부 구간이 재생에 포함되지 않았습니다.`;
 
 const MISSING_ASSET_REASON_LABELS: Record<MissingSnapshotAssetReason, string> = {
   fetch_failed: '가져오지 못함',
@@ -82,11 +106,328 @@ function scrollSavedScreen(frame: HTMLIFrameElement, event: WheelEvent): void {
   }
   const bounds = frame.getBoundingClientRect();
   const scale = bounds.width / frame.clientWidth;
-  let target = frameDocument.elementFromPoint((event.clientX - bounds.left) / scale, (event.clientY - bounds.top) / scale);
+  const x = (event.clientX - bounds.left) / scale;
+  const y = (event.clientY - bounds.top) / scale;
+  // Before the page is laid out the frame has no width, so there is no point to look up.
+  let target = Number.isFinite(x) && Number.isFinite(y) ? frameDocument.elementFromPoint(x, y) : null;
   while (target && !canScroll(target)) {
     target = target.parentElement;
   }
   (target ?? frameDocument.scrollingElement)?.scrollBy(event.deltaX, event.deltaY);
+}
+
+// Finds the pinned element in the rebuilt page. When it was not serialized, the saved document
+// coordinates are shifted by the rebuilt page's scroll instead.
+// A point outside any ancestor that clips its content (a scrolled list, for example) is not visible,
+// even when it is still inside the page's viewport.
+function isPointClipped(element: Element, x: number, y: number): boolean {
+  const view = element.ownerDocument.defaultView;
+  for (let ancestor = element.parentElement; ancestor && view; ancestor = ancestor.parentElement) {
+    const { overflowX, overflowY } = view.getComputedStyle(ancestor);
+    if (overflowX === 'visible' && overflowY === 'visible') {
+      continue;
+    }
+    const clip = ancestor.getBoundingClientRect();
+    if (x < clip.left || x > clip.right || y < clip.top || y > clip.bottom) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function measurePin(replayer: Replayer, pin: ScreenCommentPin): PinBox {
+  const node = pin.nodeId === null ? null : replayer.getMirror().getNode(pin.nodeId);
+  if (node && 'getBoundingClientRect' in node) {
+    const bounds = (node as Element).getBoundingClientRect();
+    if (bounds.width > 0 || bounds.height > 0) {
+      const isClipped = isPointClipped(
+        node as Element,
+        bounds.left + pin.offset.x * bounds.width,
+        bounds.top + pin.offset.y * bounds.height,
+      );
+      return { pin, x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height, isClipped };
+    }
+  }
+  const view = replayer.iframe.contentWindow;
+  return {
+    pin,
+    x: pin.rect.x - (view?.scrollX ?? 0),
+    y: pin.rect.y - (view?.scrollY ?? 0),
+    width: pin.rect.width,
+    height: pin.rect.height,
+    isClipped: false,
+  };
+}
+
+function findMarkedElement(replayer: Replayer, nodeId: number | null): HTMLElement | null {
+  const node = nodeId === null ? null : replayer.getMirror().getNode(nodeId);
+  // The node lives in the replay iframe's realm, so instanceof HTMLElement would be false.
+  return node && 'style' in node && 'getBoundingClientRect' in node ? (node as HTMLElement) : null;
+}
+
+function getMoveDelta(move: ScreenEditMove): { x: number; y: number } {
+  return { x: move.proposedRect.x - move.originalRect.x, y: move.proposedRect.y - move.originalRect.y };
+}
+
+const MOVE_CLONE_ATTRIBUTE = 'data-lattice-move-clone';
+// Styling a very large subtree element by element would stall the viewer; the rest keeps its own rules.
+const MAX_STYLED_CLONE_ELEMENTS = 500;
+
+// The clone leaves the element's ancestors, so rules such as ".toolbar button" and inherited values no
+// longer reach it. Each element's resolved styles are written onto its copy before it is moved.
+function copyResolvedStyles(source: Element, target: Element, view: Window, budget: { remaining: number }): void {
+  const style = (target as Partial<ElementCSSInlineStyle>).style;
+  if (budget.remaining <= 0 || !style) {
+    return;
+  }
+  budget.remaining -= 1;
+  const computed = view.getComputedStyle(source);
+  for (const property of Array.from(computed)) {
+    style.setProperty(property, computed.getPropertyValue(property));
+  }
+  Array.from(source.children).forEach((child, index) => {
+    const copy = target.children[index];
+    if (copy) {
+      copyResolvedStyles(child, copy, view, budget);
+    }
+  });
+}
+
+// The runtime scroll position of a container is not part of a node copy, so it is carried over.
+function copyScrollOffsets(source: Element, target: Element, budget: { remaining: number }): void {
+  if (budget.remaining <= 0) {
+    return;
+  }
+  budget.remaining -= 1;
+  target.scrollTop = source.scrollTop;
+  target.scrollLeft = source.scrollLeft;
+  Array.from(source.children).forEach((child, index) => {
+    const copy = target.children[index];
+    if (copy) {
+      copyScrollOffsets(child, copy, budget);
+    }
+  });
+}
+
+// The scale, rotation and skew the element is drawn with, from its own transform and its ancestors'.
+// The translation is left out: the clone is placed by measuring where it lands.
+function getVisualTransform(element: Element, view: Window & typeof globalThis): DOMMatrix {
+  const chain: Element[] = [];
+  for (let current: Element | null = element; current; current = current.parentElement) {
+    chain.unshift(current);
+  }
+  let matrix = new view.DOMMatrix();
+  for (const current of chain) {
+    const { transform, transformOrigin } = view.getComputedStyle(current);
+    if (transform === 'none') {
+      continue;
+    }
+    const [originX = 0, originY = 0] = transformOrigin.split(' ').map((value) => Number.parseFloat(value));
+    matrix = matrix.translate(originX, originY).multiply(new view.DOMMatrix(transform)).translate(-originX, -originY);
+  }
+  matrix.e = 0;
+  matrix.f = 0;
+  return matrix;
+}
+
+// The copy of `node` inside `copyRoot`, found by walking the same child positions as from `sourceRoot`.
+// Every copied element carries its own visibility, so hiding the root alone would leave its children showing.
+function hideCopiedSubtree(root: Element): void {
+  for (const element of [root, ...root.querySelectorAll('*')]) {
+    (element as Partial<ElementCSSInlineStyle>).style?.setProperty('visibility', 'hidden');
+  }
+}
+
+function findCopiedNode(sourceRoot: Element, copyRoot: Element, node: Element): Element | null {
+  const path: number[] = [];
+  for (let current = node; current !== sourceRoot; current = current.parentElement as Element) {
+    if (!current.parentElement) {
+      return null;
+    }
+    path.unshift(Array.prototype.indexOf.call(current.parentElement.children, current));
+  }
+  let copy: Element | undefined = copyRoot;
+  for (const index of path) {
+    copy = copy?.children[index];
+  }
+  return copy ?? null;
+}
+
+// The clone sits in document coordinates; it is placed again whenever the page or a container scrolls,
+// because the original (kept in place, only hidden) moves with its scroll container.
+function positionProposedClones(replayer: Replayer, moves: ScreenEditMove[]): void {
+  const frameDocument = replayer.iframe.contentDocument;
+  const view = replayer.iframe.contentWindow;
+  if (!frameDocument || !view) {
+    return;
+  }
+  for (const move of moves) {
+    const element = findMarkedElement(replayer, move.nodeId);
+    const clone = frameDocument.querySelector<HTMLElement>(`[${MOVE_CLONE_ATTRIBUTE}="${move.key}"]`);
+    if (!element || !clone) {
+      continue;
+    }
+    const bounds = element.getBoundingClientRect();
+    const delta = getMoveDelta(move);
+    const targetX = bounds.left + delta.x;
+    const targetY = bounds.top + delta.y;
+    clone.style.setProperty('left', `${targetX + view.scrollX}px`);
+    clone.style.setProperty('top', `${targetY + view.scrollY}px`);
+    // A transformed clone is drawn away from its left/top corner; one correction lines up what is seen.
+    const drawn = clone.getBoundingClientRect();
+    clone.style.setProperty('left', `${targetX + view.scrollX + targetX - drawn.left}px`);
+    clone.style.setProperty('top', `${targetY + view.scrollY + targetY - drawn.top}px`);
+  }
+}
+
+// The original element keeps its layout box (it is only hidden while the proposal is shown), so its
+// bounds are the original position either way.
+function measureMove(replayer: Replayer, move: ScreenEditMove): MoveBox {
+  const delta = getMoveDelta(move);
+  const element = findMarkedElement(replayer, move.nodeId);
+  const bounds = element?.getBoundingClientRect();
+  let original = { ...move.originalRect };
+  if (bounds && (bounds.width > 0 || bounds.height > 0)) {
+    original = { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height };
+  } else {
+    const view = replayer.iframe.contentWindow;
+    original = { ...original, x: original.x - (view?.scrollX ?? 0), y: original.y - (view?.scrollY ?? 0) };
+  }
+  return { move, original, proposed: { ...original, x: original.x + delta.x, y: original.y + delta.y } };
+}
+
+// Only the rebuilt page in the sandboxed iframe changes; the host page is never touched. The proposal
+// is drawn as a copy placed in document coordinates, so an ancestor's overflow cannot clip it.
+function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isShown: boolean): void {
+  const frameDocument = replayer.iframe.contentDocument;
+  const view = replayer.iframe.contentWindow;
+  frameDocument?.querySelectorAll(`[${MOVE_CLONE_ATTRIBUTE}]`).forEach((clone) => clone.remove());
+  const elements = moves.map((move) => findMarkedElement(replayer, move.nodeId));
+  elements.forEach((element) => element?.style.removeProperty('visibility'));
+  if (!isShown || !frameDocument || !view) {
+    return;
+  }
+  // Every clone is built before any original is hidden: an edited element inside another edited one
+  // would otherwise inherit the temporary hiding into its copied styles.
+  const clones = moves.map((move, index) => {
+    const element = elements[index];
+    if (!element) {
+      return null;
+    }
+    const bounds = element.getBoundingClientRect();
+    const clone = element.cloneNode(true) as HTMLElement;
+    clone.setAttribute(MOVE_CLONE_ATTRIBUTE, move.key);
+    copyResolvedStyles(element, clone, view, { remaining: MAX_STYLED_CLONE_ELEMENTS });
+    // The untransformed layout size is kept and the visible transform reapplied, so a scaled or rotated
+    // element looks the same at the proposed position.
+    Object.assign(clone.style, {
+      position: 'absolute',
+      width: `${element.offsetWidth || bounds.width}px`,
+      height: `${element.offsetHeight || bounds.height}px`,
+      margin: '0',
+      boxSizing: 'border-box',
+      transform: getVisualTransform(element, view as Window & typeof globalThis).toString(),
+      transformOrigin: '0 0',
+      visibility: 'visible',
+      zIndex: '2147483647',
+    });
+    frameDocument.documentElement.appendChild(clone);
+    copyScrollOffsets(element, clone, { remaining: MAX_STYLED_CLONE_ELEMENTS });
+    return clone;
+  });
+  // An edited element inside another edited one is shown only by its own clone; its copy inside the
+  // outer clone keeps its space but is hidden, so it does not appear twice. An element edited twice is
+  // not inside itself: each of its edits keeps its own clone.
+  elements.forEach((outer, outerIndex) => {
+    const outerClone = clones[outerIndex];
+    elements.forEach((inner) => {
+      if (!outer || !outerClone || !inner || inner === outer || !outer.contains(inner)) {
+        return;
+      }
+      const copy = findCopiedNode(outer, outerClone, inner);
+      if (copy) {
+        hideCopiedSubtree(copy);
+      }
+    });
+  });
+  elements.forEach((element) => element?.style.setProperty('visibility', 'hidden'));
+  positionProposedClones(replayer, moves);
+}
+
+function formatPlaybackTime(milliseconds: number): string {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
+}
+
+interface ReplayControlsProps {
+  isPlaying: boolean;
+  currentMs: number;
+  totalMs: number;
+  steps: ReplayStep[];
+  onPlay: () => void;
+  onPause: () => void;
+  onSeek: (milliseconds: number) => void;
+  onStep: (milliseconds: number) => void;
+}
+
+const REPLAY_STEP_LABELS: Record<ReplayStepKind, string> = {
+  start: '시작',
+  screen: '화면 전환',
+  click: '클릭',
+  input: '입력',
+  scroll: '스크롤',
+};
+const STEP_BUTTON_CLASS = `${BUTTON_CLASS} disabled:opacity-50`;
+
+function ReplayControls({ isPlaying, currentMs, totalMs, steps, onPlay, onPause, onSeek, onStep }: ReplayControlsProps) {
+  const stepIndex = getCurrentStepIndex(steps, currentMs);
+  const previousStep = findAdjacentStep(steps, currentMs, 'previous');
+  const nextStep = findAdjacentStep(steps, currentMs, 'next');
+  return (
+    <div className="flex flex-wrap items-center gap-2" aria-label="흐름 재생">
+      <button type="button" className={BUTTON_CLASS} onClick={isPlaying ? onPause : onPlay}>
+        {isPlaying ? '일시정지' : '재생'}
+      </button>
+      <button type="button" className={BUTTON_CLASS} onClick={() => onSeek(0)}>
+        처음부터
+      </button>
+      <button
+        type="button"
+        className={STEP_BUTTON_CLASS}
+        disabled={!previousStep}
+        onClick={() => previousStep && onStep(previousStep.atMs)}
+      >
+        이전 단계
+      </button>
+      <button
+        type="button"
+        className={STEP_BUTTON_CLASS}
+        disabled={!nextStep}
+        onClick={() => nextStep && onStep(nextStep.atMs)}
+      >
+        다음 단계
+      </button>
+      <span className="text-xs text-gray-600">
+        단계 {stepIndex + 1}/{steps.length} · {REPLAY_STEP_LABELS[steps[stepIndex].kind]}
+      </span>
+      <input
+        type="range"
+        aria-label="재생 위치"
+        className="min-w-48 flex-1"
+        min={0}
+        max={Math.max(totalMs, 1)}
+        step={1}
+        value={Math.min(currentMs, totalMs)}
+        onChange={(event) => onSeek(Number(event.target.value))}
+      />
+      <span className="text-xs tabular-nums text-gray-600">
+        {formatPlaybackTime(currentMs)} / {formatPlaybackTime(totalMs)}
+      </span>
+      <span className="w-full text-xs text-gray-600">
+        기록한 조작과 페이지 이동 전후의 화면을 재생합니다. 입력값은 가려져 있습니다.
+      </span>
+    </div>
+  );
 }
 
 function AdminTokenForm() {
@@ -120,12 +461,49 @@ function AdminTokenForm() {
 }
 
 interface ScreenReplayProps {
-  snapshot: ScreenSnapshot;
-  projectKey: string;
-  token: string;
+  /** A saved screen, or one captured in this browser and not sent yet. */
+  screen: Pick<CapturedScreen, 'events' | 'page'>;
+  /**
+   * A URL for each asset file of the screen, in order; null for a file that could not be loaded. The
+   * replay revokes them when it closes. Keep the function's identity stable: a new one rebuilds the page.
+   */
+  loadAssetUrls: () => Promise<(string | null)[]>;
+  /** Opens with edited elements already at their proposed position. */
+  initiallyShowsProposed?: boolean;
+}
+
+// A long Flow replay arrives as a gzip file, because the platform limits how large a response may be.
+async function readSnapshotResponse(response: Response): Promise<ScreenSnapshotDetailResponse> {
+  if (!response.body || !isGzipBody(response.headers)) {
+    return (await response.json()) as ScreenSnapshotDetailResponse;
+  }
+  const unpacked = response.body.pipeThrough(new DecompressionStream('gzip'));
+  return (await new Response(unpacked).json()) as ScreenSnapshotDetailResponse;
 }
 
 // Asset files need the admin token, so they are fetched here and handed to the replay as blob: URLs.
+export type SavedScreenResult = { snapshot: ScreenSnapshot } | { status: number };
+
+/** Reads one saved screen with the admin token. Status 0 means the request never reached the server. */
+export async function fetchSavedScreen(id: string, projectKey: string, token: string, signal?: AbortSignal): Promise<SavedScreenResult> {
+  try {
+    const response = await fetch(`/api/snapshots/${encodeURIComponent(id)}?projectKey=${encodeURIComponent(projectKey)}`, {
+      headers: { authorization: `Bearer ${token}`, accept: isGzipSupported() ? GZIP_MEDIA_TYPE : 'application/json' },
+      signal,
+    });
+    if (!response.ok) {
+      return { status: response.status };
+    }
+    const body = await readSnapshotResponse(response);
+    return { snapshot: body.snapshot };
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    return { status: 0 };
+  }
+}
+
 async function fetchAssetUrl(hash: string, projectKey: string, token: string): Promise<string | null> {
   try {
     const response = await fetch(`/api/snapshots/assets/${hash}?projectKey=${encodeURIComponent(projectKey)}`, {
@@ -140,13 +518,115 @@ async function fetchAssetUrl(hash: string, projectKey: string, token: string): P
   }
 }
 
-function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
+// Shared by the admin viewer and the widget's preview. It only draws what it is handed: reading a saved
+// screen from the server, and the admin token that needs, stay with the caller.
+export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = false }: ScreenReplayProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [unloadedAssetCount, setUnloadedAssetCount] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
-  const { viewportWidth, viewportHeight } = snapshot.page;
+  const pins = useMemo(() => findCommentPins(screen.events), [screen]);
+  const moves = useMemo(() => findEditMoves(screen.events), [screen]);
+  const [pinBoxes, setPinBoxes] = useState<PinBox[]>([]);
+  const [moveBoxes, setMoveBoxes] = useState<MoveBox[]>([]);
+  const [selectedPin, setSelectedPin] = useState<number | null>(null);
+  const [showsProposed, setShowsProposed] = useState(false);
+  const replayerRef = useRef<Replayer | null>(null);
+  const isReplay = useMemo(() => hasReplayEvents(screen.events), [screen]);
+  const isTruncated = useMemo(() => isReplayTruncated(screen.events), [screen]);
+  const steps = useMemo(() => findReplaySteps(screen.events), [screen]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentMs, setCurrentMs] = useState(0);
+  const [totalMs, setTotalMs] = useState(0);
+  const progressFrame = useRef<number | null>(null);
+  const showsProposedRef = useRef(false);
+  // A recorded Flow can cross pages and window sizes, so its stage follows the size at the current moment.
+  const { viewportWidth, viewportHeight } = isReplay ? getViewportAt(screen.events, currentMs, screen.page) : screen.page;
+
+  const measureMarks = useCallback(() => {
+    const replayer = replayerRef.current;
+    if (!replayer) {
+      return;
+    }
+    setPinBoxes(pins.map((pin) => measurePin(replayer, pin)));
+    setMoveBoxes(moves.map((move) => measureMove(replayer, move)));
+    if (showsProposedRef.current) {
+      positionProposedClones(replayer, moves);
+    }
+  }, [pins, moves]);
+
+  function stopProgress() {
+    if (progressFrame.current !== null) {
+      window.cancelAnimationFrame(progressFrame.current);
+      progressFrame.current = null;
+    }
+  }
+
+  // Follows the replayer's clock while playing; the replayer itself keeps the time.
+  function followProgress() {
+    stopProgress();
+    const tick = () => {
+      const replayer = replayerRef.current;
+      if (!replayer) {
+        return;
+      }
+      setCurrentMs(replayer.getCurrentTime());
+      progressFrame.current = window.requestAnimationFrame(tick);
+    };
+    progressFrame.current = window.requestAnimationFrame(tick);
+  }
+
+  function play() {
+    const replayer = replayerRef.current;
+    if (!replayer) {
+      return;
+    }
+    replayer.play(currentMs >= totalMs ? 0 : currentMs);
+    setIsPlaying(true);
+    followProgress();
+  }
+
+  function pause() {
+    replayerRef.current?.pause();
+    stopProgress();
+    setIsPlaying(false);
+  }
+
+  function seek(milliseconds: number) {
+    const replayer = replayerRef.current;
+    if (!replayer) {
+      return;
+    }
+    if (isPlaying) {
+      replayer.play(milliseconds);
+    } else {
+      replayer.pause(milliseconds);
+    }
+    setCurrentMs(milliseconds);
+  }
+
+  // Stepping is for looking at one moment, so it also stops the playback there.
+  function stepTo(milliseconds: number) {
+    const replayer = replayerRef.current;
+    if (!replayer) {
+      return;
+    }
+    replayer.pause(milliseconds + 1);
+    stopProgress();
+    setIsPlaying(false);
+    setCurrentMs(milliseconds);
+  }
+
+  function toggleProposed() {
+    const next = !showsProposedRef.current;
+    showsProposedRef.current = next;
+    if (replayerRef.current) {
+      showProposedPositions(replayerRef.current, moves, next);
+    }
+    setShowsProposed(next);
+    measureMarks();
+  }
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -166,6 +646,28 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
     let replayer: Replayer | null = null;
     let isCancelled = false;
     let assetUrls: (string | null)[] = [];
+    let frameDocument: Document | null = null;
+
+    function measurePins() {
+      if (!isCancelled) {
+        measureMarks();
+      }
+    }
+
+    // Marks follow the rebuilt page as it (or a scroll container inside it) is scrolled and once its
+    // fonts have changed the layout.
+    // A rebuild reopens the same document object, which drops its listeners, so they are added again.
+    function followMarks() {
+      frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
+      frameDocument = replayer?.iframe.contentDocument ?? null;
+      frameDocument?.addEventListener('scroll', measurePins, { capture: true, passive: true });
+      // A rebuilt page has no clones yet, so a proposal that is shown is drawn again on it.
+      if (replayer && showsProposedRef.current) {
+        showProposedPositions(replayer, moves, true);
+      }
+      void frameDocument?.fonts.ready.then(measurePins);
+      measurePins();
+    }
 
     function handleWheel(event: WheelEvent) {
       event.preventDefault();
@@ -178,7 +680,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       // Loaded in the browser only: rrweb expects a DOM when its module is evaluated.
       const [{ Replayer: ReplayerClass }, urls] = await Promise.all([
         import('@rrweb/replay'),
-        Promise.all(snapshot.assetHashes.map((hash) => fetchAssetUrl(hash, projectKey, token))),
+        loadAssetUrls(),
       ]);
       assetUrls = urls;
       if (isCancelled) {
@@ -187,7 +689,7 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       }
       setUnloadedAssetCount(urls.filter((url) => url === null).length);
       const events = JSON.parse(
-        resolveAssetReferences(JSON.stringify(snapshot.events), (index) => urls[index] ?? null),
+        resolveAssetReferences(JSON.stringify(screen.events), (index) => urls[index] ?? null),
       ) as ReplayerEvents;
       // rrweb strips scripts and rebuilds into an iframe sandboxed without allow-scripts.
       replayer = new ReplayerClass(events, {
@@ -196,7 +698,30 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
         showWarning: false,
         triggerFocus: false,
       });
+      const hasMarks = pins.length > 0 || moves.length > 0;
+      if (hasMarks) {
+        // Rebuilding the page replaces its document, so the scroll watch is attached after each rebuild.
+        replayer.on('fullsnapshot-rebuilded', followMarks);
+      }
       replayer.pause(0);
+      replayerRef.current = replayer;
+      if (isReplay) {
+        const finished = replayer;
+        finished.on('finish', () => {
+          stopProgress();
+          setIsPlaying(false);
+          setCurrentMs(finished.getMetaData().totalTime);
+        });
+        setTotalMs(replayer.getMetaData().totalTime);
+        setCurrentMs(0);
+        setIsPlaying(false);
+      }
+      const showsProposedAtStart = initiallyShowsProposed && moves.length > 0;
+      showsProposedRef.current = showsProposedAtStart;
+      setShowsProposed(showsProposedAtStart);
+      if (hasMarks) {
+        followMarks();
+      }
     }
 
     void mount(stage);
@@ -204,11 +729,14 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
     return () => {
       isCancelled = true;
       stage.removeEventListener('wheel', handleWheel);
+      frameDocument?.removeEventListener('scroll', measurePins, { capture: true });
+      stopProgress();
       replayer?.destroy();
+      replayerRef.current = null;
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [snapshot, projectKey, token]);
+  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -218,6 +746,23 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
 
   return (
     <div className="flex flex-col gap-2">
+      {isReplay && (
+        <ReplayControls
+          isPlaying={isPlaying}
+          currentMs={currentMs}
+          totalMs={totalMs}
+          steps={steps}
+          onPlay={play}
+          onPause={pause}
+          onSeek={seek}
+          onStep={stepTo}
+        />
+      )}
+      {isTruncated && (
+        <p role="alert" className="text-xs text-amber-700">
+          {REPLAY_TRUNCATED_MESSAGE}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={BUTTON_CLASS} aria-pressed={zoomMode === 'fit'} onClick={() => setZoomMode('fit')}>
           화면에 맞춤
@@ -240,16 +785,44 @@ function ScreenReplay({ snapshot, projectKey, token }: ScreenReplayProps) {
       <div ref={frameRef} className="w-full overflow-auto rounded border bg-white">
         <div className="overflow-hidden" style={{ width: viewportWidth * scale, height: viewportHeight * scale }}>
           <div
-            ref={stageRef}
-            role="img"
-            aria-label="저장된 화면"
-            className="[&_.replayer-mouse]:hidden [&_.replayer-mouse-tail]:hidden"
+            className="relative"
             style={{ width: viewportWidth, height: viewportHeight, transform: `scale(${scale})`, transformOrigin: 'top left' }}
-          />
+          >
+            <div
+              ref={stageRef}
+              role="img"
+              aria-label="저장된 화면"
+              className={isReplay ? '[&_.replayer-mouse-tail]:hidden' : '[&_.replayer-mouse]:hidden [&_.replayer-mouse-tail]:hidden'}
+              style={{ width: viewportWidth, height: viewportHeight }}
+            />
+            <EditMoveOverlay boxes={moveBoxes} scale={scale} showsProposed={showsProposed} />
+            <CommentPinOverlay
+              boxes={pinBoxes}
+              width={viewportWidth}
+              height={viewportHeight}
+              scale={scale} selectedNumber={selectedPin} onSelect={setSelectedPin} />
+          </div>
         </div>
       </div>
+      {moves.length > 0 && <EditMoveList moves={moves} showsProposed={showsProposed} onToggle={toggleProposed} />}
+      {pins.length > 0 && <CommentPinList pins={pins} selectedNumber={selectedPin} onSelect={setSelectedPin} />}
     </div>
   );
+}
+
+interface AdminScreenReplayProps extends Pick<ScreenReplayProps, 'initiallyShowsProposed'> {
+  snapshot: ScreenSnapshot;
+  projectKey: string;
+  token: string;
+}
+
+// The saved files are read with the admin token here, so the shared replay never sees it.
+export function AdminScreenReplay({ snapshot, projectKey, token, initiallyShowsProposed }: AdminScreenReplayProps) {
+  const loadAssetUrls = useCallback(
+    () => Promise.all(snapshot.assetHashes.map((hash) => fetchAssetUrl(hash, projectKey, token))),
+    [snapshot, projectKey, token],
+  );
+  return <ScreenReplay screen={snapshot} loadAssetUrls={loadAssetUrls} initiallyShowsProposed={initiallyShowsProposed} />;
 }
 
 function ScreenSnapshotDetails({ snapshot }: { snapshot: ScreenSnapshot }) {
@@ -290,26 +863,10 @@ export function ScreenSnapshotViewer() {
     }
     const controller = new AbortController();
 
-    async function load() {
-      try {
-        const response = await fetch(`/api/snapshots/${encodeURIComponent(id)}?projectKey=${encodeURIComponent(projectKey)}`, {
-          headers: { authorization: `Bearer ${token}` },
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          setResult({ key: requestKey, status: response.status });
-          return;
-        }
-        const body = (await response.json()) as ScreenSnapshotDetailResponse;
-        setResult({ key: requestKey, snapshot: body.snapshot });
-      } catch {
-        if (!controller.signal.aborted) {
-          setResult({ key: requestKey, status: 0 });
-        }
-      }
-    }
-
-    void load();
+    fetchSavedScreen(id, projectKey, token, controller.signal).then(
+      (loaded) => setResult({ key: requestKey, ...loaded }),
+      () => undefined,
+    );
     return () => controller.abort();
   }, [id, projectKey, token, requestKey]);
 
@@ -333,7 +890,7 @@ export function ScreenSnapshotViewer() {
     return (
       <>
         <ScreenSnapshotDetails snapshot={result.snapshot} />
-        <ScreenReplay snapshot={result.snapshot} projectKey={projectKey} token={token} />
+        <AdminScreenReplay snapshot={result.snapshot} projectKey={projectKey} token={token} />
       </>
     );
   }

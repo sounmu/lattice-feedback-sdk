@@ -1,3 +1,5 @@
+import { GzipLimitExceededError, gunzipBytesWithLimit, isGzipBody } from '@/lib/gzip';
+
 export class BodyTooLargeError extends Error {
   constructor() {
     super('Request body is too large.');
@@ -15,7 +17,7 @@ export function isDeclaredBodyTooLarge(request: Request, maxBytes: number): bool
 
 // Reads at most maxBytes and cancels the stream as soon as the limit is crossed,
 // so an oversized body (with or without content-length) is never fully buffered.
-export async function readBodyBytesWithLimit(request: Request, maxBytes: number): Promise<Uint8Array> {
+export async function readBodyBytesWithLimit(request: Request, maxBytes: number): Promise<Uint8Array<ArrayBuffer>> {
   if (!request.body) {
     return new Uint8Array();
   }
@@ -41,6 +43,22 @@ export async function readBodyBytesWithLimit(request: Request, maxBytes: number)
     offset += chunk.byteLength;
   }
   return body;
+}
+
+// A gzip body is limited twice: as sent, and as unpacked.
+export async function readEncodedBodyTextWithLimit(request: Request, maxBytes: number, maxUnpackedBytes: number): Promise<string> {
+  const body = await readBodyBytesWithLimit(request, maxBytes);
+  if (!isGzipBody(request.headers)) {
+    return new TextDecoder().decode(body);
+  }
+  try {
+    return new TextDecoder().decode(await gunzipBytesWithLimit(body, maxUnpackedBytes));
+  } catch (error) {
+    if (error instanceof GzipLimitExceededError) {
+      throw new BodyTooLargeError();
+    }
+    throw error;
+  }
 }
 
 export async function readBodyTextWithLimit(request: Request, maxBytes: number): Promise<string> {

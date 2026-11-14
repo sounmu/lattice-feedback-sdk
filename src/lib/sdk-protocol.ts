@@ -55,6 +55,12 @@ function hasEnvelope(value: unknown): value is UnknownRecord & { type: unknown; 
   return value.source === MESSAGE_SOURCE && value.version === PROTOCOL_VERSION && isRecord(value.payload);
 }
 
+const MAX_REQUEST_ID_LENGTH = 64;
+
+function isRequestId(value: unknown): boolean {
+  return typeof value === 'string' && value.length > 0 && value.length <= MAX_REQUEST_ID_LENGTH;
+}
+
 export function isHostToWidgetMessage(value: unknown): value is HostToWidgetMessage {
   if (!hasEnvelope(value)) {
     return false;
@@ -68,9 +74,9 @@ export function isHostToWidgetMessage(value: unknown): value is HostToWidgetMess
     case 'page:update':
       return isPageContext(payload.page);
     case 'screen:captured':
-      return isCapturedScreen(payload.screen) && isAssetFileList(payload.assetFiles);
+      return isRequestId(payload.requestId) && isCapturedScreen(payload.screen) && isAssetFileList(payload.assetFiles);
     case 'screen:capture-failed':
-      return isScreenCaptureFailureReason(payload.reason);
+      return isRequestId(payload.requestId) && isScreenCaptureFailureReason(payload.reason);
     default:
       return false;
   }
@@ -83,8 +89,10 @@ export function isWidgetToHostMessage(value: unknown): value is WidgetToHostMess
   switch (value.type) {
     case 'ready':
     case 'close':
-    case 'screen:capture':
       return true;
+    case 'screen:capture':
+    case 'flow:capture':
+      return isRequestId(value.payload.requestId);
     case 'submitted':
       return typeof value.payload.feedbackId === 'string' && value.payload.feedbackId.length > 0;
     default:

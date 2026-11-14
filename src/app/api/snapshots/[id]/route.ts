@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { GZIP_MEDIA_TYPE, gzipBytes } from '@/lib/gzip';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
@@ -27,7 +28,12 @@ export async function GET(request: Request, context: RouteContext) {
       return createApiErrorResponse(404, 'screen_snapshot_not_found', 'Saved screen not found.');
     }
     const body: ScreenSnapshotDetailResponse = { snapshot };
-    return NextResponse.json(body);
+    if (!request.headers.get('accept')?.includes(GZIP_MEDIA_TYPE)) {
+      return NextResponse.json(body);
+    }
+    // A long Flow replay is larger than the platform's response limit, so a viewer that asks gets a gzip file.
+    const compressed = await gzipBytes(new TextEncoder().encode(JSON.stringify(body)));
+    return new Response(compressed, { headers: { 'Content-Type': GZIP_MEDIA_TYPE, Vary: 'Accept' } });
   } catch (error) {
     if (error instanceof FeedbackStorageUnavailableError) {
       return createApiErrorResponse(503, 'storage_unavailable', 'Screen storage is unavailable.');

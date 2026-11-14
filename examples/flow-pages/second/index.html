@@ -9,10 +9,12 @@
     <main>
       <h1>Flow 두 번째 화면</h1>
       <button data-feedback-id="save-button" type="button">저장</button>
+      <p id="save-result" role="status">두 번째 화면 저장 전</p>
       <a data-feedback-id="next-page" href="/first/">첫 문서로 돌아가기</a>
     </main>
     <script src="http://localhost:3000/sdk.js" data-project-key="demo"
       data-capture-policy='{"allowedPaths":["/first/","/second/"],"targets":[{"id":"test-input","selector":"[data-feedback-id=\"test-input\"]"},{"id":"save-button","selector":"[data-feedback-id=\"save-button\"]"},{"id":"next-page","selector":"[data-feedback-id=\"next-page\"]"}]}'
       onload="window.LatticeFeedback.setUser({id:'flow-test',name:'Flow Test'})"></script>
+    <script src="/flow-demo.js"></script>
   </body>
 </html>

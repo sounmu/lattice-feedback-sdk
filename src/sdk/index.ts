@@ -1,5 +1,5 @@
 import { FeedbackSdk } from '@/sdk/feedback-sdk';
-import { findCapturePolicyFromJson } from '@/lib/capture-policy';
+import { resolveCapturePolicyFromJson } from '@/lib/capture-policy';
 import { findOriginFromScriptSource, findSdkScriptElement } from '@/sdk/script-origin';
 import type { LatticeFeedbackApi } from '@/sdk/types';
 
@@ -41,7 +41,7 @@ function bootstrap(): void {
 
   const projectKey = scriptElement.dataset.projectKey;
   if (projectKey) {
-    const capturePolicy = findCapturePolicyFromJson(scriptElement.dataset.capturePolicy);
+    const capturePolicy = resolveCapturePolicyFromJson(scriptElement.dataset.capturePolicy);
     sdk.init({ projectKey, capturePolicy: capturePolicy ?? undefined });
   }
 }
