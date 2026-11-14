@@ -4,6 +4,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 
 import { FeedbackListItem } from '@/components/admin/FeedbackListItem';
 import { ShortcutKey } from '@/components/admin/ShortcutKey';
+import { SidePaneToggle } from '@/components/admin/SidePaneToggle';
 import {
   countFeedbacksByStatus,
   DEFAULT_FEEDBACK_LIST_QUERY,
@@ -25,6 +26,8 @@ interface FeedbackListViewProps {
   selectedId: string | null;
   /** Given when a feedback opens next to the list instead of on its own page. */
   onSelect?: (id: string) => void;
+  /** Given when the list can fold to the side. */
+  onCollapse?: () => void;
 }
 
 const STATUS_TABS: StatusFilter[] = ['all', ...FEEDBACK_STATUSES];
@@ -34,7 +37,7 @@ function getStatusTabLabel(status: StatusFilter): string {
   return status === 'all' ? '전체' : FEEDBACK_STATUS_LABELS[status];
 }
 
-export function FeedbackListView({ items, projectKey, nowTimestamp, onReload, selectedId, onSelect }: FeedbackListViewProps) {
+export function FeedbackListView({ items, projectKey, nowTimestamp, onReload, selectedId, onSelect, onCollapse }: FeedbackListViewProps) {
   const [query, setQuery] = useState<FeedbackListQuery>(DEFAULT_FEEDBACK_LIST_QUERY);
   const counts = countFeedbacksByStatus(items);
   const visibleItems = filterFeedbacks(items, query);
@@ -71,9 +74,12 @@ export function FeedbackListView({ items, projectKey, nowTimestamp, onReload, se
     <section className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-bold">받은 피드백</h1>
-        <button type="button" onClick={onReload} className={`${FIELD_CLASS_NAME} text-(--admin-text-sub)`}>
-          새로고침
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onReload} className={`${FIELD_CLASS_NAME} text-(--admin-text-sub)`}>
+            새로고침
+          </button>
+          {onCollapse ? <SidePaneToggle isCollapsed={false} side="left" label="피드백 목록" onToggle={onCollapse} /> : null}
+        </div>
       </div>
 
       <div role="tablist" aria-label="상태별 보기" className="flex flex-wrap gap-2">
