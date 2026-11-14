@@ -33,6 +33,8 @@ interface StyleRule {
 /** The CSS text a stylesheet change can carry, whichever of the three sources recorded it. */
 interface StyleSheetChange {
   source: number;
+  /** rrweb node id of the element that owns the stylesheet; absent for a stylesheet made through script. */
+  id?: number;
   adds?: StyleRule[];
   replace?: string;
   replaceSync?: string;
@@ -72,7 +74,7 @@ export function createReplayAssetRoot(events: readonly ScreenSnapshotEvent[], el
       rewrites.push(...addStyleTexts(node, undefined, styleTextIds, target));
       continue;
     }
-    if (event.type === RRWEB_INCREMENTAL_EVENT_TYPE && STYLE_SHEET_SOURCES.has((event.data as StyleSheetChange).source)) {
+    if (isStyleSheetChange(event)) {
       rewrites.push(...addStyleSheetChange(event.data as StyleSheetChange, target));
       continue;
     }
@@ -115,9 +117,9 @@ export function createReplayAssetRoot(events: readonly ScreenSnapshotEvent[], el
 }
 
 // CSS text kept outside an attribute stands in as a stylesheet of its own, so its fonts and images are
-// saved, or recorded as missing, like those of any other stylesheet. Its URLs are resolved against the
-// document: a rule added to a linked stylesheet whose own address differs is resolved the same way, since
-// that address is not part of the recording.
+// saved, or recorded as missing, like those of any other stylesheet. URLs that are still relative
+// here are resolved against the document; those of a rule set in a linked stylesheet were resolved against
+// that stylesheet when the rule was recorded.
 function addCssText(cssText: string, { baseUrl, childNodes }: CssTextTarget, write: (rewritten: string) => void): (() => void)[] {
   if (!cssText.includes(CSS_URL_MARKER)) {
     return [];
@@ -151,26 +153,72 @@ function addStyleTexts(
   return rewrites;
 }
 
-function addStyleSheetChange(change: StyleSheetChange, target: CssTextTarget): (() => void)[] {
+interface CssTextSlot {
+  cssText: string;
+  write(rewritten: string): void;
+}
+
+// Every place a stylesheet change keeps CSS text, whichever source recorded it.
+function findCssTextSlots(change: StyleSheetChange): CssTextSlot[] {
   const rules = [...(change.adds ?? []), ...(change.styles ?? []).flatMap((style) => style.rules)];
-  const rewrites = rules.flatMap((rule) => addCssText(rule.rule, target, (rewritten) => {
-    rule.rule = rewritten;
+  const slots: CssTextSlot[] = rules.map((rule) => ({
+    cssText: rule.rule,
+    write: (rewritten) => {
+      rule.rule = rewritten;
+    },
   }));
   for (const key of ['replace', 'replaceSync'] as const) {
     const cssText = change[key];
     if (typeof cssText === 'string') {
-      rewrites.push(...addCssText(cssText, target, (rewritten) => {
-        change[key] = rewritten;
-      }));
+      slots.push({
+        cssText,
+        write: (rewritten) => {
+          change[key] = rewritten;
+        },
+      });
     }
   }
   const declaration = change.set;
   if (declaration && typeof declaration.value === 'string') {
-    rewrites.push(...addCssText(declaration.value, target, (rewritten) => {
-      declaration.value = rewritten;
-    }));
+    slots.push({
+      cssText: declaration.value,
+      write: (rewritten) => {
+        declaration.value = rewritten;
+      },
+    });
   }
-  return rewrites;
+  return slots;
+}
+
+function addStyleSheetChange(change: StyleSheetChange, target: CssTextTarget): (() => void)[] {
+  return findCssTextSlots(change).flatMap(({ cssText, write }) => addCssText(cssText, target, write));
+}
+
+function isStyleSheetChange(event: ScreenSnapshotEvent): boolean {
+  return event.type === RRWEB_INCREMENTAL_EVENT_TYPE && STYLE_SHEET_SOURCES.has((event.data as StyleSheetChange).source);
+}
+
+/** The rrweb node id of the element whose stylesheet an event changed. Undefined for any other event. */
+export function findStyleSheetOwnerId(event: ScreenSnapshotEvent): number | undefined {
+  if (!isStyleSheetChange(event)) {
+    return undefined;
+  }
+  const { id } = event.data as StyleSheetChange;
+  return typeof id === 'number' ? id : undefined;
+}
+
+/**
+ * A copy of a stylesheet change with its URLs made absolute against the stylesheet's own address. A rule
+ * set in a linked stylesheet is relative to that file, which only the live page can tell.
+ */
+export function resolveStyleSheetChange(event: ScreenSnapshotEvent, styleSheetUrl: string): ScreenSnapshotEvent {
+  const copy = JSON.parse(JSON.stringify(event)) as ScreenSnapshotEvent;
+  for (const { cssText, write } of findCssTextSlots(copy.data as StyleSheetChange)) {
+    if (cssText.includes(CSS_URL_MARKER)) {
+      write(resolveCssUrls(cssText, styleSheetUrl));
+    }
+  }
+  return copy;
 }
 
 // Which candidate the browser shows after a later srcset change is not known when the change is recorded

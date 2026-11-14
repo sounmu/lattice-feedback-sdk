@@ -19,6 +19,7 @@ import { openReplayStore, type ReplayChunk } from '@/sdk/flow-replay-session';
 import { getPageUrl } from '@/sdk/page-context';
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { isMutationEvent, sanitizeReplayEvents, trimReplayStart, type MutationData, type RecordedElements } from '@/sdk/replay-sanitize';
+import { findStyleSheetOwnerId, resolveStyleSheetChange } from '@/sdk/replay-assets';
 import { BLOCKED_SELECTOR, findLoadedFontFamilies, findUsedCssImageUrls, MASKED_SELECTOR } from '@/sdk/screen-capture';
 import type { SnapshotNode } from '@/sdk/snapshot-assets';
 import type { ScreenSnapshotEvent, ScreenSnapshotPage } from '@/types/screen-snapshot';
@@ -63,6 +64,18 @@ export interface ReplayRecorder {
 
 function createUnsaved(): Pick<ReplayChunk, 'events' | 'bytes' | 'usedCssImageUrls' | 'loadedFontFamilies' | 'liveImageSources'> {
   return { events: [], bytes: 0, usedCssImageUrls: [], loadedFontFamilies: [], liveImageSources: [] };
+}
+
+// rrweb records a rule set through script as the page wrote it. In a linked stylesheet its URLs are relative
+// to that file, so they are made absolute while the page can still tell where the file is.
+function resolveLinkedStyleSheetUrls(event: ScreenSnapshotEvent): ScreenSnapshotEvent {
+  const ownerId = findStyleSheetOwnerId(event);
+  if (ownerId === undefined) {
+    return event;
+  }
+  const owner = record.mirror.getNode(ownerId) as { sheet?: { href?: string | null } | null } | null;
+  const styleSheetUrl = owner?.sheet?.href;
+  return styleSheetUrl ? resolveStyleSheetChange(event, styleSheetUrl) : event;
 }
 
 export function startReplayRecording(sdkSelector: string, session: ReplaySession): ReplayRecorder {
@@ -204,10 +217,11 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
     }
   }
 
-  function handleEvent(event: ScreenSnapshotEvent): void {
-    if (truncated || !RECORDED_EVENT_TYPES.has(event.type)) {
+  function handleEvent(emitted: ScreenSnapshotEvent): void {
+    if (truncated || !RECORDED_EVENT_TYPES.has(emitted.type)) {
       return;
     }
+    const event = resolveLinkedStyleSheetUrls(emitted);
     // The page is read now, even when the event itself has to wait for the saved part.
     sampleAddedImages(event);
     if (event.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
