@@ -20,12 +20,12 @@ import {
   MAX_REPLAY_DURATION_MS,
   MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK,
 } from '@/lib/feedback-limits';
+import { describeTarget } from '@/lib/target-labels';
 import type { EditAttachment, ElementTarget, FlowAttachment, FlowEventType } from '@/types/feedback';
 import type { AttachmentKind, CaptureMode, CaptureState } from '@/types/sdk-message';
 
 type Attachments = CaptureState['attachments'];
 
-const MAX_TARGET_LABEL_LENGTH = 60;
 const MAX_FLOW_LABELS = 5;
 const MAX_FLOWS = 1;
 const MAX_REPLAY_MINUTES = Math.round(MAX_REPLAY_DURATION_MS / 60000);
@@ -51,11 +51,7 @@ const FLOW_EVENT_LABELS: Record<FlowEventType, string> = {
 const MODES: CaptureMode[] = ['comment', 'edit', 'flow'];
 
 export function getTargetLabel(target: Pick<ElementTarget, 'feedbackId' | 'tagName'>): string {
-  const label = target.feedbackId ?? target.tagName.toLowerCase();
-  if (label.length <= MAX_TARGET_LABEL_LENGTH) {
-    return label;
-  }
-  return `${label.slice(0, MAX_TARGET_LABEL_LENGTH)}…`;
+  return describeTarget(target);
 }
 
 function getEditSummary(edit: EditAttachment): string {
@@ -212,6 +208,7 @@ export function CaptureAttachmentCards({ attachments, disabled, onRemove }: Capt
       {attachments.comments.map((comment, index) => (
         <AttachmentCard
           key={`comment-${index}`}
+          kind="comment"
           icon={<PinIcon className="size-4" />}
           title={`코멘트 ${index + 1}`}
           description={`${getTargetLabel(comment.target)} · ${comment.comment}`}
@@ -223,6 +220,7 @@ export function CaptureAttachmentCards({ attachments, disabled, onRemove }: Capt
       {attachments.edits.map((edit, index) => (
         <AttachmentCard
           key={`edit-${index}`}
+          kind="edit"
           icon={<MoveIcon className="size-4" />}
           title={`위치 편집 ${index + 1}`}
           description={getEditSummary(edit)}
@@ -233,6 +231,7 @@ export function CaptureAttachmentCards({ attachments, disabled, onRemove }: Capt
       ))}
       {attachments.flow ? (
         <AttachmentCard
+          kind="flow"
           icon={<FlowIcon className="size-4" />}
           title={`흐름 기록 · 이벤트 ${attachments.flow.events.length}개`}
           description={getFlowSequence(attachments.flow) || '기록된 동작이 없어요'}
@@ -329,7 +328,7 @@ export function CaptureModeView({
             <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
               취소
             </button>
-            <button type="button" className={PRIMARY_BUTTON_CLASS} disabled={!canAttachComment} onClick={handleAttachComment}>
+            <button type="button" className={PRIMARY_BUTTON_CLASS} disabled={!canAttachComment} onClick={handleAttachComment} data-autofocus>
               코멘트 첨부
             </button>
           </div>
@@ -348,7 +347,7 @@ export function CaptureModeView({
           </WidgetBanner>
         </WidgetBody>
         <WidgetFooter>
-          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
+          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel} data-autofocus>
             요소 코멘트 취소
           </button>
         </WidgetFooter>
@@ -359,14 +358,22 @@ export function CaptureModeView({
   if (activeMode === 'edit') {
     return (
       <>
-        <WidgetHeader title="위치 편집" subtitle={`위치 편집 ${attachments.edits.length + 1}/${MAX_EDITS}`} onClose={onClose} />
+        <WidgetHeader title="위치 편집" subtitle={`위치 편집 ${attachments.edits.length + 1}/${MAX_EDITS} · Esc 키로도 취소할 수 있어요`} onClose={onClose} />
         <WidgetBody>
-          <WidgetBanner tone="info" title="요소를 원하는 곳으로 끌어 놓으세요" icon={<MoveIcon className="size-4 text-fw-primary" />}>
-            다 옮겼으면 페이지 위의 <strong>변경 첨부</strong> 버튼을 눌러 주세요. 미리보기일 뿐이라 실제 화면과 데이터는 바뀌지 않아요.
-          </WidgetBanner>
+          {selection ? (
+            <WidgetBanner tone="info" title="요소를 골랐어요" icon={<CheckIcon className="size-4 text-fw-primary" />}>
+              옮기는 요소{' '}
+              <code className="rounded bg-fw-surface px-1.5 py-0.5 font-mono text-xs">{getTargetLabel(selection)}</code>
+              <p className="mt-1">페이지에서 끌어 옮긴 뒤 <strong>변경 첨부</strong>를 눌러 주세요. 방향키로도 옮길 수 있어요.</p>
+            </WidgetBanner>
+          ) : (
+            <WidgetBanner tone="info" title="요소를 원하는 곳으로 끌어 놓으세요" icon={<MoveIcon className="size-4 text-fw-primary" />}>
+              먼저 페이지에서 옮길 요소를 클릭하세요. 다 옮겼으면 페이지 위의 <strong>변경 첨부</strong> 버튼을 눌러 주세요. 미리보기일 뿐이라 실제 화면과 데이터는 바뀌지 않아요.
+            </WidgetBanner>
+          )}
         </WidgetBody>
         <WidgetFooter>
-          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
+          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel} data-autofocus>
             위치 편집 취소
           </button>
         </WidgetFooter>
@@ -397,7 +404,7 @@ export function CaptureModeView({
           <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
             기록 취소
           </button>
-          <button type="button" className={DANGER_BUTTON_CLASS} disabled={disabled} onClick={onStopFlow}>
+          <button type="button" className={DANGER_BUTTON_CLASS} disabled={disabled} onClick={onStopFlow} data-autofocus>
             기록 종료 및 첨부
           </button>
         </div>

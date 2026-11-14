@@ -85,6 +85,8 @@ export function WidgetBanner({ tone, title, children, isAlert = false, icon }: W
 }
 
 interface AttachmentCardProps {
+  /** Which kind of attachment the card holds, so the newest card of a kind can be scrolled into view. */
+  kind: 'comment' | 'edit' | 'flow' | 'screen';
   icon: ReactNode;
   title: string;
   description: string;
@@ -95,9 +97,9 @@ interface AttachmentCardProps {
   actions?: ReactNode;
 }
 
-export function AttachmentCard({ icon, title, description, removeLabel, disabled, onRemove, actions }: AttachmentCardProps) {
+export function AttachmentCard({ kind, icon, title, description, removeLabel, disabled, onRemove, actions }: AttachmentCardProps) {
   return (
-    <li className="flex items-center gap-2 rounded-xl border border-fw-border bg-fw-surface p-2">
+    <li data-kind={kind} className="flex items-center gap-2 rounded-xl border border-fw-border bg-fw-surface p-2">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-fw-primary-weak text-fw-primary">{icon}</span>
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold">{title}</p>

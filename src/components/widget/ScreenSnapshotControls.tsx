@@ -77,6 +77,7 @@ export function ScreenSnapshotControls({
         return (
           <AttachmentCard
             key={id}
+            kind="screen"
             icon={<CameraIcon className="size-4" />}
             title={title}
             description={getScreenDescription(snapshot, origin)}
