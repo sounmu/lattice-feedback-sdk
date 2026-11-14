@@ -35,6 +35,14 @@ const SCREEN: CapturedScreen = {
 };
 
 describe('isHostToWidgetMessage', () => {
+  it('accepts boolean visibility only and rejects malformed identity proofs', () => {
+    const visible = createHostToWidgetMessage('visibility:update', { isOpen: true });
+    expect(isHostToWidgetMessage(visible)).toBe(true);
+    expect(isHostToWidgetMessage({ ...visible, payload: { isOpen: 'true' } })).toBe(false);
+    expect(isHostToWidgetMessage({
+      ...INIT_MESSAGE, payload: { ...INIT_MESSAGE.payload, reporter: { id: 'alice', name: 'Alice', identity: { signature: 'bad' } } },
+    })).toBe(false);
+  });
   it('accepts built messages of every type', () => {
     expect(isHostToWidgetMessage(INIT_MESSAGE)).toBe(true);
     expect(isHostToWidgetMessage(createHostToWidgetMessage('screen:captured', { requestId: 'request-1', screen: SCREEN, assetFiles: [] }))).toBe(true);

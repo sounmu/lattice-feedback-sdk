@@ -88,6 +88,7 @@ export class FeedbackSdk {
     this.panelElement.classList.add(PANEL_OPEN_CLASS_NAME);
     this.launcherButton.setAttribute('aria-expanded', 'true');
     this.isPanelOpen = true;
+    this.postToWidget(createHostToWidgetMessage('visibility:update', { isOpen: true }));
     // The viewport may have changed since the iframe was created, so refresh on every open.
     this.updatePageContext();
     this.captureController?.setPanelVisible(true);
@@ -106,6 +107,7 @@ export class FeedbackSdk {
     this.panelElement.classList.remove(PANEL_OPEN_CLASS_NAME);
     this.launcherButton.setAttribute('aria-expanded', 'false');
     this.isPanelOpen = false;
+    this.postToWidget(createHostToWidgetMessage('visibility:update', { isOpen: false }));
     this.stopResizeTracking();
     this.captureController?.setPanelVisible(false);
   }
@@ -200,6 +202,7 @@ export class FeedbackSdk {
       }),
     );
     this.captureController?.sync();
+    this.postToWidget(createHostToWidgetMessage('visibility:update', { isOpen: this.isPanelOpen }));
   }
 
   private stopResizeTracking(): void {
