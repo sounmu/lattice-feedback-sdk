@@ -7,6 +7,7 @@ import { FeedbackActionPanel } from '@/components/admin/FeedbackActionPanel';
 import { StatusBadge, TypeBadge } from '@/components/admin/FeedbackBadges';
 import { FlowTimeline } from '@/components/admin/FlowTimeline';
 import { SavedScreenList } from '@/components/admin/SavedScreenList';
+import { TicketDraftPanel } from '@/components/admin/TicketDraftPanel';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
 import { formatDateTime, getPagePath } from '@/lib/feedback-display';
 import type { FeedbackDetailResponse, UpdateFeedbackInput } from '@/types/feedback';
@@ -71,6 +72,8 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
               <SavedScreenList screens={screenSnapshots} projectKey={projectKey} />
             </Section>
           ) : null}
+
+          <TicketDraftPanel key={feedback.id} detail={detail} />
         </div>
 
         <aside className="flex flex-col gap-4">
