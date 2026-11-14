@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { countFeedbacksByStatus, DEFAULT_FEEDBACK_LIST_QUERY, filterFeedbacks } from '@/lib/admin-feedback-list';
+import { countFeedbacksByStatus, DEFAULT_FEEDBACK_LIST_QUERY, filterDuplicateCandidates, filterFeedbacks } from '@/lib/admin-feedback-list';
 import { MOCK_FEEDBACKS } from '@/mocks/feedback';
 import type { Feedback } from '@/types/feedback';
 
@@ -71,12 +71,22 @@ describe('filterFeedbacks', () => {
   });
 });
 
+describe('filterDuplicateCandidates', () => {
+  it('offers every other feedback that is not itself a duplicate, newest first, narrowed by the keyword', () => {
+    const duplicate = createFeedback({ id: 'd', status: 'duplicate', duplicateOfId: 'a', createdAt: '2026-11-14T01:00:00.000Z' });
+    const items = [...ITEMS, duplicate];
+
+    expect(getIds(filterDuplicateCandidates(items, 'b', ''))).toEqual(['c', 'a']);
+    expect(getIds(filterDuplicateCandidates(items, 'b', '엑셀'))).toEqual(['a']);
+  });
+});
+
 describe('countFeedbacksByStatus', () => {
   it('counts every status and the total', () => {
-    expect(countFeedbacksByStatus(ITEMS)).toEqual({ all: 3, open: 1, in_progress: 1, resolved: 1 });
+    expect(countFeedbacksByStatus(ITEMS)).toEqual({ all: 3, open: 1, in_progress: 1, resolved: 1, rejected: 0, duplicate: 0 });
   });
 
   it('returns zeros for an empty list', () => {
-    expect(countFeedbacksByStatus([])).toEqual({ all: 0, open: 0, in_progress: 0, resolved: 0 });
+    expect(countFeedbacksByStatus([])).toEqual({ all: 0, open: 0, in_progress: 0, resolved: 0, rejected: 0, duplicate: 0 });
   });
 });

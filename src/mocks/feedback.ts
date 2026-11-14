@@ -19,6 +19,7 @@ export const MOCK_FEEDBACKS: Feedback[] = [
     message: '주문 목록에서 엑셀 다운로드 버튼을 누르면 아무 반응이 없습니다.',
     type: 'bug',
     status: 'open',
+    duplicateOfId: null,
     reporter: { id: 'user_001', name: '테스트 사용자 A', email: 'tester-a@example.com' },
     page: createDemoPage('/orders', '주문 관리'),
     attachments: { comments: [], edits: [], flow: null },
@@ -32,6 +33,7 @@ export const MOCK_FEEDBACKS: Feedback[] = [
     message: '검색 필터 라벨이 무엇을 의미하는지 잘 모르겠어요.',
     type: 'question',
     status: 'in_progress',
+    duplicateOfId: null,
     reporter: { id: 'user_002', name: '테스트 사용자 B' },
     page: createDemoPage('/inventory', '재고 현황'),
     attachments: {
@@ -59,6 +61,7 @@ export const MOCK_FEEDBACKS: Feedback[] = [
     message: '저장 버튼이 화면 아래에 있어서 매번 스크롤해야 합니다. 상단으로 옮겨 주세요.',
     type: 'improvement',
     status: 'resolved',
+    duplicateOfId: null,
     reporter: { id: 'user_003', name: '테스트 사용자 C', email: 'tester-c@example.com' },
     page: createDemoPage('/settings/profile', '프로필 설정'),
     attachments: {
@@ -90,6 +93,7 @@ export const MOCK_FEEDBACKS: Feedback[] = [
     message: '거래처를 등록하고 목록으로 돌아오면 방금 등록한 거래처가 보이지 않습니다.',
     type: 'bug',
     status: 'open',
+    duplicateOfId: null,
     reporter: { id: 'user_004', name: '테스트 사용자 D' },
     page: createDemoPage('/partners', '거래처 목록'),
     attachments: {

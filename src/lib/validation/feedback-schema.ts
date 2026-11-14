@@ -14,7 +14,7 @@ const MAX_SHORT_TEXT_LENGTH = 200;
 const MAX_URL_LENGTH = 2048;
 
 const FEEDBACK_TYPES = ['bug', 'improvement', 'question', 'other'] as const;
-const FEEDBACK_STATUSES = ['open', 'in_progress', 'resolved'] as const;
+const FEEDBACK_STATUSES = ['open', 'in_progress', 'resolved', 'rejected', 'duplicate'] as const;
 const FLOW_EVENT_TYPES = ['click', 'navigation', 'input'] as const;
 
 function findHttpUrl(value: string): URL | null {
@@ -133,10 +133,16 @@ export const createFeedbackInputSchema = z.object({
     .default([]),
 });
 
-export const updateFeedbackInputSchema = z.object({
-  status: z.enum(FEEDBACK_STATUSES).optional(),
-  adminReply: z.string().max(MAX_REPLY_LENGTH).nullable().optional(),
-});
+export const updateFeedbackInputSchema = z
+  .object({
+    status: z.enum(FEEDBACK_STATUSES).optional(),
+    adminReply: z.string().max(MAX_REPLY_LENGTH).nullable().optional(),
+    /** The original feedback. Sent together with the duplicate status, and only then. */
+    duplicateOfId: z.uuid().optional(),
+  })
+  .refine((input) => (input.status === 'duplicate') === (input.duplicateOfId !== undefined), {
+    message: 'duplicateOfId is required with the duplicate status and not accepted otherwise',
+  });
 
 // Compile-time checks: parsed output must be assignable to the shared types.
 type IsAssignable<TFrom, TTo> = [TFrom] extends [TTo] ? true : false;

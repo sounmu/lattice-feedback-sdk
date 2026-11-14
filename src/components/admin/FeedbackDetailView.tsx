@@ -46,6 +46,17 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
               <StatusBadge status={feedback.status} />
               <TypeBadge type={feedback.type} />
             </div>
+            {feedback.duplicateOfId ? (
+              <p className="text-sm text-(--admin-text-sub)">
+                먼저 접수된 피드백과 같은 내용으로 표시했어요.{' '}
+                <Link
+                  href={`/admin/feedback/${encodeURIComponent(feedback.duplicateOfId)}?projectKey=${encodeURIComponent(projectKey)}`}
+                  className="font-semibold text-(--admin-primary)"
+                >
+                  원본 피드백 보기
+                </Link>
+              </p>
+            ) : null}
             <p className="whitespace-pre-wrap text-base">{feedback.message}</p>
           </Section>
 

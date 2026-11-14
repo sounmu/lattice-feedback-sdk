@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
@@ -6,7 +7,7 @@ import { createApiErrorResponse } from '@/lib/http/api-error';
 import { findProject } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
-import type { Feedback, FeedbackDetailResponse } from '@/types/feedback';
+import type { Feedback, FeedbackDetailResponse, UpdateFeedbackInput } from '@/types/feedback';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -68,13 +69,22 @@ export async function PATCH(request: Request, context: RouteContext) {
     return createApiErrorResponse(400, 'invalid_body', 'Request body failed validation.');
   }
 
+  const changes: UpdateFeedbackInput = { ...parsed.data };
+  if (changes.status !== undefined && changes.status !== 'duplicate') {
+    // Leaving the duplicate status drops the link to the original.
+    changes.duplicateOfId = null;
+  }
+
   try {
-    const feedback = await getFeedbackRepository().update(project.projectKey, id, parsed.data);
+    const feedback = await getFeedbackRepository().update(project.projectKey, id, changes);
     if (!feedback) {
       return createFeedbackNotFoundResponse();
     }
     return NextResponse.json(await createDetailBody(feedback));
   } catch (error) {
+    if (error instanceof FeedbackDuplicateTargetError) {
+      return createApiErrorResponse(400, 'invalid_duplicate_target', error.message);
+    }
     if (error instanceof FeedbackStorageUnavailableError) {
       return createApiErrorResponse(503, 'storage_unavailable', error.message);
     }

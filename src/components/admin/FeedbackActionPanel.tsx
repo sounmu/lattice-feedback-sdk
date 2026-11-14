@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { DuplicateOriginalPicker } from '@/components/admin/DuplicateOriginalPicker';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
 import { FEEDBACK_STATUS_LABELS, FEEDBACK_STATUSES } from '@/lib/feedback-display';
 import type { Feedback, FeedbackStatus, UpdateFeedbackInput } from '@/types/feedback';
@@ -23,13 +24,20 @@ const SAVE_STATUS_MESSAGES: Record<SaveStatus, string> = {
 export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, onSave }: FeedbackActionPanelProps) {
   const [status, setStatus] = useState<FeedbackStatus>(feedback.status);
   const [reply, setReply] = useState(feedback.adminReply ?? '');
+  const [duplicateOfId, setDuplicateOfId] = useState(feedback.duplicateOfId ?? '');
   const isSaving = saveStatus === 'saving';
-  const isChanged = status !== feedback.status || reply.trim() !== (feedback.adminReply ?? '');
+  const isOriginalChanged = status === 'duplicate' && duplicateOfId !== (feedback.duplicateOfId ?? '');
+  const isStatusChanged = status !== feedback.status || isOriginalChanged;
+  const isOriginalMissing = status === 'duplicate' && duplicateOfId === '';
+  const isChanged = isStatusChanged || reply.trim() !== (feedback.adminReply ?? '');
 
   async function handleSave() {
     const changes: UpdateFeedbackInput = {};
-    if (status !== feedback.status) {
+    if (isStatusChanged) {
       changes.status = status;
+      if (status === 'duplicate') {
+        changes.duplicateOfId = duplicateOfId;
+      }
     }
     if (reply.trim() !== (feedback.adminReply ?? '')) {
       changes.adminReply = reply.trim() === '' ? null : reply.trim();
@@ -58,6 +66,10 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
         ))}
       </fieldset>
 
+      {status === 'duplicate' ? (
+        <DuplicateOriginalPicker feedbackId={feedback.id} value={duplicateOfId} disabled={isSaving} onChange={setDuplicateOfId} />
+      ) : null}
+
       <label htmlFor="admin-reply" className="text-sm font-semibold">
         답변
       </label>
@@ -75,7 +87,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
         <button
           type="button"
           onClick={handleSave}
-          disabled={!isChanged || isSaving}
+          disabled={!isChanged || isSaving || isOriginalMissing}
           className="min-h-11 rounded-[10px] bg-(--admin-primary) px-5 font-semibold text-white hover:bg-(--admin-primary-hover) disabled:opacity-50"
         >
           저장
