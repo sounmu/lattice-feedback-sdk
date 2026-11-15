@@ -14,8 +14,8 @@ import { describeTarget } from '@/lib/target-labels';
 import type { CaptureTarget } from '@/sdk/capture-policy';
 import { SDK_Z_INDEX } from '@/sdk/styles';
 import {
-  getStateLayer, getTranslucentColor, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT_FAMILY, SDK_PRESSED_SCALE, SDK_RADIUS,
-  SDK_SHADOW, SDK_THEME, SDK_THEME_DARK,
+  getStateLayer, getTranslucentColor, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT_FAMILY, SDK_HOVER_MEDIA, SDK_NO_TAP_HIGHLIGHT,
+  SDK_PRESSED_SCALE, SDK_RADIUS, SDK_SHADOW, SDK_THEME, SDK_THEME_DARK,
 } from '@/sdk/theme-tokens';
 import type { EditAttachment, ElementRect } from '@/types/feedback';
 
@@ -57,6 +57,7 @@ const GHOST_STYLE = [
   'touch-action: none',
   'pointer-events: auto',
   'outline: none',
+  SDK_NO_TAP_HIGHLIGHT,
 ].join('; ');
 const TOOLBAR_STYLE = [
   'position: fixed',
@@ -88,13 +89,17 @@ ${OVERLAY_SELECTOR} button:focus-visible {
   outline: ${SDK_FOCUS_OUTLINE.line} ${SDK_THEME_DARK.accent} !important;
   outline-offset: ${SDK_FOCUS_OUTLINE.offset} !important;
 }
-${OVERLAY_SELECTOR} button:hover { background-image: ${getStateLayer(SDK_THEME_DARK.overlayHover)} !important; }
+${SDK_HOVER_MEDIA} {
+  ${OVERLAY_SELECTOR} button:hover { background-image: ${getStateLayer(SDK_THEME_DARK.overlayHover)} !important; }
+}
 ${OVERLAY_SELECTOR} button:active {
   background-image: ${getStateLayer(SDK_THEME_DARK.overlayPressed)} !important;
   transform: ${SDK_PRESSED_SCALE} !important;
 }
-${OVERLAY_SELECTOR} button[data-action="confirm"]:hover { background-image: ${getStateLayer(SDK_THEME_DARK.accentHover)} !important; }
-${OVERLAY_SELECTOR} button[data-action="confirm"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)} !important; }
+${SDK_HOVER_MEDIA} {
+  ${OVERLAY_SELECTOR} button[data-action="confirm"]:hover { background-image: ${getStateLayer(SDK_THEME_DARK.accentHover)} !important; }
+}
+${OVERLAY_SELECTOR} button[data-action="confirm"]:active { background-image: ${getStateLayer(SDK_THEME_DARK.accentPressed)} !important; }
 @media (prefers-reduced-motion: reduce) {
   ${OVERLAY_SELECTOR} button { transition: none !important; }
   ${OVERLAY_SELECTOR} button:active { transform: none !important; }

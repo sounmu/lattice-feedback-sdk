@@ -4,8 +4,8 @@ import { MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS } from '@/lib/feedback-limits'
 import { getStatusActions, getStatusPhase, type StatusPhase } from '@/sdk/capture-status-model';
 import { SDK_Z_INDEX } from '@/sdk/styles';
 import {
-  getStateLayer, getTranslucentColor, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_PRESSED_SCALE, SDK_RADIUS,
-  SDK_SHADOW, SDK_THEME, SDK_THEME_DARK,
+  getStateLayer, getTranslucentColor, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_HOVER_MEDIA, SDK_PRESSED_SCALE,
+  SDK_RADIUS, SDK_SHADOW, SDK_THEME, SDK_THEME_DARK,
 } from '@/sdk/theme-tokens';
 import type { CaptureState } from '@/types/sdk-message';
 
@@ -64,12 +64,12 @@ const STATUS_STYLES = `
 .capture-status-error[hidden] { display: none; }
 .capture-status-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .capture-status button { ${SDK_BUTTON_BASE}; background-color: ${DARK.neutral}; color: ${DARK.textPrimary}; }
-.capture-status button:hover { background-image: ${getStateLayer(DARK.overlayHover)}; }
+${SDK_HOVER_MEDIA} { .capture-status button:hover { background-image: ${getStateLayer(DARK.overlayHover)}; } }
 .capture-status button:active { background-image: ${getStateLayer(DARK.overlayPressed)}; transform: ${SDK_PRESSED_SCALE}; }
 .capture-status button:focus-visible { outline: ${SDK_FOCUS_OUTLINE.line} ${DARK.accent}; outline-offset: ${SDK_FOCUS_OUTLINE.offset}; }
 .capture-status button[data-action="stop"] { background-color: ${DARK.accent}; color: ${DARK.onAccent}; }
-.capture-status button[data-action="stop"]:hover { background-image: ${getStateLayer(DARK.accentHover)}; }
-.capture-status button[data-action="stop"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; }
+${SDK_HOVER_MEDIA} { .capture-status button[data-action="stop"]:hover { background-image: ${getStateLayer(DARK.accentHover)}; } }
+.capture-status button[data-action="stop"]:active { background-image: ${getStateLayer(DARK.accentPressed)}; }
 .capture-status button[hidden] { display: none; }
 .capture-recording-frame {
   position: fixed;

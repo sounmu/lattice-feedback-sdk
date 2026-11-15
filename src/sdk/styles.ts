@@ -1,6 +1,6 @@
 import {
-  getStateLayer, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_PRESSED_SCALE, SDK_RADIUS, SDK_SHADOW, SDK_THEME,
-  SDK_TRANSITION,
+  getStateLayer, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_HOVER_MEDIA, SDK_NO_TAP_HIGHLIGHT, SDK_PRESSED_SCALE, SDK_RADIUS, SDK_SHADOW,
+  SDK_THEME, SDK_TRANSITION,
 } from '@/sdk/theme-tokens';
 
 export const SDK_Z_INDEX = 2147483647;
@@ -44,6 +44,7 @@ export const SDK_STYLES = `
   cursor: pointer;
   box-shadow: ${SDK_SHADOW.high};
   transition: transform ${SDK_TRANSITION};
+  ${SDK_NO_TAP_HIGHLIGHT};
 }
 
 .${LAUNCHER_ICON_CLASS_NAME} {
@@ -74,12 +75,14 @@ export const SDK_STYLES = `
   white-space: nowrap;
 }
 
-.launcher:hover {
-  background-image: ${getStateLayer(SDK_THEME.accentHover)};
+${SDK_HOVER_MEDIA} {
+  .launcher:hover {
+    background-image: ${getStateLayer(SDK_THEME.accentHover)};
+  }
 }
 
 .launcher:active {
-  background-image: ${getStateLayer(SDK_THEME.overlayPressed)};
+  background-image: ${getStateLayer(SDK_THEME.accentPressed)};
   transform: ${SDK_PRESSED_SCALE};
 }
 
