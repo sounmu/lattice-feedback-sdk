@@ -1,7 +1,7 @@
 // Turns a feedback into a ticket draft the admin can paste into an issue tracker. It restates what the
 // reporter wrote and what the SDK recorded, kept apart, and never guesses a cause.
 import { describeMove, formatSignedPixels } from '@/lib/edit-comparison-geometry';
-import { FEEDBACK_TYPE_LABELS, formatDateTime, getElementLabel, getOrganizationLabel, getPagePath } from '@/lib/feedback-display';
+import { FEEDBACK_TYPE_LABELS, formatDateTime, findUnverifiedOrganizationName, getElementLabel, getPagePath } from '@/lib/feedback-display';
 import type { FeedbackDetailResponse, FlowAttachment, FlowEvent } from '@/types/feedback';
 
 const MAX_TITLE_LENGTH = 60;
@@ -101,7 +101,9 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
     `- 작성자: ${plain(feedback.reporter.name)}`,
   ];
   if (organization) {
-    summaryLines.push(`- 소속: ${plain(getOrganizationLabel(organization))} (고객사 서버 서명으로 확인됨)`);
+    const unverifiedName = findUnverifiedOrganizationName(organization);
+    const nameNote = unverifiedName ? `, 표시 이름: ${plain(unverifiedName)} (미검증)` : '';
+    summaryLines.push(`- 소속: ${plain(organization.id)} (고객사 서버 서명으로 확인됨)${nameNote}`);
   }
   const sections = [
     [

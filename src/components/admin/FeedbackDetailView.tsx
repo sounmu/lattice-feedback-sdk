@@ -13,7 +13,7 @@ import { SidePaneToggle } from '@/components/admin/SidePaneToggle';
 import { TicketDraftPanel } from '@/components/admin/TicketDraftPanel';
 import { useCollapsedSection } from '@/hooks/useCollapsedSection';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
-import { formatDateTime, getOrganizationLabel, getPagePath } from '@/lib/feedback-display';
+import { findUnverifiedOrganizationName, formatDateTime, getPagePath } from '@/lib/feedback-display';
 import type { FeedbackDetailResponse, UpdateFeedbackInput } from '@/types/feedback';
 
 interface FeedbackDetailViewProps {
@@ -113,8 +113,13 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
                 <dd>
                   {feedback.reporter.verifiedOrganization ? (
                     <>
-                      {getOrganizationLabel(feedback.reporter.verifiedOrganization)}{' '}
+                      {feedback.reporter.verifiedOrganization.id}{' '}
                       <span className="text-(--admin-success)">서명 확인됨</span>
+                      {findUnverifiedOrganizationName(feedback.reporter.verifiedOrganization) ? (
+                        <span className="block text-(--admin-text-muted)">
+                          표시 이름: {findUnverifiedOrganizationName(feedback.reporter.verifiedOrganization)} (미검증)
+                        </span>
+                      ) : null}
                     </>
                   ) : (
                     <span className="text-(--admin-text-muted)">확인되지 않음</span>

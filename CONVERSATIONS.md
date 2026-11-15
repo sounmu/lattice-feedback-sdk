@@ -53,6 +53,7 @@ trusting the browser:
   ticket draft show it.
 - Only the organization **id** is signed. The `name` is display text next to a
   signed id, like the reporter name; the id is what identifies the organization.
+  The admin screens and ticket drafts therefore always show the signed id and label the name as unverified.
 - A claimed organization that the signature does not cover is dropped, not stored
   as "unverified": the admin never has an organization value to mistake for a
   verified one, and attacker-chosen text never reaches the admin screen. The detail
