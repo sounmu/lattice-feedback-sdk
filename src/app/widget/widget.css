@@ -35,9 +35,12 @@
 }
 
 /* Astryx paints hover/press with shared overlays, rather than accent-state tokens.
-   Scope the opaque brand hover to primary actions so neutral controls stay neutral. */
+   Scope the opaque brand hover to primary actions so neutral controls stay neutral. A press is one more
+   step darker: the theme's translucent press overlay came out lighter than the opaque hover.
+   src/sdk/theme-tokens.ts carries the same two colours for the SDK's primary buttons. */
 [data-astryx-theme='neutral'] .astryx-button[data-variant='primary'] {
   --color-overlay-hover: #2f4ae0;
+  --color-overlay-pressed: #2740c8;
 }
 
 /* The selected segment uses surface/text tokens instead of accent tokens. */
@@ -185,6 +188,14 @@
   content: '';
   position: absolute;
   inset: calc(var(--spacing-1) * -1);
+}
+
+/* A send button that cannot send yet is dimmed through its own colours, half way to the surface behind it.
+   The opacity Astryx puts on a disabled button would fade its focus ring along with it. */
+.widget-composer .astryx-button[aria-disabled='true'] {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-background-muted));
+  color: color-mix(in srgb, var(--color-on-accent) 50%, var(--color-background-muted));
 }
 
 /* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would
