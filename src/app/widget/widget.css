@@ -1,0 +1,348 @@
+/* Astryx base, components and the neutral theme, loaded for the widget route only. globals.css
+   declares the cascade-layer order these files fill, so admin pages never receive them. The theme's
+   fonts.css is left out on purpose: it loads Figtree from a font CDN, which closed networks block. */
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+
+/* Theme adjustments for the widget. They sit on the theme root, so anything Astryx renders outside
+   the widget root, such as a tooltip, gets them too. */
+[data-astryx-theme='neutral'] {
+  --color-accent: #3b5bfd;
+  --color-accent-muted: #eef1ff;
+  --color-on-accent: #ffffff;
+  /* Accent text is the darker brand blue. On the accent wash of a chosen tab or feedback type,
+     --color-accent reads 4.5:1 only at rest and falls under it while the control is hovered. */
+  --color-text-accent: #2f4ae0;
+  --color-icon-accent: var(--color-accent);
+  --focus-outline-color: var(--color-accent);
+  /* Korean text is set in Pretendard when the device has it, else the platform's Korean face. */
+  --font-family-body: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
+    'Segoe UI', 'Malgun Gothic', Roboto, 'Noto Sans KR', Helvetica, Arial, sans-serif;
+  --font-family-heading: var(--font-family-body);
+  /* Large controls are the widget's touch targets: 44px instead of the theme's 36px. A pill, such as a tab
+     or a feedback type, is drawn 8px shorter and keeps the full 44px as its press area. */
+  --widget-target-size: 2.75rem;
+  --widget-pill-size: calc(var(--widget-target-size) - var(--spacing-2));
+  --size-element-lg: var(--widget-target-size);
+  /* Shape, after the messenger the widget is modelled on: rounder controls and cards than the theme's,
+     and 16px chat bubbles whose grouped corner tightens to the inner radius. src/sdk/theme-tokens.ts
+     carries the same values for the SDK's own UI on the host page. */
+  --radius-inner: 0.5rem;
+  --radius-element: 0.75rem;
+  --radius-container: 1rem;
+  --radius-chat: 1rem;
+}
+
+/* Astryx paints hover/press with shared overlays, rather than accent-state tokens.
+   Scope the opaque brand hover to primary actions so neutral controls stay neutral. A press is one more
+   step darker: the theme's translucent press overlay came out lighter than the opaque hover.
+   src/sdk/theme-tokens.ts carries the same two colours for the SDK's primary buttons. */
+[data-astryx-theme='neutral'] .astryx-button[data-variant='primary'] {
+  --color-overlay-hover: #2f4ae0;
+  --color-overlay-pressed: #2740c8;
+}
+
+.widget-root {
+  color: var(--color-text-primary);
+  background: var(--color-background-surface);
+  font-family: var(--font-family-body);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+  /* Korean words stay whole; only a token longer than the line breaks. The last line is not left with
+     one short word where the browser can avoid it. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  caret-color: var(--color-accent);
+  scrollbar-color: var(--color-border-emphasized) transparent;
+  scrollbar-width: thin;
+}
+
+.widget-root ::selection {
+  background: var(--color-accent-muted);
+  color: var(--color-text-primary);
+}
+
+/* Astryx's text, chat bubble and tooltip set their own word-break, which lets Korean split inside a word.
+   They keep words whole like the rest of the widget. The tooltip is rendered outside the widget root. */
+.widget-root .astryx-text,
+.widget-root .astryx-chat-message-bubble,
+[data-astryx-theme='neutral'] :is(.astryx-tooltip, .astryx-tooltip *) {
+  word-break: keep-all;
+}
+
+/* A tooltip stays clear of the focus ring of the control it names. The theme's 4px offset put it on the
+   ring's outer edge, which reaches 5px out. The browser moves this margin to the other side when the
+   tooltip flips below its control. */
+[data-astryx-theme='neutral'] .astryx-tooltip {
+  overflow-wrap: anywhere;
+  margin-block-end: calc(var(--focus-outline-offset) + var(--focus-outline-width) + var(--spacing-0-5));
+}
+
+/* Typed text wraps plainly, so earlier lines do not move while the user is writing. */
+.widget-root textarea {
+  resize: none;
+  text-wrap: wrap;
+}
+
+/* The team's avatar carries the brand colour. Every avatar in the widget is the team's. */
+.widget-root .astryx-avatar-fallback {
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* The tabs sit under the header as two pills. The chosen one is a wash with accent ink, like the chosen
+   feedback type, in place of the theme's underline. Astryx sizes a tab and the hover layer inside it from
+   the large-control size, so inside the bar that size is the pill's. The bar itself stays 44px tall: its
+   padding and its divider make up the difference. */
+.widget-root .astryx-tab-list {
+  --size-element-lg: var(--widget-pill-size);
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-3) calc(var(--spacing-1) - var(--border-width));
+}
+
+/* A tab takes a press anywhere in the bar's height, 4px above and below its pill. */
+.widget-root .astryx-tab::after {
+  content: '';
+  position: absolute;
+  inset: calc(var(--spacing-1) * -1) 0;
+}
+
+/* The chosen tab is already open: pointing at it or pressing it does nothing, so it shows no state change. */
+.widget-root .astryx-tab[data-selected='selected'] {
+  --color-text-primary: var(--color-text-accent);
+  --color-overlay-hover: transparent;
+  --color-overlay-pressed: transparent;
+  background-color: var(--color-accent-muted);
+}
+
+.widget-root .astryx-tab-indicator {
+  display: none;
+}
+
+/* A conversation in the list is a row to press. The list clips what is drawn outside it, which cut the
+   sides off a row's focus ring, so the ring is drawn just inside the row. */
+.widget-root .astryx-list-item {
+  outline-offset: calc(var(--focus-outline-width) * -1);
+}
+
+/* A message's time is a tab stop: focusing it opens a card with the full date. It shows the widget's focus
+   ring in place of the browser's, drawn close to the small text so it stays clear of that card, which
+   opens 4px above the time. */
+.widget-root .astryx-timestamp time:focus-visible {
+  border-radius: var(--radius-inner);
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: var(--border-width);
+}
+
+/* The reporter's own messages are accent bubbles. The theme paints both sides neutral. */
+.widget-root .astryx-chat-message-bubble[data-sender='user'][data-variant='filled'] {
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* A message field and its send button share one borderless surface. The surface shows the field's focus
+   the way the theme's fields do: an accent hairline with a muted ring inside it. */
+.widget-composer {
+  display: flex;
+  align-items: flex-end;
+  padding: calc(var(--spacing-0-5) - var(--border-width));
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-container);
+  background-color: var(--color-background-muted);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.widget-composer:has(textarea:focus-visible) {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 2px var(--color-accent-muted);
+}
+
+.widget-composer .astryx-text-area {
+  border-width: 0;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* One line to start, growing with the text up to five. Where field-sizing is not supported the field
+   keeps the two rows set on the element. */
+.widget-composer textarea {
+  field-sizing: content;
+  min-block-size: calc(1lh + var(--spacing-6));
+  max-block-size: calc(5lh + var(--spacing-6));
+  padding-block: var(--spacing-3);
+  padding-inline: var(--spacing-3) var(--spacing-2);
+}
+
+/* The send button is a round control inset evenly from the surface edge, the way a messenger draws it.
+   It keeps the 44px press area through an invisible ring around the visible circle, and sits at the
+   bottom so it stays next to the last line while the field grows. */
+.widget-composer .astryx-button {
+  position: relative;
+  flex-shrink: 0;
+  inline-size: var(--widget-pill-size);
+  block-size: var(--widget-pill-size);
+  min-inline-size: 0;
+  min-block-size: 0;
+  margin: var(--spacing-1);
+  border-radius: var(--radius-full);
+}
+
+.widget-composer .astryx-button::after {
+  content: '';
+  position: absolute;
+  inset: calc(var(--spacing-1) * -1);
+}
+
+/* A send button that cannot send yet is dimmed through its own colours, half way to the surface behind it.
+   The opacity Astryx puts on a disabled button would fade its focus ring along with it. */
+.widget-composer .astryx-button[aria-disabled='true'] {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-background-muted));
+  color: color-mix(in srgb, var(--color-on-accent) 50%, var(--color-background-muted));
+}
+
+/* A saved screen shown at its captured size is wider than the preview, so its frame scrolls and the
+   keyboard can focus it to scroll. The frame is the one thing in the preview that takes focus without
+   being a control of the widget, and it shows the widget's focus ring. */
+.widget-screen-preview :focus-visible:not(button, input) {
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset);
+}
+
+/* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would
+   truncate. A name too long for a narrow panel wraps, and the icons still line up because each tool
+   starts at the top of its cell. */
+.widget-root .widget-tool {
+  align-items: flex-start;
+  block-size: auto;
+  min-block-size: calc(var(--size-element-lg) + var(--spacing-3));
+  padding: var(--spacing-2) var(--spacing-1);
+}
+
+/* Astryx wraps a button's content in a box that hugs it and clips it. A tool's content spans its cell
+   instead and may draw outside its own box, so the usage count can hang beside the icon. */
+.widget-root .widget-tool :has(> .widget-tool-content) {
+  inline-size: 100%;
+  overflow: visible;
+}
+
+.widget-tool-content {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-0-5);
+  inline-size: 100%;
+}
+
+.widget-tool-glyph {
+  position: relative;
+  display: flex;
+}
+
+.widget-tool-usage,
+.widget-tool-label {
+  font-size: var(--text-supporting-size);
+  line-height: var(--text-supporting-leading);
+}
+
+/* The count hangs beside the icon without taking part in its centring, so the icon does not move when a
+   count appears. It may reach the cell's edge, less a hairline: the gap it keeps from the icon equals the
+   cell's own inline padding, so the two cancel out. Where "count/limit" is wider than that, the limit
+   wraps onto a second line, which is cut off, and the count shows alone. */
+.widget-tool-usage {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: calc(100% + var(--spacing-1));
+  display: flex;
+  flex-wrap: wrap;
+  inline-size: max-content;
+  max-inline-size: calc((100cqi - 100%) / 2 - var(--border-width));
+  block-size: 1lh;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  translate: 0 -50%;
+  white-space: nowrap;
+}
+
+/* Digits that take room without showing: they pad a count to the width of the widest one in the row. */
+.widget-tool-usage-filler {
+  visibility: hidden;
+}
+
+.widget-tool-label {
+  text-align: center;
+  white-space: normal;
+}
+
+/* The feedback type reads as quick replies under the greeting: separate outlined chips that wrap onto a
+   second row on a narrow panel, the chosen one a wash with accent ink. A chip is drawn 8px shorter than
+   the 44px that take its press: 4px above and below it, which the row's padding and the gap between rows
+   leave free. */
+.widget-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  padding-block: var(--spacing-1);
+}
+
+.widget-chip {
+  position: relative;
+  min-block-size: var(--widget-pill-size);
+  padding-inline: var(--spacing-3);
+  border: var(--border-width) solid var(--color-border-emphasized);
+  border-radius: var(--radius-element);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-label-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-label-leading);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+/* The press area is measured from inside the chip's border, so it reaches past the border as well. */
+.widget-chip::after {
+  content: '';
+  position: absolute;
+  inset: calc((var(--spacing-1) + var(--border-width)) * -1) 0;
+}
+
+.widget-chip[aria-checked='true'] {
+  border-color: transparent;
+  background-color: var(--color-accent-muted);
+  color: var(--color-text-accent);
+  font-weight: var(--font-weight-semibold);
+}
+
+.widget-chip:focus-visible {
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset);
+}
+
+/* Only a chip that would change the choice answers the pointer: the chosen one is already in effect. */
+@media (hover: hover) {
+  .widget-chip[aria-checked='false']:not([aria-disabled='true']):hover {
+    background-color: var(--color-overlay-hover);
+  }
+}
+
+.widget-chip[aria-checked='false']:not([aria-disabled='true']):active {
+  background-color: var(--color-overlay-pressed);
+}
+
+/* While the feedback is being sent the choice is fixed. The chips dim through their ink, which leaves a
+   focus ring at full strength. */
+.widget-chip[aria-disabled='true'] {
+  color: var(--color-text-disabled);
+  cursor: default;
+}

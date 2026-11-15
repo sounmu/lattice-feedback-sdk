@@ -1,15 +1,30 @@
-import type { ReactNode } from 'react';
+'use client';
 
-import { BackIcon, CloseIcon, InfoIcon } from '@/components/widget/WidgetIcons';
+import { createContext, useContext, type ComponentType, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { Avatar } from '@astryxdesign/core/Avatar';
+import { Banner } from '@astryxdesign/core/Banner';
+import { Card } from '@astryxdesign/core/Card';
+import { Heading } from '@astryxdesign/core/Heading';
+import { HStack } from '@astryxdesign/core/HStack';
+import { Icon } from '@astryxdesign/core/Icon';
+import { IconButton } from '@astryxdesign/core/IconButton';
+import { Text } from '@astryxdesign/core/Text';
+import { VStack } from '@astryxdesign/core/VStack';
 
-export const PRIMARY_BUTTON_CLASS =
-  'min-h-11 rounded-[10px] bg-fw-primary px-4 font-semibold text-white hover:bg-fw-primary-hover disabled:opacity-50';
-export const SECONDARY_BUTTON_CLASS =
-  'min-h-11 rounded-[10px] border border-fw-border bg-fw-surface px-4 font-semibold text-fw-text hover:bg-fw-surface-sub disabled:opacity-50';
-export const DANGER_BUTTON_CLASS =
-  'min-h-11 rounded-[10px] bg-fw-danger px-4 font-semibold text-white hover:opacity-90 disabled:opacity-50';
-const ICON_BUTTON_CLASS =
-  'flex size-11 shrink-0 items-center justify-center rounded-[10px] text-fw-sub hover:bg-fw-surface-sub';
+import type { IconProps } from '@/components/widget/WidgetIcons';
+
+/** Whose avatar the widget shows: the team that answers the feedback. */
+export const WIDGET_TEAM_NAME = 'Lattice';
+
+const CLOSE_LABEL = '닫기';
+const BACK_LABEL = '뒤로';
+
+// Where a header is drawn when the panel has tabs: above them. The tabs stay mounted while the views
+// under them change, so a header rendered in place could only sit below the tabs.
+const WidgetHeaderSlotContext = createContext<HTMLElement | null>(null);
+
+export const WidgetHeaderSlotProvider = WidgetHeaderSlotContext.Provider;
 
 interface WidgetHeaderProps {
   title: string;
@@ -17,49 +32,64 @@ interface WidgetHeaderProps {
   onClose?: () => void;
   /** Replaces the avatar with a back button. */
   onBack?: () => void;
+  /** Where the back button leads, when "back" alone would not say. */
+  backLabel?: string;
 }
 
-export function WidgetHeader({ title, subtitle, onClose, onBack }: WidgetHeaderProps) {
-  return (
-    <header className="flex shrink-0 items-center gap-3 border-b border-fw-border bg-fw-surface px-3 py-2">
+export function WidgetHeader({ title, subtitle, onClose, onBack, backLabel = BACK_LABEL }: WidgetHeaderProps) {
+  const slot = useContext(WidgetHeaderSlotContext);
+  const header = (
+    <HStack as="header" gap={3} align="center" paddingInlineStart={onBack ? 3 : 4} paddingInlineEnd={3} paddingBlock={1.5} className="shrink-0">
       {onBack ? (
-        <button type="button" aria-label="뒤로" className={ICON_BUTTON_CLASS} onClick={onBack}>
-          <BackIcon />
-        </button>
+        <IconButton label={backLabel} tooltip={backLabel} icon={<Icon icon="chevronLeft" />} variant="ghost" size="lg" onClick={onBack} />
       ) : (
-        <span aria-hidden="true" className="ml-1 flex size-9 shrink-0 items-center justify-center rounded-full bg-fw-primary font-bold text-white">
-          L
-        </span>
+        <Avatar name={WIDGET_TEAM_NAME} size={32} shape="rounded" tooltip={false} />
       )}
-      <div className="min-w-0 flex-1">
-        <h1 className="truncate text-base font-bold">{title}</h1>
-        <p className="truncate text-xs text-fw-sub">{subtitle}</p>
-      </div>
+      <VStack gap={0} className="min-w-0 flex-1">
+        <Heading level={3} accessibilityLevel={1} maxLines={1}>
+          {title}
+        </Heading>
+        <Text as="p" type="supporting" maxLines={2}>
+          {subtitle}
+        </Text>
+      </VStack>
       {onClose ? (
-        <button type="button" aria-label="닫기" className={ICON_BUTTON_CLASS} onClick={onClose}>
-          <CloseIcon />
-        </button>
+        <IconButton label={CLOSE_LABEL} tooltip={CLOSE_LABEL} icon={<Icon icon="close" />} variant="ghost" size="lg" onClick={onClose} />
       ) : null}
-    </header>
+    </HStack>
   );
+  return slot ? createPortal(header, slot) : header;
 }
 
 /** The scrolling middle part. Only this part scrolls, so the composer below always stays in view. */
 export function WidgetBody({ children }: { children: ReactNode }) {
-  return <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-fw-surface-sub p-4">{children}</div>;
+  return (
+    <VStack gap={3} padding={4} isScrollable className="min-h-0 flex-1">
+      {children}
+    </VStack>
+  );
 }
 
 export function WidgetFooter({ children }: { children: ReactNode }) {
-  return <div className="flex shrink-0 flex-col gap-2 border-t border-fw-border bg-fw-surface p-3">{children}</div>;
+  return (
+    <VStack gap={2} padding={3} className="shrink-0 border-t border-(--color-border)">
+      {children}
+    </VStack>
+  );
+}
+
+/** A message field and its send button on one borderless surface, the way a messenger draws its input. */
+export function WidgetComposer({ children }: { children: ReactNode }) {
+  return <div className="widget-composer">{children}</div>;
 }
 
 export type BannerTone = 'info' | 'warning' | 'danger' | 'success';
 
-const BANNER_TONE_CLASSES: Record<BannerTone, string> = {
-  info: 'bg-fw-primary-weak text-fw-text',
-  warning: 'bg-fw-warning-weak text-fw-warning',
-  danger: 'bg-fw-danger-weak text-fw-danger',
-  success: 'bg-fw-success-weak text-fw-text',
+const BANNER_STATUSES: Record<BannerTone, 'info' | 'warning' | 'error' | 'success'> = {
+  info: 'info',
+  warning: 'warning',
+  danger: 'error',
+  success: 'success',
 };
 
 interface WidgetBannerProps {
@@ -73,13 +103,10 @@ interface WidgetBannerProps {
 
 export function WidgetBanner({ tone, title, children, isAlert = false, icon }: WidgetBannerProps) {
   const liveProps = isAlert ? { role: 'alert' } : { role: 'status', 'aria-live': 'polite' as const };
+  // A banner always has a title. One that only carries a message shows the message there.
   return (
-    <div {...liveProps} className={`flex gap-2 rounded-xl p-3 ${BANNER_TONE_CLASSES[tone]}`}>
-      <span className="mt-0.5 shrink-0">{icon ?? <InfoIcon className="size-4" />}</span>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        {title ? <p className="font-semibold">{title}</p> : null}
-        {children ? <div className="text-[13px]">{children}</div> : null}
-      </div>
+    <div {...liveProps}>
+      <Banner status={BANNER_STATUSES[tone]} title={title ?? children} description={title ? children : undefined} icon={icon} />
     </div>
   );
 }
@@ -87,7 +114,7 @@ export function WidgetBanner({ tone, title, children, isAlert = false, icon }: W
 interface AttachmentCardProps {
   /** Which kind of attachment the card holds, so the newest card of a kind can be scrolled into view. */
   kind: 'comment' | 'edit' | 'flow' | 'screen';
-  icon: ReactNode;
+  icon: ComponentType<IconProps>;
   title: string;
   description: string;
   removeLabel: string;
@@ -99,22 +126,32 @@ interface AttachmentCardProps {
 
 export function AttachmentCard({ kind, icon, title, description, removeLabel, disabled, onRemove, actions }: AttachmentCardProps) {
   return (
-    <li data-kind={kind} className="flex items-center gap-2 rounded-xl border border-fw-border bg-fw-surface p-2">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-fw-primary-weak text-fw-primary">{icon}</span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold">{title}</p>
-        <p className="truncate text-xs text-fw-muted">{description}</p>
-      </div>
-      {actions}
-      <button
-        type="button"
-        aria-label={removeLabel}
-        className="flex size-9 shrink-0 items-center justify-center rounded-[10px] text-fw-muted hover:bg-fw-surface-sub disabled:opacity-50"
-        disabled={disabled}
-        onClick={onRemove}
-      >
-        <CloseIcon className="size-4" />
-      </button>
+    <li data-kind={kind}>
+      <Card padding={2}>
+        <HStack gap={2} align="center">
+          <span className="flex size-9 shrink-0 items-center justify-center">
+            <Icon icon={icon} color="secondary" />
+          </span>
+          <VStack gap={0} className="min-w-0 flex-1">
+            <Text as="p" type="label" maxLines={1}>
+              {title}
+            </Text>
+            <Text as="p" type="supporting" maxLines={1}>
+              {description}
+            </Text>
+          </VStack>
+          {actions}
+          <IconButton
+            label={removeLabel}
+            tooltip={removeLabel}
+            icon={<Icon icon="close" />}
+            variant="ghost"
+            size="lg"
+            isDisabled={disabled}
+            onClick={onRemove}
+          />
+        </HStack>
+      </Card>
     </li>
   );
 }

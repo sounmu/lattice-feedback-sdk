@@ -15,6 +15,7 @@ const engines = vi.hoisted(() => ({
   cancelSelection: vi.fn(), cancelDrag: vi.fn(), destroyFlow: vi.fn(), replay: vi.fn(),
   renderPins: vi.fn(), openEditor: vi.fn(), closeEditor: vi.fn(), destroyComments: vi.fn(),
   statusOptions: undefined as { onStop(): void } | undefined,
+  layers: [] as string[],
 }));
 vi.mock('@/sdk/element-selection', () => ({ startElementSelection: engines.select }));
 vi.mock('@/sdk/element-drag', () => ({ startElementDrag: engines.drag }));
@@ -23,15 +24,19 @@ vi.mock('@/sdk/flow-replay-recorder', () => ({ startReplayRecording: engines.rep
 const index = vi.hoisted(() => ({ ready: vi.fn(), prepare: vi.fn() }));
 vi.mock('@/sdk/static-text-index', () => ({ isStaticIndexReady: index.ready, prepareStaticTextIndex: index.prepare }));
 vi.mock('@/sdk/comment-overlay', () => ({
-  createCommentOverlay: () => ({
-    renderPins: engines.renderPins,
-    openEditor: engines.openEditor,
-    closeEditor: engines.closeEditor,
-    destroy: engines.destroyComments,
-  }),
+  createCommentOverlay: () => {
+    engines.layers.push('comments');
+    return {
+      renderPins: engines.renderPins,
+      openEditor: engines.openEditor,
+      closeEditor: engines.closeEditor,
+      destroy: engines.destroyComments,
+    };
+  },
 }));
 vi.mock('@/sdk/capture-status', () => ({
   createCaptureStatus: (statusOptions: { onStop(): void }) => {
+    engines.layers.push('status');
     engines.statusOptions = statusOptions;
     return { render: engines.render, destroy: engines.removeStatus };
   },
@@ -46,6 +51,7 @@ let commentCallbacks: CommentEditorCallbacks | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  engines.layers = [];
   selectionOptions = undefined;
   dragOptions = undefined;
   restoredFlow = false;
@@ -114,6 +120,12 @@ function selectTarget() {
     target: { selector: 'button', feedbackId: 'save', tagName: 'button', rect: { x: 1, y: 2, width: 80, height: 30 } },
   }, { x: 0.25, y: 0.75 });
 }
+
+it('adds the comment layer after the mode bar, so the editor paints above the bar where they overlap', () => {
+  const { controller } = createHarness();
+  expect(engines.layers).toEqual(['status', 'comments']);
+  controller.destroy();
+});
 
 it('restores Flow synchronously without accessing an unassigned recorder', () => {
   restoredFlow = true;

@@ -11,8 +11,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@astryxdesign/core": "^0.7.16",
+    "@astryxdesign/theme-neutral": "^0.7.16",
     "@rrweb/record": "2.2.2",
     "@rrweb/replay": "2.2.2",
+    "@stylexjs/stylex": "^0.19.2",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -20,6 +23,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@astryxdesign/cli": "^0.7.16",
     "@tailwindcss/turbopack": "4.3.3",
     "@types/node": "^20",
     "@types/react": "^19",

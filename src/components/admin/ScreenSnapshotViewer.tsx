@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FormEvent } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
@@ -472,6 +472,25 @@ interface ScreenReplayProps {
   loadAssetUrls: () => Promise<(string | null)[]>;
   /** Opens with edited elements already at their proposed position. */
   initiallyShowsProposed?: boolean;
+  /** Draws a zoom mode button. A host with its own controls passes one; the default is this viewer's button. */
+  modeButton?: ComponentType<ZoomModeButtonProps>;
+  /** Keeps the rebuilt page out of the tab order: it is shown as a picture, and its links and buttons do nothing. */
+  isInert?: boolean;
+}
+
+/** One of the two buttons that switch the replay between fitting its frame and its captured size. */
+export interface ZoomModeButtonProps {
+  label: string;
+  isPressed: boolean;
+  onPress: () => void;
+}
+
+function ZoomModeButton({ label, isPressed, onPress }: ZoomModeButtonProps) {
+  return (
+    <button type="button" className={BUTTON_CLASS} aria-pressed={isPressed} onClick={onPress}>
+      {label}
+    </button>
+  );
 }
 
 // A long Flow replay arrives as a gzip file, because the platform limits how large a response may be.
@@ -522,7 +541,13 @@ async function fetchAssetUrl(hash: string, projectKey: string, token: string): P
 
 // Shared by the admin viewer and the widget's preview. It only draws what it is handed: reading a saved
 // screen from the server, and the admin token that needs, stay with the caller.
-export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = false }: ScreenReplayProps) {
+export function ScreenReplay({
+  screen,
+  loadAssetUrls,
+  initiallyShowsProposed = false,
+  modeButton: ModeButton = ZoomModeButton,
+  isInert = false,
+}: ScreenReplayProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [unloadedAssetCount, setUnloadedAssetCount] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -700,6 +725,9 @@ export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = f
         showWarning: false,
         triggerFocus: false,
       });
+      if (isInert) {
+        replayer.iframe.inert = true;
+      }
       const hasMarks = pins.length > 0 || moves.length > 0;
       if (hasMarks) {
         // Rebuilding the page replaces its document, so the scroll watch is attached after each rebuild.
@@ -738,7 +766,7 @@ export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = f
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed]);
+  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed, isInert]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -766,17 +794,8 @@ export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = f
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={BUTTON_CLASS} aria-pressed={zoomMode === 'fit'} onClick={() => setZoomMode('fit')}>
-          화면에 맞춤
-        </button>
-        <button
-          type="button"
-          className={BUTTON_CLASS}
-          aria-pressed={zoomMode === 'actual'}
-          onClick={() => setZoomMode('actual')}
-        >
-          실제 크기
-        </button>
+        <ModeButton label="화면에 맞춤" isPressed={zoomMode === 'fit'} onPress={() => setZoomMode('fit')} />
+        <ModeButton label="실제 크기" isPressed={zoomMode === 'actual'} onPress={() => setZoomMode('actual')} />
         <span className="text-xs text-gray-600">{Math.round(scale * 100)}% · 마우스 휠로 저장된 화면을 스크롤할 수 있습니다.</span>
         {unloadedAssetCount > 0 && (
           <span role="alert" className="text-xs text-amber-700">

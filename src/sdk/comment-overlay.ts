@@ -5,7 +5,11 @@ import { describeTarget } from '@/lib/target-labels';
 import type { CaptureTarget } from '@/sdk/capture-policy';
 import type { SelectionPoint } from '@/sdk/element-selection';
 import type { CommentPinSource } from '@/sdk/screen-marks';
-import { SDK_Z_INDEX } from '@/sdk/styles';
+import { PANEL_OPEN_CLASS_NAME, PHONE_MEDIA_QUERY, SDK_Z_INDEX } from '@/sdk/styles';
+import {
+  getStateLayer, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_FONT_FAMILY, SDK_HOVER_MEDIA, SDK_NO_TAP_HIGHLIGHT, SDK_PRESSED_SCALE,
+  SDK_RADIUS, SDK_SHADOW, SDK_THEME, SDK_TRANSITION,
+} from '@/sdk/theme-tokens';
 
 export interface CommentEditorCallbacks {
   onSubmit: (comment: string) => void;
@@ -37,46 +41,73 @@ interface OpenEditor {
   callbacks: CommentEditorCallbacks;
 }
 
-const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+// A pin grows a little under the pointer and dips when pressed. It is small, so it changes more than the
+// 2% a button does.
+const PIN_HOVER_SCALE = '1.1';
+const PIN_PRESSED_SCALE = '0.94';
+
+// Pins keep the theme's info colour to distinguish page annotations from primary actions.
+// The editor and remark are light popovers with Astryx's buttons. The
+// textarea keeps 16px text: a smaller size makes iOS zoom the customer's page when it takes focus.
 const COMMENT_STYLES = `
 .comment-layer { display: contents; }
 .comment-pin, .comment-box { position: fixed; top: 0; left: 0; box-sizing: border-box; }
 .comment-pin[hidden], .comment-box[hidden] { display: none; }
 .comment-pin {
   z-index: ${SDK_Z_INDEX - 1}; width: 28px; height: 28px; margin: -14px 0 0 -14px; padding: 0;
-  border: 2px solid #ffffff; border-radius: 50%; background: #2563eb; color: #ffffff;
-  font: 700 13px/24px ${FONT}; text-align: center; cursor: pointer; box-shadow: 0 2px 8px rgba(17, 24, 39, 0.35);
+  border: 2px solid ${SDK_THEME.surface}; border-radius: ${SDK_RADIUS.full}; background: ${SDK_THEME.info}; color: ${SDK_THEME.onInfo};
+  font: 700 12px/24px ${SDK_FONT_FAMILY}; text-align: center; cursor: pointer; box-shadow: ${SDK_SHADOW.medium};
+  transition: scale ${SDK_TRANSITION}; ${SDK_NO_TAP_HIGHLIGHT};
 }
 .comment-pin::after { content: ""; position: absolute; inset: -10px; }
+${SDK_HOVER_MEDIA} { .comment-pin:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)}; scale: ${PIN_HOVER_SCALE}; } }
+.comment-pin:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; scale: ${PIN_PRESSED_SCALE}; }
 .comment-pin.is-pending {
-  width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 3px solid #2563eb; background: transparent;
-  box-shadow: 0 0 0 2px #ffffff, 0 2px 8px rgba(17, 24, 39, 0.35); pointer-events: none;
+  width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 3px solid ${SDK_THEME.info}; background: transparent;
+  box-shadow: 0 0 0 2px ${SDK_THEME.surface}, ${SDK_SHADOW.medium}; pointer-events: none;
 }
 .comment-pin.is-pending::before {
   content: ""; position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
-  border-radius: 50%; background: #2563eb;
+  border-radius: ${SDK_RADIUS.full}; background: ${SDK_THEME.info};
 }
 .comment-box {
-  z-index: ${SDK_Z_INDEX}; width: min(300px, calc(100vw - 16px)); padding: 12px; border-radius: 12px;
-  background: #ffffff; color: #111827; font: 400 14px/1.5 ${FONT}; box-shadow: 0 12px 40px rgba(17, 24, 39, 0.3);
+  z-index: ${SDK_Z_INDEX}; width: min(300px, calc(100vw - 16px)); padding: 12px; border-radius: ${SDK_RADIUS.container};
+  background: ${SDK_THEME.surface}; color: ${SDK_THEME.textPrimary}; font: ${SDK_FONT.body}; word-break: keep-all;
+  box-shadow: 0 0 0 1px ${SDK_THEME.border}, ${SDK_SHADOW.high};
 }
 .comment-box p { max-height: 40vh; margin: 0; overflow-y: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
-.comment-box label { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.comment-box label { display: block; font: ${SDK_FONT.label}; color: ${SDK_THEME.textSecondary}; overflow-wrap: anywhere; }
 .comment-box textarea {
-  display: block; box-sizing: border-box; width: 100%; min-height: 88px; margin-top: 6px; padding: 8px;
-  border: 1px solid #6b7280; border-radius: 8px; resize: none; background: #ffffff; color: #111827;
-  font: 400 16px/1.4 ${FONT};
+  display: block; box-sizing: border-box; width: 100%; min-height: 88px; margin-top: 8px; padding: 8px 12px;
+  border: 1px solid ${SDK_THEME.borderEmphasized}; border-radius: ${SDK_RADIUS.element}; resize: none;
+  background: ${SDK_THEME.surface}; color: ${SDK_THEME.textPrimary}; font: 400 16px/1.4 ${SDK_FONT_FAMILY};
 }
-.comment-box textarea[aria-invalid="true"] { border-color: #dc2626; }
-.comment-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-.comment-box button {
-  min-width: 44px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 8px;
-  background: #e5e7eb; color: #111827; font: 600 14px/1 ${FONT}; cursor: pointer;
+.comment-box textarea::placeholder { color: ${SDK_THEME.textSecondary}; opacity: 1; }
+.comment-box textarea[aria-invalid="true"] { border-color: ${SDK_THEME.error}; }
+.comment-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.comment-box button { ${SDK_BUTTON_BASE}; background-color: ${SDK_THEME.neutral}; color: ${SDK_THEME.textPrimary}; }
+${SDK_HOVER_MEDIA} { .comment-box button:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)}; } }
+.comment-box button:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; transform: ${SDK_PRESSED_SCALE}; }
+.comment-box button[data-action="submit"] { background-color: ${SDK_THEME.accent}; color: ${SDK_THEME.onAccent}; }
+${SDK_HOVER_MEDIA} { .comment-box button[data-action="submit"]:hover { background-image: ${getStateLayer(SDK_THEME.accentHover)}; } }
+.comment-box button[data-action="submit"]:active { background-image: ${getStateLayer(SDK_THEME.accentPressed)}; }
+.comment-box button[data-action="remove"] { background-color: ${SDK_THEME.errorMuted}; color: ${SDK_THEME.onErrorMuted}; }
+.comment-pin:focus-visible, .comment-box button:focus-visible {
+  outline: ${SDK_FOCUS_OUTLINE.line} ${SDK_THEME.accent}; outline-offset: ${SDK_FOCUS_OUTLINE.offset};
 }
-.comment-box button[data-action="submit"] { background: #2563eb; color: #ffffff; }
-.comment-box button[data-action="remove"] { background: #b91c1c; color: #ffffff; }
-.comment-pin:focus-visible, .comment-box button:focus-visible, .comment-box textarea:focus-visible {
-  outline: 2px solid #60a5fa; outline-offset: 2px;
+.comment-pin:focus-visible { box-shadow: 0 0 0 ${SDK_FOCUS_OUTLINE.offset} ${SDK_THEME.surface}, ${SDK_SHADOW.medium}; }
+.comment-box textarea:focus-visible { outline: ${SDK_FOCUS_OUTLINE.line} ${SDK_THEME.accent}; outline-offset: -1px; }
+@media (prefers-reduced-motion: reduce) {
+  .comment-box button { transition: none; }
+  .comment-box button:active { transform: none; }
+  .comment-pin { transition: none; }
+  .comment-pin:active { scale: none; }
+}
+${SDK_HOVER_MEDIA} and (prefers-reduced-motion: reduce) { .comment-pin:hover { scale: none; } }
+/* A box shares the panel's z-index and comes later, so it would paint over the panel. On a phone the open
+   panel covers the page and has its own comment field, so the box stays out of the way until it closes. */
+@media ${PHONE_MEDIA_QUERY} {
+  .panel.${PANEL_OPEN_CLASS_NAME} ~ .comment-layer .comment-box { visibility: hidden; }
 }
 `;
 
@@ -173,6 +204,9 @@ export function createCommentOverlay(root: ShadowRoot): CommentOverlay {
       pin.setAttribute('aria-expanded', String(isOpen));
       if (!visible) continue;
       pin.style.transform = `translate(${x}px, ${y}px)`;
+      // Hover and press scale the pin, and a scale turns around the transform origin. The origin goes with
+      // the pin: left at the corner the pin is moved from, the scale would move the pin as well.
+      pin.style.transformOrigin = `calc(50% + ${x}px) calc(50% + ${y}px)`;
       if (isOpen) placeBeside(remark, x, y);
     }
     // An element removed while its comment is being written leaves the editor where it was.

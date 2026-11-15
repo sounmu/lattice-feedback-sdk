@@ -1,18 +1,17 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useState, type ComponentType } from 'react';
+import { Button } from '@astryxdesign/core/Button';
+import { Card } from '@astryxdesign/core/Card';
+import { HStack } from '@astryxdesign/core/HStack';
+import { Icon } from '@astryxdesign/core/Icon';
+import { StatusDot } from '@astryxdesign/core/StatusDot';
+import { Text } from '@astryxdesign/core/Text';
+import { TextArea } from '@astryxdesign/core/TextArea';
+import { VStack } from '@astryxdesign/core/VStack';
 
-import { CameraIcon, CheckIcon, FlowIcon, MoveIcon, PinIcon } from '@/components/widget/WidgetIcons';
-import {
-  AttachmentCard,
-  DANGER_BUTTON_CLASS,
-  PRIMARY_BUTTON_CLASS,
-  SECONDARY_BUTTON_CLASS,
-  WidgetBanner,
-  WidgetBody,
-  WidgetFooter,
-  WidgetHeader,
-} from '@/components/widget/WidgetLayout';
+import { CameraIcon, FlowIcon, MoveIcon, PinIcon, type IconProps } from '@/components/widget/WidgetIcons';
+import { AttachmentCard, WidgetBanner, WidgetBody, WidgetFooter, WidgetHeader } from '@/components/widget/WidgetLayout';
 import {
   MAX_COMMENT_LENGTH,
   MAX_COMMENTS,
@@ -29,6 +28,8 @@ type Attachments = CaptureState['attachments'];
 const MAX_FLOW_LABELS = 5;
 const MAX_FLOWS = 1;
 const MAX_REPLAY_MINUTES = Math.round(MAX_REPLAY_DURATION_MS / 60000);
+const COMMENT_DRAFT_LABEL = '이 요소에 대한 의견';
+const RECORDING_LABEL = '기록 중';
 
 const MODE_LABELS: Record<CaptureMode, string> = {
   comment: '요소 코멘트',
@@ -36,10 +37,10 @@ const MODE_LABELS: Record<CaptureMode, string> = {
   flow: '흐름 기록',
 };
 
-const MODE_ICONS: Record<CaptureMode, ReactNode> = {
-  comment: <PinIcon />,
-  edit: <MoveIcon />,
-  flow: <FlowIcon />,
+const MODE_ICONS: Record<CaptureMode, ComponentType<IconProps>> = {
+  comment: PinIcon,
+  edit: MoveIcon,
+  flow: FlowIcon,
 };
 
 const FLOW_EVENT_LABELS: Record<FlowEventType, string> = {
@@ -99,40 +100,73 @@ export function findStartBlocker(mode: CaptureMode, attachments: Attachments, { 
   return null;
 }
 
-function getModeUsage(mode: CaptureMode, attachments: Attachments): string {
+/** How many attachments of a tool the draft holds, out of how many it may hold. */
+interface ToolUsage {
+  count: number;
+  limit: number;
+}
+
+function getModeUsage(mode: CaptureMode, attachments: Attachments): ToolUsage {
   if (mode === 'comment') {
-    return `${attachments.comments.length}/${MAX_COMMENTS}`;
+    return { count: attachments.comments.length, limit: MAX_COMMENTS };
   }
   if (mode === 'edit') {
-    return `${attachments.edits.length}/${MAX_EDITS}`;
+    return { count: attachments.edits.length, limit: MAX_EDITS };
   }
-  return `${attachments.flow ? 1 : 0}/${MAX_FLOWS}`;
+  return { count: attachments.flow ? 1 : 0, limit: MAX_FLOWS };
+}
+
+/** How many digits "count/limit" takes. Digits are set at one width, so this ranks the counts by width. */
+function countUsageDigits(usage: ToolUsage | null): number {
+  return usage ? String(usage.count).length + String(usage.limit).length : 0;
 }
 
 interface ToolButtonProps {
-  icon: ReactNode;
+  icon: ComponentType<IconProps>;
   label: string;
-  usage: string | null;
-  blocker: string | null;
-  title: string;
+  usage: ToolUsage | null;
+  /** The digits of the widest count in the row. Every count takes that much room. */
+  usageDigits: number;
+  /** Why the tool cannot start, or what it does when the name alone does not say. */
+  tooltip: string | null;
   disabled: boolean;
   onClick: () => void;
 }
 
-function ToolButton({ icon, label, usage, blocker, title, disabled, onClick }: ToolButtonProps) {
+// An icon over the tool's name, so the four fit side by side. The usage count hangs beside the icon, which
+// stays centred. Cells too narrow for "count/limit" show the count alone; the name that is read out always
+// carries both. Every count is padded to the widest one with digits that are not shown, so the four cells
+// make the same choice and never mix the two forms.
+function ToolButton({ icon, label, usage, usageDigits, tooltip, disabled, onClick }: ToolButtonProps) {
   return (
-    <button
-      type="button"
-      title={blocker ?? title}
-      className="flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-[10px] border border-fw-border bg-fw-surface px-1 py-1.5 text-xs text-fw-text hover:bg-fw-primary-weak disabled:opacity-40"
-      disabled={disabled}
+    <Button
+      label={usage ? `${label} ${usage.count}/${usage.limit}` : label}
+      tooltip={tooltip ?? undefined}
+      variant="ghost"
+      size="lg"
+      width="100%"
+      isDisabled={disabled}
       onClick={onClick}
+      className="widget-tool"
     >
-      <span className="text-fw-primary">{icon}</span>
-      <span>{label}</span>
-      {usage ? <span className="text-fw-muted">{usage}</span> : null}
-      {blocker ? <span className="sr-only">{blocker}</span> : null}
-    </button>
+      <span className="widget-tool-content">
+        <span className="widget-tool-glyph">
+          <Icon icon={icon} />
+          {usage ? (
+            <span className="widget-tool-usage">
+              <span>{usage.count}</span>
+              <span>
+                /{usage.limit}
+                <span className="widget-tool-usage-filler" aria-hidden="true">
+                  {'0'.repeat(usageDigits - countUsageDigits(usage))}
+                </span>
+              </span>
+            </span>
+          ) : null}
+        </span>
+        <span className="widget-tool-label">{label}</span>
+      </span>
+    </Button>
   );
 }
 
@@ -161,36 +195,43 @@ export function CaptureToolBar({
   onCaptureScreen,
 }: CaptureToolBarProps) {
   const showUsage = screenCount > 0 || (attachments !== null && countAttachments(attachments) > 0);
+  const modeUsages = MODES.map((mode) => (showUsage && attachments ? getModeUsage(mode, attachments) : null));
+  const screenUsage = showUsage ? { count: screenCount, limit: MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } : null;
+  const usageDigits = Math.max(...[...modeUsages, screenUsage].map(countUsageDigits));
 
   return (
-    <section aria-label="화면으로 보여주기" className="flex flex-col gap-1.5">
-      <p className="text-xs text-fw-sub">화면으로 보여주기 (선택)</p>
-      <div className="grid grid-cols-4 gap-1.5">
-        {MODES.map((mode) => {
-          const blocker = attachments ? findStartBlocker(mode, attachments, { screenCount, isSavingScreen }) : null;
-          return (
-            <ToolButton
-              key={mode}
-              icon={MODE_ICONS[mode]}
-              label={MODE_LABELS[mode]}
-              usage={showUsage && attachments ? getModeUsage(mode, attachments) : null}
-              blocker={blocker}
-              title={MODE_LABELS[mode]}
-              disabled={disabled || !enabled || attachments === null || blocker !== null}
-              onClick={() => onStart(mode)}
-            />
-          );
-        })}
-        <ToolButton
-          icon={<CameraIcon />}
-          label="화면 저장"
-          usage={showUsage ? `${screenCount}/${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}` : null}
-          blocker={null}
-          title={screenToolTitle}
-          disabled={disabled || !canCaptureScreen}
-          onClick={onCaptureScreen}
-        />
-      </div>
+    <section aria-label="화면으로 보여주기">
+      <VStack gap={1.5}>
+        <Text as="p" type="supporting">
+          화면으로 보여주기 (선택)
+        </Text>
+        <div className="grid grid-cols-4 gap-1">
+          {MODES.map((mode, index) => {
+            const blocker = attachments ? findStartBlocker(mode, attachments, { screenCount, isSavingScreen }) : null;
+            return (
+              <ToolButton
+                key={mode}
+                icon={MODE_ICONS[mode]}
+                label={MODE_LABELS[mode]}
+                usage={modeUsages[index]}
+                usageDigits={usageDigits}
+                tooltip={blocker}
+                disabled={disabled || !enabled || attachments === null || blocker !== null}
+                onClick={() => onStart(mode)}
+              />
+            );
+          })}
+          <ToolButton
+            icon={CameraIcon}
+            label="화면 저장"
+            usage={screenUsage}
+            usageDigits={usageDigits}
+            tooltip={screenToolTitle}
+            disabled={disabled || !canCaptureScreen}
+            onClick={onCaptureScreen}
+          />
+        </div>
+      </VStack>
     </section>
   );
 }
@@ -209,7 +250,7 @@ export function CaptureAttachmentCards({ attachments, disabled, onRemove }: Capt
         <AttachmentCard
           key={`comment-${index}`}
           kind="comment"
-          icon={<PinIcon className="size-4" />}
+          icon={PinIcon}
           title={`코멘트 ${index + 1}`}
           description={`${getTargetLabel(comment.target)} · ${comment.comment}`}
           removeLabel={`코멘트 ${index + 1} 삭제`}
@@ -221,7 +262,7 @@ export function CaptureAttachmentCards({ attachments, disabled, onRemove }: Capt
         <AttachmentCard
           key={`edit-${index}`}
           kind="edit"
-          icon={<MoveIcon className="size-4" />}
+          icon={MoveIcon}
           title={`위치 편집 ${index + 1}`}
           description={getEditSummary(edit)}
           removeLabel={`위치 편집 ${index + 1} 삭제`}
@@ -232,7 +273,7 @@ export function CaptureAttachmentCards({ attachments, disabled, onRemove }: Capt
       {attachments.flow ? (
         <AttachmentCard
           kind="flow"
-          icon={<FlowIcon className="size-4" />}
+          icon={FlowIcon}
           title={`흐름 기록 · 이벤트 ${attachments.flow.events.length}개`}
           description={getFlowSequence(attachments.flow) || '기록된 동작이 없어요'}
           removeLabel="흐름 기록과 재생 화면 삭제"
@@ -301,37 +342,29 @@ export function CaptureModeView({
           onClose={onClose}
         />
         <WidgetBody>
-          <WidgetBanner tone="info" title="요소를 골랐어요" icon={<CheckIcon className="size-4 text-fw-primary" />}>
-            선택한 요소{' '}
-            <code className="rounded bg-fw-surface px-1.5 py-0.5 font-mono text-xs">{getTargetLabel(selection)}</code>
-            <p className="mt-1">페이지 위 입력창이나 아래 칸에 의견을 적어 주세요.</p>
+          <WidgetBanner tone="info" title="요소를 골랐어요" icon={<Icon icon="check" />}>
+            <span className="block">
+              선택한 요소 <strong>{getTargetLabel(selection)}</strong>
+            </span>
+            <span className="block">페이지 위 입력창이나 아래 칸에 의견을 적어 주세요.</span>
           </WidgetBanner>
         </WidgetBody>
         <WidgetFooter>
-          <textarea
-            aria-label="이 요소에 대한 의견"
-            autoFocus
+          <TextArea
+            label={COMMENT_DRAFT_LABEL}
+            aria-label={COMMENT_DRAFT_LABEL}
+            hasAutoFocus
             rows={3}
-            className="w-full resize-none rounded-xl border border-fw-border p-3 focus:outline-2 focus:outline-fw-primary"
             value={commentDraft}
             maxLength={MAX_COMMENT_LENGTH}
-            disabled={disabled}
-            onChange={(event) => setCommentDraft(event.target.value)}
+            htmlMaxLength={MAX_COMMENT_LENGTH}
+            isDisabled={disabled}
+            onChange={setCommentDraft}
           />
-          <p className="flex justify-between text-xs text-fw-muted">
-            <span>이 요소에 대한 의견</span>
-            <span>
-              {commentDraft.length}/{MAX_COMMENT_LENGTH}
-            </span>
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
-              취소
-            </button>
-            <button type="button" className={PRIMARY_BUTTON_CLASS} disabled={!canAttachComment} onClick={handleAttachComment} data-autofocus>
-              코멘트 첨부
-            </button>
-          </div>
+          <HStack gap={2}>
+            <Button label="취소" size="lg" width="100%" onClick={handleCancel} />
+            <Button label="코멘트 첨부" variant="primary" size="lg" width="100%" isDisabled={!canAttachComment} onClick={handleAttachComment} />
+          </HStack>
         </WidgetFooter>
       </>
     );
@@ -342,14 +375,12 @@ export function CaptureModeView({
       <>
         <WidgetHeader title="요소 코멘트" subtitle="Esc 키로도 취소할 수 있어요" onClose={onClose} />
         <WidgetBody>
-          <WidgetBanner tone="info" title="페이지에서 요소를 클릭하세요" icon={<PinIcon className="size-4 text-fw-primary" />}>
+          <WidgetBanner tone="info" title="페이지에서 요소를 클릭하세요" icon={<Icon icon={PinIcon} />}>
             마우스를 올리면 파란 테두리가 보여요. 클릭해도 원래 버튼은 실행되지 않아요. 고른 자리에서 바로 의견을 적을 수 있어요.
           </WidgetBanner>
         </WidgetBody>
         <WidgetFooter>
-          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel} data-autofocus>
-            요소 코멘트 취소
-          </button>
+          <Button label="요소 코멘트 취소" size="lg" width="100%" onClick={handleCancel} data-autofocus="" />
         </WidgetFooter>
       </>
     );
@@ -361,21 +392,22 @@ export function CaptureModeView({
         <WidgetHeader title="위치 편집" subtitle={`위치 편집 ${attachments.edits.length + 1}/${MAX_EDITS} · Esc 키로도 취소할 수 있어요`} onClose={onClose} />
         <WidgetBody>
           {selection ? (
-            <WidgetBanner tone="info" title="요소를 골랐어요" icon={<CheckIcon className="size-4 text-fw-primary" />}>
-              옮기는 요소{' '}
-              <code className="rounded bg-fw-surface px-1.5 py-0.5 font-mono text-xs">{getTargetLabel(selection)}</code>
-              <p className="mt-1">페이지에서 끌어 옮긴 뒤 <strong>변경 첨부</strong>를 눌러 주세요. 방향키로도 옮길 수 있어요.</p>
+            <WidgetBanner tone="info" title="요소를 골랐어요" icon={<Icon icon="check" />}>
+              <span className="block">
+                옮기는 요소 <strong>{getTargetLabel(selection)}</strong>
+              </span>
+              <span className="block">
+                페이지에서 끌어 옮긴 뒤 <strong>변경 첨부</strong>를 눌러 주세요. 방향키로도 옮길 수 있어요.
+              </span>
             </WidgetBanner>
           ) : (
-            <WidgetBanner tone="info" title="요소를 원하는 곳으로 끌어 놓으세요" icon={<MoveIcon className="size-4 text-fw-primary" />}>
+            <WidgetBanner tone="info" title="요소를 원하는 곳으로 끌어 놓으세요" icon={<Icon icon={MoveIcon} />}>
               먼저 페이지에서 옮길 요소를 클릭하세요. 다 옮겼으면 페이지 위의 <strong>변경 첨부</strong> 버튼을 눌러 주세요. 미리보기일 뿐이라 실제 화면과 데이터는 바뀌지 않아요.
             </WidgetBanner>
           )}
         </WidgetBody>
         <WidgetFooter>
-          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel} data-autofocus>
-            위치 편집 취소
-          </button>
+          <Button label="위치 편집 취소" size="lg" width="100%" onClick={handleCancel} data-autofocus="" />
         </WidgetFooter>
       </>
     );
@@ -385,29 +417,29 @@ export function CaptureModeView({
     <>
       <WidgetHeader title="흐름 기록" subtitle={`평소처럼 페이지를 사용하세요 · 최대 ${MAX_REPLAY_MINUTES}분`} onClose={onClose} />
       <WidgetBody>
-        <WidgetBanner
-          tone="danger"
-          title="기록 중"
-          icon={<span aria-hidden="true" className="widget-recording-dot mt-1 block size-2.5 rounded-full bg-fw-recording" />}
-        >
-          <span className="text-fw-text">
-            클릭, 화면 이동과 화면 변화를 기록해 담당자가 그대로 재생해 볼 수 있어요. <strong>입력한 값은 가려서 저장해요.</strong>
-          </span>
-        </WidgetBanner>
+        <Card padding={3}>
+          <VStack gap={2}>
+            <HStack gap={2} align="center">
+              <StatusDot variant="error" label={RECORDING_LABEL} isPulsing />
+              <Text type="label">{RECORDING_LABEL}</Text>
+            </HStack>
+            <Text as="p">
+              클릭, 화면 이동과 화면 변화를 기록해 담당자가 그대로 재생해 볼 수 있어요. <strong>입력한 값은 가려서 저장해요.</strong>
+            </Text>
+            <Text as="p" color="secondary">
+              지금까지 {flowEventCount}개 동작을 기록했어요.
+            </Text>
+          </VStack>
+        </Card>
         <WidgetBanner tone="warning">
           다른 페이지로 이동하면 <strong>작성 중이던 글이 지워질 수 있어요.</strong> 기록을 마친 뒤 글을 써 주세요.
         </WidgetBanner>
-        <p className="rounded-xl border border-fw-border bg-fw-surface p-3 text-fw-sub">지금까지 {flowEventCount}개 동작을 기록했어요.</p>
       </WidgetBody>
       <WidgetFooter>
-        <div className="grid grid-cols-2 gap-2">
-          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={handleCancel}>
-            기록 취소
-          </button>
-          <button type="button" className={DANGER_BUTTON_CLASS} disabled={disabled} onClick={onStopFlow} data-autofocus>
-            기록 종료 및 첨부
-          </button>
-        </div>
+        <HStack gap={2}>
+          <Button label="기록 취소" size="lg" width="100%" onClick={handleCancel} />
+          <Button label="기록 종료 및 첨부" variant="primary" size="lg" width="100%" isDisabled={disabled} onClick={onStopFlow} data-autofocus="" />
+        </HStack>
       </WidgetFooter>
     </>
   );
