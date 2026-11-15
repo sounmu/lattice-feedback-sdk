@@ -8,6 +8,7 @@ import { createPendingStartGate } from '@/sdk/pending-start';
 import { trackHistory } from '@/sdk/history-tracking';
 import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
+import { createPreviewPanel, type PreviewPanel } from '@/sdk/preview-panel';
 import { captureRecording, captureScreen } from '@/sdk/screen-capture';
 import { configureAutomaticMasking, onStaticIndexSettled, prepareStaticTextIndex, warmStaticTextIndex } from '@/sdk/static-text-index';
 import {
@@ -53,6 +54,7 @@ export class FeedbackSdk {
   private stopHistoryTracking: (() => void) | null = null;
   private capturePolicy: CapturePolicy | null = null;
   private captureController: ReturnType<typeof createCaptureController> | null = null;
+  private previewPanel: PreviewPanel | null = null;
   private pendingResizeFrame: number | null = null;
   // Each save serializes the page as soon as it is asked, so a save asked during another keeps its own moment.
   private activeScreenCaptures = 0;
@@ -140,6 +142,8 @@ export class FeedbackSdk {
     this.panelElement.classList.remove(PANEL_OPEN_CLASS_NAME);
     this.launcherButton.setAttribute('aria-expanded', 'false');
     this.isPanelOpen = false;
+    // A preview belongs to a button in the widget, so it goes when the widget does.
+    this.previewPanel?.close();
     this.postToWidget(createHostToWidgetMessage('visibility:update', { isOpen: false }));
     this.stopResizeTracking();
     this.captureController?.setPanelVisible(false);
@@ -157,6 +161,8 @@ export class FeedbackSdk {
     this.stopHistoryTracking = null;
     this.captureController?.destroy();
     this.captureController = null;
+    this.previewPanel?.destroy();
+    this.previewPanel = null;
     this.hostElement?.remove();
     this.hostElement = null;
     this.launcherButton = null;
@@ -210,7 +216,22 @@ export class FeedbackSdk {
       onShowWidget: () => this.open(),
       onHideWidget: () => this.hideForCapture(),
     });
+    this.previewPanel = createPreviewPanel({
+      root: shadowRoot, widgetPanel: panelElement, appOrigin: this.appOrigin, projectKey,
+      onClose: (previewId) => this.handlePreviewClose(previewId, shadowRoot),
+    });
     this.launcherButton = launcherButton;
+  }
+
+  private handlePreviewClose(previewId: string, root: ShadowRoot): void {
+    this.postToWidget(createHostToWidgetMessage('preview:closed', { previewId }));
+    // Keyboard focus returns to the widget, which puts it back on the button that opened the preview.
+    // A widget that closed the preview itself still has the focus: focusing its iframe again would take
+    // the focus off the control it is on.
+    const iframeElement = this.iframeElement;
+    if (this.isPanelOpen && iframeElement && root.activeElement !== iframeElement) {
+      iframeElement.focus({ preventScroll: true });
+    }
   }
 
   private ensureIframe(): void {
@@ -343,6 +364,9 @@ export class FeedbackSdk {
     if (event.origin !== this.appOrigin) {
       return;
     }
+    if (this.previewPanel?.handleMessage(event)) {
+      return;
+    }
     if (!this.iframeElement || event.source !== this.iframeElement.contentWindow) {
       return;
     }
@@ -379,6 +403,20 @@ export class FeedbackSdk {
         break;
       case 'flow:capture':
         void this.saveFlowReplay(message.payload.requestId);
+        break;
+      case 'preview:open': {
+        const [port] = event.ports;
+        if (port && event.ports.length === 1 && this.isPanelOpen && this.previewPanel) {
+          this.previewPanel.open(message.payload.previewId, port);
+        } else {
+          // The request cannot be met: the widget is told, so its button does not stay pressed.
+          event.ports.forEach((unusedPort) => unusedPort.close());
+          this.postToWidget(createHostToWidgetMessage('preview:closed', { previewId: message.payload.previewId }));
+        }
+        break;
+      }
+      case 'preview:close':
+        this.previewPanel?.close();
         break;
       default: {
         const unhandledMessage: never = message;

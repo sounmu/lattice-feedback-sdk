@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import {
   findAdjacentStep,
   findReplaySteps,
+  getBubbleShift,
   getCurrentStepIndex,
   getViewportAt,
   keepListedCaptures,
@@ -103,4 +104,18 @@ it('lets go of the captures of screens that left the draft and keeps the rest un
   expect(kept.get('a')).toBe(first);
   expect(kept.get('c')).toBe(third);
   expect(keepListedCaptures(captures, []).size).toBe(0);
+});
+
+it('starts an open comment left of its pin only as far as it takes to end inside the screen', () => {
+  const phone = { viewWidth: 390, scale: 0.9, bubbleWidth: 256, edgeGap: 8 };
+
+  // 307px of room to the right of the pin: the comment opens there.
+  expect(getBubbleShift({ ...phone, pinX: 40 })).toBe(0);
+  // 163px to the right: the other 93px go to the left of the pin.
+  expect(getBubbleShift({ ...phone, pinX: 200 })).toBeCloseTo(93);
+  // 28px to the right: the comment ends 8px short of the right edge.
+  expect(getBubbleShift({ ...phone, pinX: 350 })).toBeCloseTo(228);
+  // A screen narrower than the comment: it starts 8px from the left edge, and never left of that.
+  expect(getBubbleShift({ ...phone, viewWidth: 200, pinX: 100 })).toBeCloseTo(82);
+  expect(getBubbleShift({ ...phone, viewWidth: 200, pinX: 4 })).toBe(0);
 });

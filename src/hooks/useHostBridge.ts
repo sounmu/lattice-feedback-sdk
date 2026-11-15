@@ -17,13 +17,14 @@ import type { FeedbackReporter, PageContext } from '@/types/feedback';
 export type ScreenCaptureResult = ScreenCapturedMessage | ScreenCaptureFailedMessage;
 type ScreenCaptureListener = (result: ScreenCaptureResult) => void;
 type CaptureUpdateListener = (state: CaptureState) => void;
+type PreviewClosedListener = (previewId: string) => void;
 
 interface HostBridgeConfig {
   projectKey: string;
   hostOrigin: string;
 }
 
-function findValidHostOrigin(value: string | null): string | null {
+export function findValidHostOrigin(value: string | null): string | null {
   if (!value) {
     return null;
   }
@@ -51,6 +52,7 @@ export function useHostBridge() {
   // A saved screen is several megabytes, so it is handed to its listener instead of kept in state.
   const screenCaptureListeners = useRef(new Set<ScreenCaptureListener>());
   const captureUpdateListeners = useRef(new Set<CaptureUpdateListener>());
+  const previewClosedListeners = useRef(new Set<PreviewClosedListener>());
 
   const projectKey = searchParams.get('projectKey');
   const hostOrigin = findValidHostOrigin(searchParams.get('hostOrigin'));
@@ -111,6 +113,9 @@ export function useHostBridge() {
         case 'screen:capture-failed':
           screenCaptureListeners.current.forEach((listener) => listener(message));
           break;
+        case 'preview:closed':
+          previewClosedListeners.current.forEach((listener) => listener(message.payload.previewId));
+          break;
       }
     }
 
@@ -156,6 +161,27 @@ export function useHostBridge() {
     postToHost(createWidgetToHostMessage('flow:capture', { requestId }));
   }, [postToHost]);
 
+  // The port travels with the request. The SDK hands it to the preview iframe, which reads the screen from it.
+  const requestPreview = useCallback((previewId: string, port: MessagePort) => {
+    if (!config) {
+      port.close();
+      return;
+    }
+    window.parent.postMessage(createWidgetToHostMessage('preview:open', { previewId }), config.hostOrigin, [port]);
+  }, [config]);
+
+  const requestPreviewClose = useCallback(() => {
+    postToHost(createWidgetToHostMessage('preview:close', {}));
+  }, [postToHost]);
+
+  const subscribeToPreviewClosed = useCallback((listener: PreviewClosedListener) => {
+    const listeners = previewClosedListeners.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
   const errorMessage = config ? null : 'projectKey 또는 hostOrigin이 올바르지 않습니다.';
 
   return {
@@ -171,6 +197,9 @@ export function useHostBridge() {
     subscribeToCaptureUpdate,
     requestScreenCapture,
     requestFlowCapture,
+    requestPreview,
+    requestPreviewClose,
+    subscribeToPreviewClosed,
     notifyClose,
     notifySubmitted,
   };
