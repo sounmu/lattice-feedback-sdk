@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { ConversationLimitError, getConversationMessages } from '@/lib/conversation';
+import { canPresentReporter, ConversationLimitError, getConversationMessages } from '@/lib/conversation';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { createApiErrorResponse } from '@/lib/http/api-error';
@@ -44,12 +44,17 @@ async function handleRequest(request: Request, write: boolean) {
     };
     const repository = getFeedbackRepository();
     if ('message' in input && typeof input.message === 'string' && 'feedbackId' in input && typeof input.feedbackId === 'string') {
+      const existing = await repository.find(project.projectKey, input.feedbackId, credentials);
+      if (!existing || !canPresentReporter(existing, input.reporter)) {
+        return createApiErrorResponse(404, 'conversation_not_found', 'Conversation not found.');
+      }
       const feedback = await repository.appendReporterMessage(project.projectKey, input.feedbackId, { credentials, body: input.message });
       if (!feedback) return createApiErrorResponse(404, 'conversation_not_found', 'Conversation not found.');
       return NextResponse.json({ thread: getThread(feedback) }, { headers: { 'Cache-Control': 'no-store' } });
     }
     const items = await repository.findMany(project.projectKey, credentials);
-    return NextResponse.json({ threads: items.slice(0, 100).map(getThread) }, { headers: { 'Cache-Control': 'no-store' } });
+    const threads = items.filter((item) => canPresentReporter(item, input.reporter)).slice(0, 100).map(getThread);
+    return NextResponse.json({ threads }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof BodyTooLargeError) return createApiErrorResponse(413, 'payload_too_large', 'Request too large.');
     if (error instanceof ConversationLimitError) return createApiErrorResponse(409, 'conversation_full', error.message);

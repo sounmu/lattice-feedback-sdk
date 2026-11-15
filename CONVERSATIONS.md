@@ -46,15 +46,31 @@ an attacker could previously have submitted using someone else's id.
 
 Creation always issues an independent 32-byte random conversation capability.
 Only its SHA-256 hash is stored. The widget keeps the capability in localStorage
-scoped by project and host origin; API requests send it in the body, never a URL.
-Knowing an id, name, allowed host origin, or feedback UUID grants no access.
-The capability authorizes reading and continuing that conversation regardless of
-the current display name. This makes the unsigned demo work without claiming the
-browser is an authenticated account.
+scoped by project, host origin and the reporter id that submitted; API requests
+send it in the body, never a URL. Knowing an id, name, allowed host origin, or
+feedback UUID grants no access. The capability authorizes reading and continuing
+that conversation regardless of the current display name. This makes the unsigned
+demo work without claiming the browser is an authenticated account.
+
+When the host page calls `setUser` with another user, or clears the user, the
+widget looks up capabilities only under the new reporter id and sends none of the
+previous user's. A page with no user has its own bucket, separate from every id,
+so a conversation started while signed out is not shown after signing in, and
+switching back to the earlier user shows that user's conversations again. A new
+capability is stored under the reporter who submitted, even if the user changed
+while the request was in flight. Loaded conversations are shown only to the
+reporter they were loaded for. Capabilities saved by earlier versions under a
+project and origin key are not read.
+
+The server also refuses a capability presented with a reporter id other than the
+one the feedback was created with (a missing user counts as `anonymous`), which
+blocks an ordinary user switch even if a client still sends old secrets. The
+reporter id of an unsigned browser is only a claim, so this is defence in depth,
+not authentication: use verified identities where accounts must be separated.
 
 Clearing browser storage loses unverified access. Shared browser profiles share
-these capabilities. If persistent storage is blocked, capabilities last only for
-the mounted widget session. Cross-site storage partitioning can restrict access
+these capabilities among anyone who claims the same reporter id. If persistent
+storage is blocked, capabilities last only for the mounted widget session. Cross-site storage partitioning can restrict access
 to the same top-level customer site. There is no account recovery or retroactive
 identity linking in this change.
 

@@ -25,14 +25,19 @@ interface ConversationPanelProps {
 
 export function ConversationPanel({ config, reporter, isOpen, onClose, children }: ConversationPanelProps) {
   const [showHistory, setShowHistory] = useState(false);
-  const [threads, setThreads] = useState<Thread[]>([]);
+  const [result, setResult] = useState<{ owner: string; threads: Thread[]; error: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const identityKey = JSON.stringify(reporter);
+  // A result is shown only to the reporter it was loaded for, so a user switch never displays the previous
+  // user's threads, even for a moment or through a response that was already in flight.
+  const owner = JSON.stringify(reporter?.id ?? null);
+  const current = result?.owner === owner ? result : null;
+  const threads = current?.threads ?? [];
+  const error = current?.error ?? '';
+  const loading = current === null;
   const selected = threads.find((thread) => thread.id === selectedId);
   const draft = selectedId ? drafts[selectedId] ?? '' : '';
 
@@ -40,7 +45,7 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
     return {
       ...config,
       reporter: reporter ? { id: reporter.id, name: reporter.name, identity: reporter.identity } : null,
-      secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin),
+      secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin, reporter?.id ?? null),
     };
   }
 
@@ -61,28 +66,27 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
           body: JSON.stringify({
             ...config,
             reporter: reporter ? { id: reporter.id, name: reporter.name, identity: reporter.identity } : null,
-            secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin),
+            secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin, reporter?.id ?? null),
           }),
           signal: controller.signal,
         });
         if (!response.ok) throw new Error('대화를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
-        const result = threadsSchema.parse(await response.json());
-        if (!controller.signal.aborted) {
-          setThreads(result.threads);
-          setError('');
-        }
+        const loaded = threadsSchema.parse(await response.json());
+        if (!controller.signal.aborted) setResult({ owner, threads: loaded.threads, error: '' });
       } catch (failure) {
-        if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : '대화를 불러오지 못했어요.');
+        if (!controller.signal.aborted) {
+          const message = failure instanceof Error ? failure.message : '대화를 불러오지 못했어요.';
+          setResult((previous) => ({ owner, threads: previous?.owner === owner ? previous.threads : [], error: message }));
+        }
       } finally {
         if (!controller.signal.aborted) {
-          setLoading(false);
           timer = setTimeout(load, 10_000);
         }
       }
     }
     void load();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [config, identityKey, reporter, isOpen, refresh]);
+  }, [config, identityKey, owner, reporter, isOpen, refresh]);
 
   async function send() {
     if (!selected || !draft.trim() || sending) return;
@@ -94,12 +98,14 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
         body: JSON.stringify({ ...getRequest(), feedbackId: id, message: draft.trim() }),
       });
       if (!response.ok) throw new Error('보내지 못했어요. 대화가 가득 찼거나 연결이 끊겼을 수 있어요.');
-      const result = z.object({ thread: threadSchema }).parse(await response.json());
-      setThreads((items) => items.map((item) => item.id === id ? result.thread : item));
+      const sent = z.object({ thread: threadSchema }).parse(await response.json());
+      setResult((previous) => previous?.owner === owner
+        ? { owner, threads: previous.threads.map((item) => item.id === id ? sent.thread : item), error: '' }
+        : previous);
       setDrafts((values) => ({ ...values, [id]: '' }));
-      setError('');
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : '보내지 못했어요.');
+      const message = failure instanceof Error ? failure.message : '보내지 못했어요.';
+      setResult((previous) => previous?.owner === owner ? { ...previous, error: message } : previous);
     } finally {
       setSending(false);
     }

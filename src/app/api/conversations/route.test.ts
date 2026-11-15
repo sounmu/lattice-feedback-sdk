@@ -9,7 +9,7 @@ import { resetMemoryFeedbackStore } from '@/lib/memory-feedback-repository';
 import { resetRateLimit } from '@/lib/http/rate-limit';
 import { hashConversationSecret } from '@/lib/reporter-identity';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
-import { getConversationMessages, ConversationLimitError } from '@/lib/conversation';
+import { ANONYMOUS_REPORTER_ID, getConversationMessages, ConversationLimitError } from '@/lib/conversation';
 
 const base = { projectKey: 'demo', hostOrigin: 'http://localhost:4000', reporter: { id: 'alice', name: 'Alice' }, secrets: [] };
 const secret = 'a'.repeat(64);
@@ -53,6 +53,30 @@ describe('reporter conversation access', () => {
     else expect((await history.json()).threads).toEqual([]);
     const response = await PUT(createJsonRequest(url, 'PUT', { ...request, feedbackId: feedback.id, message: 'intrusion' }));
     expect(response.status).toBe(404);
+  });
+
+  it.each([
+    { label: 'another user', reporter: { id: 'bob', name: 'Bob' } },
+    { label: 'no user', reporter: null },
+  ])('refuses a valid capability presented for $label after the browser user changed', async ({ reporter }) => {
+    const feedback = await getFeedbackRepository().create(input, undefined, access);
+    const request = { ...base, reporter, secrets: [secret] };
+    expect((await (await POST(createJsonRequest(url, 'POST', request))).json()).threads).toEqual([]);
+    const response = await PUT(createJsonRequest(url, 'PUT', { ...request, feedbackId: feedback.id, message: 'intrusion' }));
+    expect(response.status).toBe(404);
+    expect((await getFeedbackRepository().find('demo', feedback.id))?.messages).toEqual([]);
+    const owner = await POST(createJsonRequest(url, 'POST', { ...base, secrets: [secret] }));
+    expect((await owner.json()).threads.map((thread: { id: string }) => thread.id)).toEqual([feedback.id]);
+  });
+
+  it('lets a browser without a user continue the conversation it created', async () => {
+    const anonymousInput = createFeedbackInputSchema.parse(createFeedbackBody({ reporter: { id: ANONYMOUS_REPORTER_ID, name: 'Anonymous' } }));
+    const feedback = await getFeedbackRepository().create(anonymousInput, undefined, access);
+    const request = { ...base, reporter: null, secrets: [secret] };
+    const history = await POST(createJsonRequest(url, 'POST', request));
+    expect((await history.json()).threads.map((thread: { id: string }) => thread.id)).toEqual([feedback.id]);
+    const response = await PUT(createJsonRequest(url, 'PUT', { ...request, feedbackId: feedback.id, message: 'More detail.' }));
+    expect(response.status).toBe(200);
   });
 
   it('accepts verified identity across browsers only for verified-created threads', async () => {
