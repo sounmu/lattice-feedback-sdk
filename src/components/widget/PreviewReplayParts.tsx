@@ -213,7 +213,7 @@ function PreviewCommentPinOverlay({ boxes, selectedNumber, onSelect, ...overlay 
   const namedBoxes = boxes.map((box) => ({ ...box, pin: { ...box.pin, label: describeMarkedElement(box.pin.label) } }));
   return (
     <OpenCommentScope selectedNumber={selectedNumber} onSelect={onSelect}>
-      <CommentPinOverlay {...overlay} boxes={namedBoxes} selectedNumber={selectedNumber} onSelect={onSelect} skin={PIN_SKIN} />
+      <CommentPinOverlay {...overlay} boxes={namedBoxes} selectedNumber={selectedNumber} onSelect={onSelect} skin={PIN_SKIN} keepsBubbleInView />
     </OpenCommentScope>
   );
 }

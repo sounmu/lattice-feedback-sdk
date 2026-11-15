@@ -1,5 +1,6 @@
 'use client';
 
+import { getBubbleShift } from '@/lib/screen-preview';
 import type { ScreenCommentPin, ScreenEditMove } from '@/types/screen-snapshot';
 
 /** Where a pin's element sits in the rebuilt page's viewport, in CSS px. */
@@ -15,6 +16,8 @@ export interface PinBox {
 
 // Bubble width in screen px, before the inverse scale is applied.
 const BUBBLE_WIDTH = 256;
+// Screen px a bubble held in view keeps to the edge of the screen.
+const BUBBLE_EDGE_GAP = 8;
 
 /** Class names of the pieces drawn for a pin. The bubble has to stay BUBBLE_WIDTH wide. */
 export interface CommentPinOverlaySkin {
@@ -45,12 +48,18 @@ export interface CommentPinOverlayProps {
   onSelect: (number: number | null) => void;
   /** A host with its own look passes its own class names. The default is this viewer's look. */
   skin?: CommentPinOverlaySkin;
+  /**
+   * Starts an open comment left of its pin by as much as it takes to end inside the screen. Without it the
+   * comment opens to the right of its pin, or wholly to the left when the right has no room, which cuts it
+   * off on a screen too narrow for either.
+   */
+  keepsBubbleInView?: boolean;
 }
 
 // Drawn over the rebuilt page in its own coordinates. Badges and bubbles are scaled back up so they
 // stay readable when the screen is shrunk to fit.
 export function CommentPinOverlay({
-  boxes, width: viewWidth, height: viewHeight, scale, selectedNumber, onSelect, skin = PIN_OVERLAY_SKIN,
+  boxes, width: viewWidth, height: viewHeight, scale, selectedNumber, onSelect, skin = PIN_OVERLAY_SKIN, keepsBubbleInView = false,
 }: CommentPinOverlayProps) {
   const inverseScale = 1 / scale;
   return (
@@ -65,6 +74,7 @@ export function CommentPinOverlay({
           return null;
         }
         const opensLeft = badgeX + BUBBLE_WIDTH * inverseScale > viewWidth;
+        const bubbleShift = getBubbleShift({ pinX: badgeX, viewWidth, scale, bubbleWidth: BUBBLE_WIDTH, edgeGap: BUBBLE_EDGE_GAP });
         return (
           <div key={pin.number}>
             <div
@@ -84,7 +94,8 @@ export function CommentPinOverlay({
               {isSelected && (
                 <div
                   role="note"
-                  className={`pointer-events-auto ${skin.bubble} ${opensLeft ? '-translate-x-full' : ''}`}
+                  className={`pointer-events-auto ${skin.bubble} ${opensLeft && !keepsBubbleInView ? '-translate-x-full' : ''}`}
+                  style={keepsBubbleInView ? { translate: `${-bubbleShift}px 0` } : undefined}
                 >
                   <p className={skin.label}>{pin.label}</p>
                   <p className={skin.comment}>{pin.comment}</p>
