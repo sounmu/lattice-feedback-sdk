@@ -106,6 +106,17 @@ export function scanCssSelectors(cssText: string): CssSelectors {
   return { names, dataSelectors };
 }
 
+// Besides names, rewriteCssNames writes a url(#name) without the whitespace around the name and a ::part() list again.
+const REWRITTEN_WITHOUT_NAMES = /url\(\s*["']?#|::part\(/;
+
+/**
+ * True when rewriteCssNames returns the text as it is for as long as none of the names scanCssSelectors finds in
+ * it has another name, so a caller that knows those names can skip the rewrite.
+ */
+export function isVerbatimWithoutReplacements(cssText: string): boolean {
+  return !REWRITTEN_WITHOUT_NAMES.test(cssText);
+}
+
 /** The same stylesheet with the names that already have another name in this document written as that other name. */
 export function rewriteCssNames(cssText: string, findReplacement: (name: string) => string | undefined): string {
   return splitCssPieces(cssText)
