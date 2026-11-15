@@ -94,7 +94,10 @@ export function scanCssSelectors(cssText: string): CssSelectors {
       const attribute = match[3].toLowerCase();
       const operator = match[4] as AttributeOperator;
       const value = match[5] ?? match[6] ?? match[7] ?? '';
-      if (isReferenceAttribute(attribute) && (operator === '=' || operator === '~=')) names.add(value);
+      rewriteSelectorValue(attribute, operator, value, (name) => {
+        names.add(name);
+        return undefined;
+      });
       if (attribute.startsWith('data-')) {
         dataSelectors.push({ attribute, operator, value, ignoreCase: /i/i.test(match[8] ?? '') && !/s/i.test(match[8] ?? '') });
       }
@@ -125,13 +128,27 @@ function rewriteSelectorNames(selector: string, findReplacement: (name: string) 
     if (parts !== undefined) {
       return whole.replace(parts, parts.replace(/\S+/g, (part) => findReplacement(part) ?? part));
     }
-    if (attribute === undefined || !isReferenceAttribute(attribute.toLowerCase()) || (operator !== '=' && operator !== '~=')) return whole;
+    if (attribute === undefined || operator === undefined) return whole;
     const value = double ?? single ?? bare ?? '';
-    const replacement = findReplacement(value);
-    if (replacement === undefined) return whole;
-    const quote = double === undefined ? (single === undefined ? '' : "'") : '"';
-    return `[${attribute}${operator}${quote}${replacement}${quote}${flag ?? ''}]`;
+    const rewritten = rewriteSelectorValue(attribute.toLowerCase(), operator, value, findReplacement);
+    if (rewritten === value) return whole;
+    const quote = findQuote(double, single);
+    return `[${attribute}${operator}${quote}${rewritten}${quote}${flag ?? ''}]`;
   });
+}
+
+function findQuote(double: string | undefined, single: string | undefined): string {
+  if (double !== undefined) return '"';
+  if (single !== undefined) return "'";
+  return '';
+}
+
+// A selector value names nodes the way the attribute itself does. "=" compares the whole value, so a fragment
+// (href="#name") or a list of names (aria-controls="one two") is read like that attribute. "~=" compares one name.
+function rewriteSelectorValue(attribute: string, operator: string, value: string, findReplacement: (name: string) => string | undefined): string {
+  if (operator === '=') return rewriteReferences(attribute, value, (name) => findReplacement(name) ?? name);
+  if (operator === '~=' && isReferenceAttribute(attribute)) return findReplacement(value) ?? value;
+  return value;
 }
 
 function toComparable(text: string, ignoreCase: boolean): string {

@@ -32,6 +32,14 @@ describe('names in stylesheet text', () => {
       .toBe('@scope (#r1) { img { color: #abc } }');
   });
 
+  it('rewrites the value of an attribute selector the way the attribute itself is rewritten', () => {
+    const css = 'a[href="#panel"] [aria-controls="one two"] [aria-controls~=one] [href="/panel"] [id^=one] [data-x="one"] [target="_blank"] { top: 0 }';
+
+    expect(rewriteCssNames(css, renameTo({ panel: 'r1', one: 'r2', two: 'r3' })))
+      .toBe('a[href="#r1"] [aria-controls="r2 r3"] [aria-controls~=r2] [href="/panel"] [id^=one] [data-x="one"] [target="_blank"] { top: 0 }');
+    expect([...scanCssSelectors('a[href="#panel"] [aria-controls="one two"] [href="/x"] {}').names].sort()).toEqual(['one', 'panel', 'two']);
+  });
+
   it('reads hexadecimal escapes in an id selector, with the space that ends them', () => {
     expect([...scanCssSelectors('#\\31 23 { color: red } #a\\:b\\62 c{}').names].sort()).toEqual(['123', 'a:bbc']);
     expect(rewriteCssNames('#\\31 23 { color: red } #\\31 23.x #\\000031 23{}', renameTo({ 123: 'r1' })))

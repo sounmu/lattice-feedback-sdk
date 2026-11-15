@@ -530,3 +530,16 @@ describe('tokens and names the page already uses', () => {
     expect(css).toBe('#' + later.id + ' { top: 0 }');
   });
 });
+
+describe('names a stylesheet selects through an attribute', () => {
+  it('keeps a name that a stylesheet selects through a fragment or a list of names', () => {
+    const masking = new SnapshotMasker(new AutomaticMasker(new Set()));
+    const link = recorded(2, 'a', { href: '#panel', 'aria-controls': 'one two' });
+    const panel = recorded(3, 'div', { id: 'panel' });
+    const css = 'a[href="#panel"], [aria-controls="one two"] { top: 0 }';
+    masking.node(recorded(1, 'div', {}, [recorded(4, 'style', {}, [textNode(5, css)]), link, panel]));
+
+    expect(attributesOf(link)).toEqual({ href: '#panel', 'aria-controls': 'one two' });
+    expect(attributesOf(panel).id).toBe('panel');
+  });
+});
