@@ -28,23 +28,12 @@ export function getCaptureRuntimeUrl(source: CaptureRuntimeSource, failedLoads: 
 }
 
 /**
- * The returned function loads the runtime once and shares the result. A failed load is not kept, so the
- * next call tries again.
+ * The returned function imports the runtime. Its caller (src/sdk/lazy-capture.ts) shares one load between
+ * all who wait for it and says how many loads have failed, which the address of a retry depends on.
  */
-export function createRuntimeLoader(appOrigin: string): () => Promise<CaptureRuntime> {
-  let loading: Promise<CaptureRuntime> | null = null;
-  let failedLoads = 0;
-  return () => {
-    if (loading) {
-      return loading;
-    }
+export function createRuntimeLoader(appOrigin: string): (failedLoads: number) => Promise<CaptureRuntime> {
+  return async (failedLoads) => {
     const source = { appOrigin, path: __LATTICE_CAPTURE_RUNTIME_PATH__, deploymentId: __LATTICE_DEPLOYMENT_ID__ };
-    const load: Promise<CaptureRuntime> = import(getCaptureRuntimeUrl(source, failedLoads));
-    loading = load;
-    load.catch(() => {
-      failedLoads += 1;
-      loading = null;
-    });
-    return load;
+    return import(getCaptureRuntimeUrl(source, failedLoads));
   };
 }

@@ -10,8 +10,11 @@ import type { CaptureRuntime } from '@/sdk/runtime-loader';
 import type { CaptureCommand } from '@/types/sdk-message';
 
 export interface LazyCaptureOptions extends CaptureControllerOptions {
-  /** Rejects when the runtime cannot be loaded. A later call tries again. */
-  loadRuntime: () => Promise<CaptureRuntime>;
+  /**
+   * Imports the runtime. It is told how many loads have failed, so that a retry can ask under a new
+   * address. Rejects when the runtime cannot be loaded.
+   */
+  loadRuntime: (failedLoads: number) => Promise<CaptureRuntime>;
   widgetPanel: Element;
   appOrigin: string;
   onPreviewClose: (previewId: string) => void;
@@ -22,6 +25,9 @@ export interface LazyCaptureOptions extends CaptureControllerOptions {
 export type LazyCapture = ReturnType<typeof createLazyCapture>;
 
 const RUNTIME_UNAVAILABLE_MESSAGE = '화면 첨부 도구를 불러오지 못했습니다. 다시 시도하거나 페이지를 새로고침하세요.';
+// For a retry that failed as well. The file this sdk.js asks for is then most likely gone: the app was
+// deployed again after the page loaded sdk.js, and only a reload brings the sdk.js that asks for the new file.
+const RUNTIME_OUTDATED_MESSAGE = '피드백 도구가 업데이트된 것으로 보입니다. 페이지를 새로고침해야 화면을 첨부할 수 있습니다. 글로 쓴 피드백은 새로고침하지 않아도 지금 보낼 수 있습니다.';
 
 export function createLazyCapture(options: LazyCaptureOptions) {
   const { policy, projectKey } = options;
@@ -31,6 +37,8 @@ export function createLazyCapture(options: LazyCaptureOptions) {
   let stopWatchingIndex: (() => void) | null = null;
   let isPanelVisible = false;
   let isDestroyed = false;
+  let loading: Promise<CaptureRuntime> | null = null;
+  let failedLoads = 0;
 
   // What the widget is told while there is no controller: capture can start and nothing is attached.
   function emitIdleState(errorMessage: string | null): void {
@@ -56,10 +64,17 @@ export function createLazyCapture(options: LazyCaptureOptions) {
     options.onTitleChange();
   }
 
-  async function load(): Promise<CaptureRuntime> {
-    const loaded = await options.loadRuntime();
-    attach(loaded);
-    return loaded;
+  // Every caller shares one load. A failed load is not kept, so the next call tries again.
+  function load(): Promise<CaptureRuntime> {
+    loading ??= options.loadRuntime(failedLoads).then((loaded) => {
+      attach(loaded);
+      return loaded;
+    }, (error: unknown) => {
+      loading = null;
+      failedLoads += 1;
+      throw error;
+    });
+    return loading;
   }
 
   // A failed load is left alone here: nothing was asked for yet, and a capture that needs the tools reports it.
@@ -123,7 +138,7 @@ export function createLazyCapture(options: LazyCaptureOptions) {
     },
     /** Tells the widget that a capture could not start because the tools did not load. */
     reportUnavailable(): void {
-      if (!controller) emitIdleState(RUNTIME_UNAVAILABLE_MESSAGE);
+      if (!controller) emitIdleState(failedLoads > 1 ? RUNTIME_OUTDATED_MESSAGE : RUNTIME_UNAVAILABLE_MESSAGE);
     },
     maskTitle,
     handleCommand(command: CaptureCommand): void {

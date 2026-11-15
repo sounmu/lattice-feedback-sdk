@@ -3,12 +3,14 @@ import type { CapturePolicy } from '@/lib/capture-policy';
 import { createCaptureCommand } from '@/lib/capture-protocol';
 import { getFlowSessionKey } from '@/sdk/flow-session';
 import { MemoryStorage } from '@/sdk/flow-test-fixtures';
-import { createLazyCapture } from '@/sdk/lazy-capture';
+import { createLazyCapture, type LazyCaptureOptions } from '@/sdk/lazy-capture';
 import type { CaptureRuntime } from '@/sdk/runtime-loader';
 import type { CaptureState } from '@/types/sdk-message';
 
 const PROJECT_KEY = 'demo';
 const FLOW_KEY = getFlowSessionKey(PROJECT_KEY);
+
+type LoadRuntime = LazyCaptureOptions['loadRuntime'];
 
 function stubWindow(storedFlow = false) {
   const storage = new MemoryStorage();
@@ -42,7 +44,7 @@ function createFakeRuntime() {
   return { runtime: exports as unknown as CaptureRuntime, exports, controller, previewPanel, stopWatchingIndex };
 }
 
-function createCapture(loadRuntime: () => Promise<CaptureRuntime>, policy: CapturePolicy | null = null) {
+function createCapture(loadRuntime: LoadRuntime, policy: CapturePolicy | null = null) {
   const onUpdate = vi.fn<(state: CaptureState) => void>();
   const onTitleChange = vi.fn();
   const capture = createLazyCapture({
@@ -159,6 +161,32 @@ describe('loading the capture tools', () => {
     capture.reset();
 
     expect(onUpdate.mock.calls.map(([state]) => state.errorMessage === null)).toEqual([false, true, false, true]);
+  });
+
+  it('reports a load that failed again on retry differently from a first failure', async () => {
+    stubWindow();
+    const { capture, onUpdate } = createCapture(vi.fn<LoadRuntime>().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    await Promise.allSettled([capture.load(), capture.load()]);
+    capture.reportUnavailable();
+    await expect(capture.load()).rejects.toThrow(TypeError);
+    capture.reportUnavailable();
+
+    const [afterFirstLoad, afterRetry] = onUpdate.mock.calls.map(([state]) => state.errorMessage);
+    expect(afterFirstLoad).toEqual(expect.any(String));
+    expect(afterRetry).toEqual(expect.any(String));
+    expect(afterRetry).not.toBe(afterFirstLoad);
+  });
+
+  it('shares a load between its callers and tells the next one how many have failed', async () => {
+    stubWindow();
+    const loadRuntime = vi.fn<LoadRuntime>().mockRejectedValue(new TypeError('Failed to fetch'));
+    const { capture } = createCapture(loadRuntime);
+
+    await Promise.allSettled([capture.load(), capture.load()]);
+    await expect(capture.load()).rejects.toThrow(TypeError);
+
+    expect(loadRuntime.mock.calls).toEqual([[0], [1]]);
   });
 
   it('warms the static text index once loaded while the panel is on screen', async () => {
