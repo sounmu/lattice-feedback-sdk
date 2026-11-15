@@ -10,7 +10,10 @@ import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
 import { captureRecording, captureScreen } from '@/sdk/screen-capture';
 import { configureAutomaticMasking, onStaticIndexSettled, prepareStaticTextIndex, warmStaticTextIndex } from '@/sdk/static-text-index';
-import { HOST_ELEMENT_STYLE, PANEL_OPEN_CLASS_NAME, SDK_STYLES } from '@/sdk/styles';
+import {
+  HOST_ELEMENT_STYLE, LAUNCHER_CLOSE_ICON_CLASS_NAME, LAUNCHER_ICON_CLASS_NAME, LAUNCHER_LABEL_CLASS_NAME, PANEL_OPEN_CLASS_NAME,
+  SDK_STYLES,
+} from '@/sdk/styles';
 import type { FeedbackSdkInitOptions } from '@/sdk/types';
 import type { FeedbackReporter } from '@/types/feedback';
 import type { CaptureUpdateMessage, HostToWidgetMessage } from '@/types/sdk-message';
@@ -18,7 +21,23 @@ import type { CaptureUpdateMessage, HostToWidgetMessage } from '@/types/sdk-mess
 const LOG_PREFIX = '[LatticeFeedback]';
 const HOST_ELEMENT_TAG_NAME = 'lattice-feedback-root';
 const IFRAME_TITLE = 'Feedback';
+const LAUNCHER_LABEL = 'Feedback';
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+// A speech bubble while the panel is closed, a chevron pointing down while it is open.
+const LAUNCHER_OPEN_ICON_PATH = 'M6 4h12a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-6l-5 4v-4H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z';
+const LAUNCHER_CLOSE_ICON_PATH = 'm6 9 6 6 6-6';
 const MAX_CONCURRENT_SCREEN_CAPTURES = 3;
+
+function createLauncherIcon(className: string, pathData: string): SVGSVGElement {
+  const iconElement = document.createElementNS(SVG_NAMESPACE, 'svg');
+  iconElement.setAttribute('class', className);
+  iconElement.setAttribute('viewBox', '0 0 24 24');
+  iconElement.setAttribute('aria-hidden', 'true');
+  const pathElement = document.createElementNS(SVG_NAMESPACE, 'path');
+  pathElement.setAttribute('d', pathData);
+  iconElement.append(pathElement);
+  return iconElement;
+}
 
 export class FeedbackSdk {
   private readonly appOrigin: string;
@@ -165,7 +184,16 @@ export class FeedbackSdk {
     const launcherButton = document.createElement('button');
     launcherButton.type = 'button';
     launcherButton.className = 'launcher';
-    launcherButton.textContent = 'Feedback';
+    // The icons carry no text, so a pointer gets the name as a tooltip.
+    launcherButton.title = LAUNCHER_LABEL;
+    const launcherLabel = document.createElement('span');
+    launcherLabel.className = LAUNCHER_LABEL_CLASS_NAME;
+    launcherLabel.textContent = LAUNCHER_LABEL;
+    launcherButton.append(
+      createLauncherIcon(LAUNCHER_ICON_CLASS_NAME, LAUNCHER_OPEN_ICON_PATH),
+      createLauncherIcon(`${LAUNCHER_ICON_CLASS_NAME} ${LAUNCHER_CLOSE_ICON_CLASS_NAME}`, LAUNCHER_CLOSE_ICON_PATH),
+      launcherLabel,
+    );
     launcherButton.setAttribute('aria-expanded', 'false');
     launcherButton.addEventListener('click', this.handleLauncherClick);
 

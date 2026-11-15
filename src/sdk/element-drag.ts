@@ -93,7 +93,7 @@ ${OVERLAY_SELECTOR} button:active {
   background-image: ${getStateLayer(SDK_THEME_DARK.overlayPressed)} !important;
   transform: ${SDK_PRESSED_SCALE} !important;
 }
-${OVERLAY_SELECTOR} button[data-action="confirm"]:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)} !important; }
+${OVERLAY_SELECTOR} button[data-action="confirm"]:hover { background-image: ${getStateLayer(SDK_THEME_DARK.accentHover)} !important; }
 ${OVERLAY_SELECTOR} button[data-action="confirm"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)} !important; }
 @media (prefers-reduced-motion: reduce) {
   ${OVERLAY_SELECTOR} button { transition: none !important; }

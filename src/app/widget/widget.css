@@ -8,12 +8,39 @@
 /* Theme adjustments for the widget. They sit on the theme root, so anything Astryx renders outside
    the widget root, such as a tooltip, gets them too. */
 [data-astryx-theme='neutral'] {
+  --color-accent: #3b5bfd;
+  --color-accent-muted: #eef1ff;
+  --color-on-accent: #ffffff;
+  /* Accent text is the darker brand blue. On the accent wash of a chosen tab or feedback type,
+     --color-accent reads 4.5:1 only at rest and falls under it while the control is hovered. */
+  --color-text-accent: #2f4ae0;
+  --color-icon-accent: var(--color-accent);
+  --focus-outline-color: var(--color-accent);
   /* Korean text is set in Pretendard when the device has it, else the platform's Korean face. */
   --font-family-body: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
     'Segoe UI', 'Malgun Gothic', Roboto, 'Noto Sans KR', Helvetica, Arial, sans-serif;
   --font-family-heading: var(--font-family-body);
   /* Large controls are the widget's touch targets: 44px instead of the theme's 36px. */
   --size-element-lg: 2.75rem;
+  /* Shape, after the messenger the widget is modelled on: rounder controls and cards than the theme's,
+     and 16px chat bubbles whose grouped corner tightens to the inner radius. src/sdk/theme-tokens.ts
+     carries the same values for the SDK's own UI on the host page. */
+  --radius-inner: 0.5rem;
+  --radius-element: 0.75rem;
+  --radius-container: 1rem;
+  --radius-chat: 1rem;
+}
+
+/* Astryx paints hover/press with shared overlays, rather than accent-state tokens.
+   Scope the opaque brand hover to primary actions so neutral controls stay neutral. */
+[data-astryx-theme='neutral'] .astryx-button[data-variant='primary'] {
+  --color-overlay-hover: #2f4ae0;
+}
+
+/* The selected segment uses surface/text tokens instead of accent tokens. */
+[data-astryx-theme='neutral'] .astryx-segmented-control-item[data-selected='selected'] {
+  --color-background-surface: var(--color-accent-muted);
+  --color-text-primary: var(--color-text-accent);
 }
 
 .widget-root {
@@ -55,16 +82,148 @@
   text-wrap: wrap;
 }
 
-/* The message field grows with its text, from two lines up to four. The block padding matches the
-   field's own. */
-.widget-composer-field textarea {
-  field-sizing: content;
-  min-block-size: calc(2lh + var(--spacing-2));
-  max-block-size: calc(4lh + var(--spacing-2));
+/* The team's avatar carries the brand colour. Every avatar in the widget is the team's. */
+.widget-root .astryx-avatar-fallback {
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
 }
 
-/* A segment is 8px shorter than its 44px track. Under a finger the track itself takes the tap for the
-   segment below it. Under a mouse this extends the segment's press area to the track's full height. */
+/* The tabs sit under the header as two pills. The chosen one is a wash with accent ink, like the chosen
+   feedback type, in place of the theme's underline. A pill is 8px shorter than its 44px press area. */
+.widget-root .astryx-tab-list {
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-3) var(--spacing-2);
+}
+
+.widget-root .astryx-tab-strip {
+  padding-block-end: 0;
+}
+
+.widget-root .astryx-tab {
+  min-block-size: calc(var(--size-element-lg) - var(--spacing-2));
+}
+
+.widget-root .astryx-tab::after {
+  content: '';
+  position: absolute;
+  inset: calc(var(--spacing-1) * -1) 0;
+}
+
+.widget-root .astryx-tab[data-selected='selected'] {
+  --color-text-primary: var(--color-text-accent);
+  background-color: var(--color-accent-muted);
+}
+
+.widget-root .astryx-tab-indicator {
+  display: none;
+}
+
+/* The reporter's own messages are accent bubbles. The theme paints both sides neutral. */
+.widget-root .astryx-chat-message-bubble[data-sender='user'][data-variant='filled'] {
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* A message field and its send button share one borderless surface. The surface shows the field's focus
+   the way the theme's fields do: an accent hairline with a muted ring inside it. */
+.widget-composer {
+  display: flex;
+  align-items: flex-end;
+  padding: calc(var(--spacing-0-5) - var(--border-width));
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-container);
+  background-color: var(--color-background-muted);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.widget-composer:has(textarea:focus-visible) {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 2px var(--color-accent-muted);
+}
+
+.widget-composer .astryx-text-area {
+  border-width: 0;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* One line to start, growing with the text up to five. Where field-sizing is not supported the field
+   keeps the two rows set on the element. */
+.widget-composer textarea {
+  field-sizing: content;
+  min-block-size: calc(1lh + var(--spacing-6));
+  max-block-size: calc(5lh + var(--spacing-6));
+  padding-block: var(--spacing-3);
+  padding-inline: var(--spacing-3) var(--spacing-2);
+}
+
+/* The send button's corner follows the surface it sits in. */
+.widget-composer .astryx-button {
+  border-radius: calc(var(--radius-container) - var(--spacing-0-5));
+}
+
+/* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would
+   truncate. Its usage count sits beside the icon. A name too long for a narrow panel wraps, and the
+   icons still line up because each tool starts at the top of its cell. */
+.widget-root .widget-tool {
+  align-items: flex-start;
+  block-size: auto;
+  min-block-size: calc(var(--size-element-lg) + var(--spacing-3));
+  padding: var(--spacing-2) var(--spacing-1);
+}
+
+.widget-tool-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-0-5);
+}
+
+.widget-tool-glyph {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.widget-tool-usage,
+.widget-tool-label {
+  font-size: var(--text-supporting-size);
+  line-height: var(--text-supporting-leading);
+}
+
+.widget-tool-usage {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.widget-tool-label {
+  text-align: center;
+  white-space: normal;
+}
+
+/* The feedback type reads as quick replies under the greeting: separate outlined chips, the chosen one a
+   wash, in place of one filled track. The track keeps its block padding, so a chip is still 8px shorter
+   than the 44px the track gives a finger. */
+.widget-root .astryx-segmented-control {
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  padding-inline: 0;
+  background-color: transparent;
+}
+
+.widget-root .astryx-segmented-control-item {
+  border: var(--border-width) solid var(--color-border-emphasized);
+  border-radius: var(--radius-element);
+}
+
+.widget-root .astryx-segmented-control-item[data-selected='selected'] {
+  border-color: transparent;
+}
+
+/* Under a finger the track itself takes the tap for the chip below it. Under a mouse this extends the
+   chip's press area to the track's full height. */
 @media (pointer: fine) {
   .widget-root .astryx-segmented-control-item {
     position: relative;

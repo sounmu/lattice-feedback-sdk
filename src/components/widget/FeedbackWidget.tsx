@@ -33,6 +33,7 @@ import {
   WIDGET_TEAM_NAME,
   WidgetBanner,
   WidgetBody,
+  WidgetComposer,
   WidgetFooter,
   WidgetHeader,
 } from '@/components/widget/WidgetLayout';
@@ -452,20 +453,20 @@ export function FeedbackWidget() {
   function renderGreeting(isBusy: boolean) {
     const greetingName = reporter ? `, ${reporter.name} 님` : '';
     return (
-      <ChatMessage sender="assistant" avatar={<Avatar name={WIDGET_TEAM_NAME} size="sm" tooltip={false} />} name={null}>
-        <ChatMessageBubble width="100%">
-          <VStack gap={1}>
-            <Text as="p" weight="semibold">
-              안녕하세요{greetingName}
-            </Text>
-            <Text as="p" color="secondary">
-              불편한 점을 편하게 적어 주세요. 글로 설명하기 어려우면 아래 도구로{' '}
-              <Text weight="semibold" color="primary">
-                화면에서 직접
-              </Text>{' '}
-              보여주셔도 돼요.
-            </Text>
-          </VStack>
+      <ChatMessage sender="assistant" avatar={<Avatar name={WIDGET_TEAM_NAME} size="sm" shape="rounded" tooltip={false} />} name={null}>
+        <ChatMessageBubble group="first">
+          <Text as="p" weight="semibold">
+            안녕하세요{greetingName}
+          </Text>
+        </ChatMessageBubble>
+        <ChatMessageBubble group="last">
+          <Text as="p">
+            불편한 점을 편하게 적어 주세요. 글로 설명하기 어려우면 아래 도구로{' '}
+            <Text weight="semibold" className="whitespace-nowrap">
+              화면에서 직접
+            </Text>{' '}
+            보여주셔도 돼요.
+          </Text>
         </ChatMessageBubble>
         <SegmentedControl label="피드백 유형" value={type} onChange={handleTypeChange} size="lg" isDisabled={isBusy}>
           {FEEDBACK_TYPE_OPTIONS.map((option) => (
@@ -553,7 +554,7 @@ export function FeedbackWidget() {
             onStart={(mode) => sendCaptureCommand(createCaptureCommand({ type: 'capture:start', payload: { mode } }))}
             onCaptureScreen={screens.capture}
           />
-          <HStack gap={2} align="end">
+          <WidgetComposer>
             <TextArea
               ref={composerRef}
               label={MESSAGE_LABEL}
@@ -565,7 +566,7 @@ export function FeedbackWidget() {
               value={message}
               htmlMaxLength={MAX_MESSAGE_LENGTH}
               isDisabled={!isInitialized || isBusy}
-              containerClassName="widget-composer-field min-w-0 flex-1"
+              containerClassName="min-w-0 flex-1"
               onChange={setMessage}
               onKeyDown={handleMessageKeyDown}
             />
@@ -579,7 +580,7 @@ export function FeedbackWidget() {
               size="lg"
               isDisabled={!canSubmit}
             />
-          </HStack>
+          </WidgetComposer>
           <HStack gap={2} justify="between" align="center">
             {renderHint(attachmentCount)}
             <Text type="supporting" hasTabularNumbers>

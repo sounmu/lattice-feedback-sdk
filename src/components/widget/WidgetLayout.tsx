@@ -1,4 +1,7 @@
-import type { ComponentType, ReactNode } from 'react';
+'use client';
+
+import { createContext, useContext, type ComponentType, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Avatar } from '@astryxdesign/core/Avatar';
 import { Banner } from '@astryxdesign/core/Banner';
 import { Card } from '@astryxdesign/core/Card';
@@ -17,6 +20,12 @@ export const WIDGET_TEAM_NAME = 'Lattice';
 const CLOSE_LABEL = '닫기';
 const BACK_LABEL = '뒤로';
 
+// Where a header is drawn when the panel has tabs: above them. The tabs stay mounted while the views
+// under them change, so a header rendered in place could only sit below the tabs.
+const WidgetHeaderSlotContext = createContext<HTMLElement | null>(null);
+
+export const WidgetHeaderSlotProvider = WidgetHeaderSlotContext.Provider;
+
 interface WidgetHeaderProps {
   title: string;
   subtitle: string;
@@ -28,18 +37,19 @@ interface WidgetHeaderProps {
 }
 
 export function WidgetHeader({ title, subtitle, onClose, onBack, backLabel = BACK_LABEL }: WidgetHeaderProps) {
-  return (
-    <HStack as="header" gap={3} align="center" paddingInlineStart={onBack ? 2 : 4} paddingInlineEnd={2} paddingBlock={2} className="shrink-0">
+  const slot = useContext(WidgetHeaderSlotContext);
+  const header = (
+    <HStack as="header" gap={3} align="center" paddingInlineStart={onBack ? 3 : 4} paddingInlineEnd={3} paddingBlock={1.5} className="shrink-0">
       {onBack ? (
         <IconButton label={backLabel} tooltip={backLabel} icon={<Icon icon="chevronLeft" />} variant="ghost" size="lg" onClick={onBack} />
       ) : (
-        <Avatar name={WIDGET_TEAM_NAME} size="md" tooltip={false} />
+        <Avatar name={WIDGET_TEAM_NAME} size={32} shape="rounded" tooltip={false} />
       )}
       <VStack gap={0} className="min-w-0 flex-1">
         <Heading level={3} accessibilityLevel={1} maxLines={1}>
           {title}
         </Heading>
-        <Text as="p" type="supporting" maxLines={1}>
+        <Text as="p" type="supporting" maxLines={2}>
           {subtitle}
         </Text>
       </VStack>
@@ -48,6 +58,7 @@ export function WidgetHeader({ title, subtitle, onClose, onBack, backLabel = BAC
       ) : null}
     </HStack>
   );
+  return slot ? createPortal(header, slot) : header;
 }
 
 /** The scrolling middle part. Only this part scrolls, so the composer below always stays in view. */
@@ -65,6 +76,11 @@ export function WidgetFooter({ children }: { children: ReactNode }) {
       {children}
     </VStack>
   );
+}
+
+/** A message field and its send button on one borderless surface, the way a messenger draws its input. */
+export function WidgetComposer({ children }: { children: ReactNode }) {
+  return <div className="widget-composer">{children}</div>;
 }
 
 export type BannerTone = 'info' | 'warning' | 'danger' | 'success';
