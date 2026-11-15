@@ -1,7 +1,7 @@
 // Turns a feedback into a ticket draft the admin can paste into an issue tracker. It restates what the
 // reporter wrote and what the SDK recorded, kept apart, and never guesses a cause.
 import { describeMove, formatSignedPixels } from '@/lib/edit-comparison-geometry';
-import { FEEDBACK_TYPE_LABELS, formatDateTime, getElementLabel, getPagePath } from '@/lib/feedback-display';
+import { FEEDBACK_TYPE_LABELS, formatDateTime, getElementLabel, getOrganizationLabel, getPagePath } from '@/lib/feedback-display';
 import type { FeedbackDetailResponse, FlowAttachment, FlowEvent } from '@/types/feedback';
 
 const MAX_TITLE_LENGTH = 60;
@@ -92,13 +92,20 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
   const typeLabel = FEEDBACK_TYPE_LABELS[feedback.type];
   const projectQuery = `projectKey=${encodeURIComponent(feedback.projectKey)}`;
   const { comments, edits, flow } = feedback.attachments;
+  const organization = feedback.reporter.verifiedOrganization;
+  const summaryLines = [
+    '## 요약',
+    '',
+    `- 유형: ${typeLabel}`,
+    `- 발생 화면: ${code(getPagePath(feedback.page.url))}`,
+    `- 작성자: ${plain(feedback.reporter.name)}`,
+  ];
+  if (organization) {
+    summaryLines.push(`- 소속: ${plain(getOrganizationLabel(organization))} (고객사 서버 서명으로 확인됨)`);
+  }
   const sections = [
     [
-      '## 요약',
-      '',
-      `- 유형: ${typeLabel}`,
-      `- 발생 화면: ${code(getPagePath(feedback.page.url))}`,
-      `- 작성자: ${plain(feedback.reporter.name)}`,
+      ...summaryLines,
       `- 접수: ${formatDateTime(feedback.createdAt)}`,
       `- 화면 크기: ${feedback.page.viewportWidth}×${feedback.page.viewportHeight}`,
       `- 피드백 원문: ${adminOrigin}/admin/feedback/${encodeURIComponent(feedback.id)}?${projectQuery}`,

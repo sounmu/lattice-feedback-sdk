@@ -2,7 +2,7 @@
 // so it must not pull in zod or any other package.
 import { isAssetFileList, isCapturedScreen, isScreenCaptureFailureReason } from '@/lib/screen-snapshot';
 import type { FeedbackReporter, PageContext } from '@/types/feedback';
-import { isReporterIdentity } from '@/sdk/reporter';
+import { isReporterIdentity, isReporterOrganization } from '@/sdk/reporter';
 import {
   MESSAGE_SOURCE,
   PROTOCOL_VERSION,
@@ -30,6 +30,7 @@ function isReporter(value: unknown): value is FeedbackReporter {
     return false;
   }
   if (value.identity !== undefined && !isReporterIdentity(value.identity)) return false;
+  if (value.organization !== undefined && !isReporterOrganization(value.organization)) return false;
   return value.email === undefined || typeof value.email === 'string';
 }
 

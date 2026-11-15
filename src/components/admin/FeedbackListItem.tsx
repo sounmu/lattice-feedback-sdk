@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { MouseEvent } from 'react';
 
 import { StatusBadge, TypeBadge } from '@/components/admin/FeedbackBadges';
-import { formatRelativeTime, getPagePath, summarizeAttachments } from '@/lib/feedback-display';
+import { formatRelativeTime, getOrganizationLabel, getPagePath, summarizeAttachments } from '@/lib/feedback-display';
 import type { Feedback } from '@/types/feedback';
 
 interface FeedbackListItemProps {
@@ -47,6 +47,9 @@ export function FeedbackListItem({ feedback, projectKey, nowTimestamp, isSelecte
         <p className="line-clamp-2 font-medium">{feedback.message}</p>
         <div className="flex flex-wrap gap-x-3 text-xs text-(--admin-text-sub)">
           <span>{feedback.reporter.name}</span>
+          {feedback.reporter.verifiedOrganization ? (
+            <span>{getOrganizationLabel(feedback.reporter.verifiedOrganization)} (서명 확인)</span>
+          ) : null}
           <span>{getPagePath(feedback.page.url)}</span>
           {attachmentSummary.map((item) => (
             <span key={item.kind} className="text-(--admin-primary)">

@@ -120,3 +120,11 @@ it('has a section only for what the feedback carries, and leaves the reporter em
   expect(full).toContain('+300px');
   expect(full).not.toContain('hong@example.com');
 });
+
+it('lists a verified organization as signature-confirmed and leaves the line out without one', () => {
+  const verified = createTicketDraft(createDetail({
+    reporter: { id: 'user-1', name: '홍길동', verifiedOrganization: { id: 'acme', name: '에이콤 *영업*팀' } },
+  }), ADMIN_ORIGIN).body;
+  expect(verified).toContain('- 소속: 에이콤 \\*영업\\*팀 (고객사 서버 서명으로 확인됨)');
+  expect(createTicketDraft(createDetail(), ADMIN_ORIGIN).body).not.toContain('소속');
+});

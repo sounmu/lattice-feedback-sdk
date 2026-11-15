@@ -6,6 +6,11 @@ export const reporterIdentitySchema = z.object({
   signature: z.string().regex(/^[a-f0-9]{64}$/),
 });
 
+export const reporterOrganizationSchema = z.object({
+  id: z.string().min(1).max(200),
+  name: z.string().max(200).optional(),
+});
+
 export const conversationMessagesSchema = z.array(z.object({
   id: z.string().min(1),
   authorRole: z.enum(['reporter', 'admin', 'sdk', 'ai']),
@@ -19,6 +24,7 @@ export const conversationRequestSchema = z.object({
   reporter: z.object({
     id: z.string().min(1).max(200),
     name: z.string().min(1).max(200),
+    organization: reporterOrganizationSchema.optional(),
     identity: reporterIdentitySchema.optional(),
   }).nullable(),
   secrets: z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(100),

@@ -7,7 +7,7 @@ import { consumeRateLimit, getClientAddress } from '@/lib/http/rate-limit';
 import { BodyTooLargeError, readBodyTextWithLimit } from '@/lib/http/read-body';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
-import { findVerifiedReporterId, hashConversationSecret } from '@/lib/reporter-identity';
+import { findVerifiedReporterIdentity, hashConversationSecret } from '@/lib/reporter-identity';
 import { conversationPostSchema, conversationRequestSchema } from '@/lib/validation/conversation-schema';
 import type { Feedback } from '@/types/feedback';
 
@@ -39,7 +39,7 @@ async function handleRequest(request: Request, write: boolean) {
     if (!project) return createApiErrorResponse(404, 'project_not_found', 'Project not found.');
     if (!isOriginAllowed(project, input.hostOrigin)) return createApiErrorResponse(403, 'origin_not_allowed', 'Origin not allowed.');
     const credentials = {
-      verifiedReporterId: findVerifiedReporterId(project, input.reporter),
+      verifiedReporterId: findVerifiedReporterIdentity(project, input.reporter)?.reporterId ?? null,
       browserSecretHashes: input.secrets.map(hashConversationSecret),
     };
     const repository = getFeedbackRepository();

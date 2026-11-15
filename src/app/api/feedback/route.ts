@@ -12,8 +12,8 @@ import { findProject, isOriginAllowed } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import { createFeedbackWithClaimedScreens } from '@/lib/feedback-submission';
-import { createConversationSecret, findVerifiedReporterId, hashConversationSecret } from '@/lib/reporter-identity';
-import type { CreateFeedbackResponse, Feedback, FeedbackListResponse } from '@/types/feedback';
+import { createConversationSecret, findVerifiedReporterIdentity, hashConversationSecret } from '@/lib/reporter-identity';
+import type { CreateFeedbackResponse, Feedback, FeedbackListResponse, FeedbackReporter } from '@/types/feedback';
 
 const MAX_BODY_BYTES = 65536;
 
@@ -70,12 +70,18 @@ export async function POST(request: Request) {
 
   const { screenSnapshotIds, ...feedbackInput } = parsed.data;
   const conversationSecret = createConversationSecret();
+  const verifiedIdentity = findVerifiedReporterIdentity(project, feedbackInput.reporter);
   const access = {
     browserSecretHash: hashConversationSecret(conversationSecret),
-    verifiedReporterId: findVerifiedReporterId(project, feedbackInput.reporter),
+    verifiedReporterId: verifiedIdentity?.reporterId ?? null,
   };
+  // An organization is stored only when the signature covers its id; an unsigned claim is dropped.
+  const verifiedOrganization = verifiedIdentity?.organizationId ? feedbackInput.reporter.organization : undefined;
   // The identity proof is a bearer credential, never reporter metadata.
-  delete feedbackInput.reporter.identity;
+  const reporter: FeedbackReporter = feedbackInput.reporter;
+  delete reporter.identity;
+  delete reporter.organization;
+  if (verifiedOrganization) reporter.verifiedOrganization = verifiedOrganization;
   try {
     // Screens are claimed for the new id before the feedback is stored, so two submissions can never
     // both report success for the same screen.

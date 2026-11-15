@@ -1,4 +1,4 @@
-import type { ElementTarget, FeedbackAttachments, FeedbackStatus, FeedbackType } from '@/types/feedback';
+import type { ElementTarget, FeedbackAttachments, FeedbackStatus, FeedbackType, ReporterOrganization } from '@/types/feedback';
 
 export const FEEDBACK_TYPE_LABELS: Record<FeedbackType, string> = {
   bug: '버그',
@@ -75,6 +75,11 @@ export function getPagePath(pageUrl: string): string {
   } catch {
     return pageUrl;
   }
+}
+
+/** The organization's display name, or its id when no name was supplied. */
+export function getOrganizationLabel(organization: ReporterOrganization): string {
+  return organization.name?.trim() || organization.id;
 }
 
 export function getElementLabel(target: ElementTarget): string {
