@@ -66,6 +66,8 @@ export class SnapshotMasker {
   private readonly knownSelectors = new Set<string>();
   // A name that is not proven static becomes one opaque token everywhere it appears in this document, stylesheets that arrive later included.
   private readonly opaqueNames = new Map<string, string>();
+  // The tokens handed out. A page name spelled like one of them gets a token of its own, or two nodes would share a name.
+  private readonly issuedTokens = new Set<string>();
   private opaqueCount = 0;
 
   constructor(
@@ -127,13 +129,16 @@ export class SnapshotMasker {
     // A name that has a token keeps it, whatever stylesheets or the index learn afterwards.
     const established = this.opaqueNames.get(name);
     if (established !== undefined) return established;
-    if (!name.trim() || this.cssNames.has(name) || this.masker.isStatic(name)) return name;
+    if (!name.trim()) return name;
+    const isKept = this.cssNames.has(name) || this.masker.isStatic(name);
+    if (isKept && !this.issuedTokens.has(name)) return name;
     let opaque: string;
     do {
       this.opaqueCount += 1;
       opaque = `lattice-ref-${this.opaqueCount}`;
-    } while (this.masker.known.has(opaque));
+    } while (this.masker.known.has(opaque) || this.cssNames.has(opaque));
     this.opaqueNames.set(name, opaque);
+    this.issuedTokens.add(opaque);
     this.masker.countMasked(name);
     return opaque;
   };
@@ -154,7 +159,7 @@ export class SnapshotMasker {
   private registerCss(cssText: string): void {
     const { names, dataSelectors } = scanCssSelectors(cssText);
     names.forEach((name) => {
-      if (!this.opaqueNames.has(name)) this.cssNames.add(name);
+      if (!this.opaqueNames.has(name) && !this.issuedTokens.has(name)) this.cssNames.add(name);
     });
     for (const selector of dataSelectors) {
       const key = [selector.attribute, selector.operator, selector.ignoreCase, selector.value].join('\u0000');
@@ -167,7 +172,7 @@ export class SnapshotMasker {
   /** Stylesheet text from any route: names it mentions that already have a token are written with it, the rest stay. */
   css(cssText: string): string {
     this.registerCss(cssText);
-    return rewriteCssNames(cssText, (name) => this.opaqueNames.get(name));
+    return rewriteCssNames(cssText, (name) => this.opaqueNames.get(name) ?? (this.issuedTokens.has(name) ? this.remapName(name) : undefined));
   }
 
   private collectCssNames(node: SnapshotNode): void {

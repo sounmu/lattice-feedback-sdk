@@ -502,3 +502,31 @@ describe('attributes that carry displayed text', () => {
     expect(attributesOf(node)[attribute]).toBe(MASKED_TEXT);
   });
 });
+
+describe('tokens and names the page already uses', () => {
+  it('does not hand out a token that a stylesheet of the page names', () => {
+    const masking = new SnapshotMasker(new AutomaticMasker(new Set()));
+    const dynamic = recorded(2, 'li', { id: 'dynamic-order-999' });
+    const literal = recorded(3, 'li', { id: 'lattice-ref-1' });
+    masking.node(recorded(1, 'ul', {}, [recorded(4, 'style', {}, [textNode(5, '#lattice-ref-1 { color: red }')]), dynamic, literal]));
+
+    expect(attributesOf(literal).id).toBe('lattice-ref-1');
+    expect(attributesOf(dynamic).id).toMatch(/^lattice-ref-\d+$/);
+    expect(attributesOf(dynamic).id).not.toBe('lattice-ref-1');
+  });
+
+  it('renames a page name spelled like a token already handed out, in a later stylesheet too', () => {
+    const masking = new SnapshotMasker(new AutomaticMasker(new Set()));
+    const dynamic = recorded(2, 'li', { id: 'dynamic-order-999' });
+    masking.node(recorded(1, 'ul', {}, [dynamic, recorded(3, 'style', {}, [textNode(4, '.row { color: blue }')])]));
+    expect(attributesOf(dynamic).id).toBe('lattice-ref-1');
+
+    const css = masking.text(4, '#lattice-ref-1 { top: 0 }');
+    const later = { id: 'lattice-ref-1' };
+    masking.attributes(5, later);
+
+    expect(later.id).toMatch(/^lattice-ref-\d+$/);
+    expect(later.id).not.toBe('lattice-ref-1');
+    expect(css).toBe('#' + later.id + ' { top: 0 }');
+  });
+});
