@@ -5,12 +5,15 @@ import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavaila
 import { getSupabaseConfiguration } from '@/lib/supabase-rest';
 import { createFeedbackInputSchema, updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import type { Feedback } from '@/types/feedback';
+import type { ConversationCredentials } from '@/types/conversation';
+import { conversationMessagesSchema } from '@/lib/validation/conversation-schema';
+import { ConversationLimitError } from '@/lib/conversation';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const PAGE_SIZE = 100;
 const FEEDBACK_SELECT = [
   'id', 'projectKey:project_key', 'message', 'type', 'status', 'duplicateOfId:duplicate_of', 'reporter', 'page',
-  'attachments', 'adminReply:admin_reply', 'createdAt:created_at', 'updatedAt:updated_at',
+  'attachments', 'adminReply:admin_reply', 'createdAt:created_at', 'updatedAt:updated_at', 'messages',
 ].join(',');
 
 // How Postgres reports a refused original: a foreign key violation (missing, or in another project) or a
@@ -33,6 +36,7 @@ const feedbackRowsSchema = z.array(
     adminReply: updateFeedbackInputSchema.shape.adminReply.unwrap(),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
+    messages: conversationMessagesSchema.optional(),
   }),
 );
 
@@ -43,8 +47,9 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
     parameters: Record<string, string>,
     options: RequestInit = {},
     setsDuplicateTarget = false,
+    table = 'feedback',
   ): Promise<Feedback[]> {
-    const endpoint = new URL('/rest/v1/feedback', url);
+    const endpoint = new URL(`/rest/v1/${table}`, url);
     endpoint.search = new URLSearchParams({ select: FEEDBACK_SELECT, ...parameters }).toString();
     let response: Response;
     try {
@@ -66,6 +71,13 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
       throw error;
     }
     if (!response.ok) {
+      if (response.status === 409) {
+        const failure: unknown = await response.clone().json().catch(() => null);
+        if (typeof failure === 'object' && failure !== null && 'code' in failure && failure.code === 'PT409') {
+          await response.body?.cancel();
+          throw new ConversationLimitError();
+        }
+      }
       // The error body is read only where its code changes the outcome.
       if (!setsDuplicateTarget) {
         await response.body?.cancel();
@@ -87,15 +99,19 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
   }
 
   return {
-    async create(input, id) {
+    async create(input, id, access) {
       const rows = await requestRows({}, {
         method: 'POST',
         body: JSON.stringify({
           ...(id === undefined ? {} : { id }),
+          ...(access ? { browser_secret_hash: access.browserSecretHash, verified_reporter_id: access.verifiedReporterId } : {}),
           project_key: input.projectKey,
           message: input.message,
           type: input.type,
-          reporter: input.reporter,
+          reporter: {
+            id: input.reporter.id, name: input.reporter.name,
+            ...(input.reporter.email === undefined ? {} : { email: input.reporter.email }),
+          },
           page: input.page,
           attachments: {
             comments: input.attachments?.comments ?? [],
@@ -111,7 +127,12 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
       return feedback;
     },
 
-    async findMany(projectKey) {
+    async findMany(projectKey, credentials) {
+      if (credentials) {
+        return requestRows({}, { method: 'POST', body: JSON.stringify({
+          p_project: projectKey, p_id: null, ...getCredentialParameters(credentials),
+        }) }, false, 'rpc/read_reporter_conversations');
+      }
       const items: Feedback[] = [];
       let cursor: Pick<Feedback, 'createdAt' | 'id'> | undefined;
       while (true) {
@@ -133,11 +154,23 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
       }
     },
 
-    async find(projectKey, id) {
+    async find(projectKey, id, credentials) {
       if (!z.uuid().safeParse(id).success) {
         return null;
       }
-      const rows = await requestRows({ project_key: `eq.${projectKey}`, id: `eq.${id}` });
+      const rows = credentials
+        ? await requestRows({}, { method: 'POST', body: JSON.stringify({
+          p_project: projectKey, p_id: id, ...getCredentialParameters(credentials),
+        }) }, false, 'rpc/read_reporter_conversations')
+        : await requestRows({ project_key: `eq.${projectKey}`, id: `eq.${id}` });
+      return rows[0] ?? null;
+    },
+
+    async appendReporterMessage(projectKey, id, message) {
+      if (!z.uuid().safeParse(id).success) return null;
+      const rows = await requestRows({}, { method: 'POST', body: JSON.stringify({
+        p_project: projectKey, p_id: id, p_body: message.body, ...getCredentialParameters(message.credentials),
+      }) }, false, 'rpc/append_reporter_message');
       return rows[0] ?? null;
     },
 
@@ -157,4 +190,8 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
       return rows[0] ?? null;
     },
   };
+}
+
+function getCredentialParameters(credentials: ConversationCredentials) {
+  return { p_hashes: credentials.browserSecretHashes, p_reporter: credentials.verifiedReporterId };
 }

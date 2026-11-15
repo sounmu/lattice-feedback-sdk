@@ -2,6 +2,7 @@
 // so it must not pull in zod or any other package.
 import { isAssetFileList, isCapturedScreen, isScreenCaptureFailureReason } from '@/lib/screen-snapshot';
 import type { FeedbackReporter, PageContext } from '@/types/feedback';
+import { isReporterIdentity } from '@/sdk/reporter';
 import {
   MESSAGE_SOURCE,
   PROTOCOL_VERSION,
@@ -28,6 +29,7 @@ function isReporter(value: unknown): value is FeedbackReporter {
   if (typeof value.id !== 'string' || typeof value.name !== 'string') {
     return false;
   }
+  if (value.identity !== undefined && !isReporterIdentity(value.identity)) return false;
   return value.email === undefined || typeof value.email === 'string';
 }
 
@@ -67,6 +69,8 @@ export function isHostToWidgetMessage(value: unknown): value is HostToWidgetMess
   }
   const payload = value.payload;
   switch (value.type) {
+    case 'visibility:update':
+      return typeof payload.isOpen === 'boolean';
     case 'init':
       return typeof payload.projectKey === 'string' && isReporterOrNull(payload.reporter) && isPageContext(payload.page);
     case 'reporter:update':

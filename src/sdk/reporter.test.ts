@@ -13,3 +13,17 @@ it('copies only supported reporter fields and isolates later host mutation', () 
 
   expect(copied).toEqual({ id: 'test', name: 'Test', email: 'test@example.com' });
 });
+
+it('passes a valid identity proof without retaining a mutable host reference', () => {
+  const reporter = { id: 'alice', name: 'Alice', identity: { expiresAt: 1800000000, signature: 'a'.repeat(64) } };
+  expect(isFeedbackReporter(reporter)).toBe(true);
+  const copied = copyReporter(reporter);
+  reporter.identity.signature = 'b'.repeat(64);
+  expect(copied.identity).toEqual({ expiresAt: 1800000000, signature: 'a'.repeat(64) });
+});
+
+it.each([null, 'proof', { expiresAt: '1800000000', signature: 'a'.repeat(64) }, { expiresAt: 1800000000, signature: 'bad' }])(
+  'rejects a malformed identity proof before postMessage', (identity) => {
+    expect(isFeedbackReporter({ id: 'alice', name: 'Alice', identity })).toBe(false);
+  },
+);

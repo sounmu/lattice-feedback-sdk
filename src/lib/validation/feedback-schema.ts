@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { reporterIdentitySchema } from '@/lib/validation/conversation-schema';
 import {
   MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS,
   MAX_PAGE_TITLE_LENGTH, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK, MAX_USER_AGENT_LENGTH, truncateText,
@@ -116,6 +117,7 @@ export const createFeedbackInputSchema = z.object({
     id: shortTextSchema.min(1),
     name: shortTextSchema.min(1),
     email: z.email().max(MAX_SHORT_TEXT_LENGTH).optional(),
+    identity: reporterIdentitySchema.optional(),
   }),
   page: z.object({
     url: pageUrlSchema,

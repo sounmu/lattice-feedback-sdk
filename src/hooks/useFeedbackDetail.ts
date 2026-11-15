@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getFeedbackDetail, updateFeedback } from '@/lib/admin-api';
 import { findAdminLoadStatus, type AdminLoadStatus } from '@/lib/admin-load-status';
+import { findSaveOutcome } from '@/lib/feedback-save-outcome';
 import type { FeedbackDetailResponse, UpdateFeedbackInput } from '@/types/feedback';
 
 interface FeedbackDetailState {
@@ -37,6 +38,7 @@ interface UseFeedbackDetailResult {
   errorMessage: string;
   saveStatus: SaveStatus;
   saveErrorMessage: string;
+  /** Resolves true when the server stored the change, even if the admin has moved on to another feedback. */
   save: (changes: UpdateFeedbackInput) => Promise<boolean>;
 }
 
@@ -82,12 +84,13 @@ export function useFeedbackDetail({ projectKey, token, id, onSaved }: UseFeedbac
         ? { requestKey, status: 'saved', errorMessage: '' }
         : { requestKey, status: 'failed', errorMessage: result.message };
       setSaveState((previous) => (previous?.requestKey === requestKey ? settled : previous));
-      // The token, project or feedback changed while saving: the page now shows another request.
-      if (latestRequestKey.current !== requestKey || !result.ok) {
-        return false;
+      const outcome = findSaveOutcome(result.ok, requestKey, latestRequestKey.current);
+      // When the token, project or feedback changed while saving, the page shows another request, so the
+      // result is not displayed. The caller still learns the server stored it, to settle its reply draft.
+      if (result.ok && outcome.shouldShowDetail) {
+        setState({ requestKey, detail: result.data, errorStatus: null, errorMessage: '' });
       }
-      setState({ requestKey, detail: result.data, errorStatus: null, errorMessage: '' });
-      return true;
+      return outcome.isAccepted;
     },
     [projectKey, token, id, requestKey, onSaved],
   );

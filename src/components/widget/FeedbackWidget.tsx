@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 
 import { useHostBridge } from '@/hooks/useHostBridge';
+import { ConversationPanel } from '@/components/widget/ConversationPanel';
+import { ANONYMOUS_REPORTER_ID } from '@/lib/conversation';
+import { rememberConversationSecret } from '@/lib/browser-conversations';
 import { useScreenSnapshots, type ScreenSaveStatus } from '@/hooks/useScreenSnapshots';
 import { useSubmitFeedback } from '@/hooks/useSubmitFeedback';
 import {
@@ -29,7 +32,7 @@ import type { CaptureState } from '@/types/sdk-message';
 const MAX_MESSAGE_LENGTH = 5000;
 const ATTACHMENT_NOTICE_MS = 4000;
 
-const ANONYMOUS_REPORTER: FeedbackReporter = { id: 'anonymous', name: 'Anonymous' };
+const ANONYMOUS_REPORTER: FeedbackReporter = { id: ANONYMOUS_REPORTER_ID, name: 'Anonymous' };
 
 const FEEDBACK_TYPE_OPTIONS: { value: FeedbackType; label: string }[] = [
   { value: 'bug', label: '버그' },
@@ -115,7 +118,7 @@ function isNothingFocused(): boolean {
 
 export function FeedbackWidget() {
   const {
-    config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, notifyClose, notifySubmitted,
+    config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, isOpen, notifyClose, notifySubmitted,
     captureState, sendCaptureCommand, subscribeToScreenCapture, subscribeToCaptureUpdate, requestScreenCapture, requestFlowCapture,
   } = useHostBridge();
   const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture, requestFlowCapture });
@@ -269,6 +272,9 @@ export function FeedbackWidget() {
       screenSnapshotIds,
     });
     if (result) {
+      if (result.conversationSecret) {
+        rememberConversationSecret(config.projectKey, config.hostOrigin, reporter?.id ?? null, result.conversationSecret);
+      }
       setSubmittedSummary({
         typeLabel: getTypeLabel(type),
         pageTitle: page.title || page.url,
@@ -554,5 +560,11 @@ export function FeedbackWidget() {
     return renderCompose();
   }
 
-  return <div ref={rootRef} className="widget-root flex h-dvh flex-col overflow-hidden">{renderContent()}</div>;
+  return <div ref={rootRef} className="widget-root flex h-dvh flex-col overflow-hidden">
+    {config && isInitialized ? (
+      <ConversationPanel key={JSON.stringify([config, reporter])} config={config} reporter={reporter} isOpen={isOpen} onClose={notifyClose}>
+        {renderContent()}
+      </ConversationPanel>
+    ) : renderContent()}
+  </div>;
 }
