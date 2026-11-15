@@ -49,7 +49,7 @@ export function WidgetHeader({ title, subtitle, onClose, onBack, backLabel = BAC
         <Heading level={3} accessibilityLevel={1} maxLines={1}>
           {title}
         </Heading>
-        <Text as="p" type="supporting" maxLines={1}>
+        <Text as="p" type="supporting" maxLines={2}>
           {subtitle}
         </Text>
       </VStack>

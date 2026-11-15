@@ -165,8 +165,10 @@
 }
 
 /* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would
-   truncate. Its usage count sits beside the icon, and a name too long for a narrow panel wraps. */
+   truncate. Its usage count sits beside the icon. A name too long for a narrow panel wraps, and the
+   icons still line up because each tool starts at the top of its cell. */
 .widget-root .widget-tool {
+  align-items: flex-start;
   block-size: auto;
   min-block-size: calc(var(--size-element-lg) + var(--spacing-3));
   padding: var(--spacing-2) var(--spacing-1);
