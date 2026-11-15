@@ -159,9 +159,24 @@
   padding-inline: var(--spacing-3) var(--spacing-2);
 }
 
-/* The send button's corner follows the surface it sits in. */
+/* The send button is a round control inset evenly from the surface edge, the way a messenger draws it.
+   It keeps the 44px press area through an invisible ring around the visible circle, and sits at the
+   bottom so it stays next to the last line while the field grows. */
 .widget-composer .astryx-button {
-  border-radius: calc(var(--radius-container) - var(--spacing-0-5));
+  position: relative;
+  flex-shrink: 0;
+  inline-size: calc(var(--size-element-lg) - var(--spacing-2));
+  block-size: calc(var(--size-element-lg) - var(--spacing-2));
+  min-inline-size: 0;
+  min-block-size: 0;
+  margin: var(--spacing-1);
+  border-radius: var(--radius-full);
+}
+
+.widget-composer .astryx-button::after {
+  content: '';
+  position: absolute;
+  inset: calc(var(--spacing-1) * -1);
 }
 
 /* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would
