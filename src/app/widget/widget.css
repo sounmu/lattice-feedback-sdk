@@ -11,7 +11,9 @@
   --color-accent: #3b5bfd;
   --color-accent-muted: #eef1ff;
   --color-on-accent: #ffffff;
-  --color-text-accent: var(--color-accent);
+  /* Accent text is the darker brand blue. On the accent wash of a chosen tab or feedback type,
+     --color-accent reads 4.5:1 only at rest and falls under it while the control is hovered. */
+  --color-text-accent: #2f4ae0;
   --color-icon-accent: var(--color-accent);
   --focus-outline-color: var(--color-accent);
   /* Korean text is set in Pretendard when the device has it, else the platform's Korean face. */
@@ -38,7 +40,7 @@
 /* The selected segment uses surface/text tokens instead of accent tokens. */
 [data-astryx-theme='neutral'] .astryx-segmented-control-item[data-selected='selected'] {
   --color-background-surface: var(--color-accent-muted);
-  --color-text-primary: var(--color-accent);
+  --color-text-primary: var(--color-text-accent);
 }
 
 .widget-root {
@@ -108,7 +110,7 @@
 }
 
 .widget-root .astryx-tab[data-selected='selected'] {
-  --color-text-primary: var(--color-accent);
+  --color-text-primary: var(--color-text-accent);
   background-color: var(--color-accent-muted);
 }
 
