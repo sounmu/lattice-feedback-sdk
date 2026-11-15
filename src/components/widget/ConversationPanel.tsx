@@ -14,6 +14,7 @@ const threadSchema = z.object({
 });
 const threadsSchema = z.object({ threads: z.array(threadSchema) });
 type Thread = z.infer<typeof threadSchema>;
+const VERIFICATION_REQUIRED_MESSAGE = '로그인한 사용자만 대화를 볼 수 있어요. 로그인 후 다시 열어 주세요.';
 
 function subscribeToVisibility(onChange: () => void) {
   document.addEventListener('visibilitychange', onChange);
@@ -33,7 +34,7 @@ interface ConversationPanelProps {
 
 export function ConversationPanel({ config, reporter, isOpen, onClose, children }: ConversationPanelProps) {
   const [showHistory, setShowHistory] = useState(false);
-  const [result, setResult] = useState<{ owner: string; threads: Thread[]; error: string } | null>(null);
+  const [result, setResult] = useState<{ owner: string; threads: Thread[]; error: string; verificationRequired?: boolean } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
@@ -48,6 +49,7 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
   const current = result?.owner === owner ? result : null;
   const threads = current?.threads ?? [];
   const error = current?.error ?? '';
+  const verificationRequired = current?.verificationRequired === true;
   const loading = current === null;
   const selected = threads.find((thread) => thread.id === selectedId);
   const draft = selectedId ? drafts[selectedId] ?? '' : '';
@@ -82,6 +84,10 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
           }),
           signal,
         });
+        if (response.status === 401) {
+          if (!signal.aborted) setResult({ owner, threads: [], error: '', verificationRequired: true });
+          return;
+        }
         if (!response.ok) throw new Error('대화를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
         const loaded = threadsSchema.parse(await response.json());
         if (!signal.aborted) setResult({ owner, threads: loaded.threads, error: '' });
@@ -108,6 +114,7 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...getRequest(), feedbackId: id, message: draft.trim() }),
       });
+      if (response.status === 401) throw new Error(VERIFICATION_REQUIRED_MESSAGE);
       if (!response.ok) throw new Error('보내지 못했어요. 대화가 가득 찼거나 연결이 끊겼을 수 있어요.');
       const sent = z.object({ thread: threadSchema }).parse(await response.json());
       setResult((previous) => previous?.owner === owner
@@ -134,7 +141,8 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
           <WidgetBody>
             {error ? <p role="alert" className="text-fw-danger">{error}</p> : null}
             {loading ? <p role="status">대화를 불러오는 중이에요…</p> : null}
-            {!loading && threads.length === 0 ? <p>아직 대화가 없어요. 새 피드백을 보내 주세요.</p> : null}
+            {verificationRequired ? <p role="status">{VERIFICATION_REQUIRED_MESSAGE}</p> : null}
+            {!loading && !verificationRequired && threads.length === 0 ? <p>아직 대화가 없어요. 새 피드백을 보내 주세요.</p> : null}
             {selected ? (
               <>
                 <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={() => setSelectedId(null)}>대화 목록으로</button>

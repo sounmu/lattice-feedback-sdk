@@ -149,3 +149,104 @@ describe('reporter conversation access', () => {
     expect(getConversationMessages({ ...legacy, messages: [{ id: 'legacy', authorRole: 'admin', body: 'Legacy answer', createdAt: legacy.updatedAt }] })).toHaveLength(2);
   });
 });
+
+describe('requireVerifiedIdentity', () => {
+  const feedbackUrl = 'http://localhost:3000/api/feedback';
+
+  function signIdentity(id: string) {
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+    const signature = createHmac('sha256', 'test-customer-secret')
+      .update(JSON.stringify(['lattice-identity-v1', 'demo', id, expiresAt])).digest('hex');
+    return { expiresAt, signature };
+  }
+
+  function getSignedReporter(id: string, name: string) {
+    return { id, name, identity: signIdentity(id) };
+  }
+
+  async function findStoredIds() {
+    return (await getFeedbackRepository().findMany('demo')).map((item) => item.id);
+  }
+
+  describe('when on', () => {
+    beforeEach(() => vi.stubEnv('FEEDBACK_REQUIRE_VERIFIED_IDENTITY', 'true'));
+
+    it('lets a verified user send feedback without issuing a browser capability and see only their own threads', async () => {
+      const created = await createFeedback(createJsonRequest(feedbackUrl, 'POST', { ...input, reporter: getSignedReporter('alice', 'Alice') }));
+      const body = await created.json();
+      expect(created.status).toBe(201);
+      expect(body).not.toHaveProperty('conversationSecret');
+      const history = await POST(createJsonRequest(url, 'POST', { ...base, reporter: getSignedReporter('alice', 'Alice') }));
+      expect((await history.json()).threads.map((thread: { id: string }) => thread.id)).toEqual([body.feedback.id]);
+      const other = await POST(createJsonRequest(url, 'POST', { ...base, reporter: getSignedReporter('bob', 'Bob') }));
+      expect((await other.json()).threads).toEqual([]);
+    });
+
+    it('refuses to list with browser secrets alone or without a valid signature', async () => {
+      await getFeedbackRepository().create(input, undefined, access);
+      const forged = { ...base.reporter, identity: { ...signIdentity('alice'), signature: 'c'.repeat(64) } };
+      for (const request of [
+        { ...base, secrets: [secret] },
+        { ...base, reporter: null, secrets: [secret] },
+        { ...base, reporter: forged, secrets: [secret] },
+      ]) {
+        const response = await POST(createJsonRequest(url, 'POST', request));
+        expect(response.status).toBe(401);
+        expect((await response.json()).error.code).toBe('verification_required');
+      }
+    });
+
+    it('matches threads by verified reporter id only, ignoring browser secrets', async () => {
+      await getFeedbackRepository().create(input, undefined, access);
+      const response = await POST(createJsonRequest(url, 'POST', { ...base, reporter: getSignedReporter('alice', 'Alice'), secrets: [secret] }));
+      expect(response.status).toBe(200);
+      expect((await response.json()).threads).toEqual([]);
+    });
+
+    it('refuses follow-ups without a signature and accepts them with one', async () => {
+      const created = await createFeedback(createJsonRequest(feedbackUrl, 'POST', { ...input, reporter: getSignedReporter('alice', 'Alice') }));
+      const feedbackId = (await created.json()).feedback.id;
+      const unsigned = await PUT(createJsonRequest(url, 'PUT', { ...base, secrets: [secret], feedbackId, message: 'intrusion' }));
+      expect(unsigned.status).toBe(401);
+      expect((await getFeedbackRepository().find('demo', feedbackId))?.messages ?? []).toEqual([]);
+      const signed = await PUT(createJsonRequest(url, 'PUT', { ...base, reporter: getSignedReporter('alice', 'Alice'), feedbackId, message: 'More detail.' }));
+      expect(signed.status).toBe(200);
+      expect((await signed.json()).thread.messages.at(-1)).toMatchObject({ authorRole: 'reporter', body: 'More detail.' });
+    });
+
+    it('refuses new feedback without a valid signature and stores nothing', async () => {
+      const forged = { ...base.reporter, identity: { ...signIdentity('alice'), signature: 'c'.repeat(64) } };
+      for (const reporter of [base.reporter, forged]) {
+        const response = await createFeedback(createJsonRequest(feedbackUrl, 'POST', { ...input, reporter }));
+        expect(response.status).toBe(401);
+        expect((await response.json()).error.code).toBe('verification_required');
+      }
+      expect(await findStoredIds()).toEqual([]);
+    });
+
+    it('fails closed and logs a warning when no identity secret is configured', async () => {
+      vi.stubEnv('FEEDBACK_IDENTITY_SECRET', '');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const reporter = getSignedReporter('alice', 'Alice');
+      const created = await createFeedback(createJsonRequest(feedbackUrl, 'POST', { ...input, reporter }));
+      expect(created.status).toBe(401);
+      const history = await POST(createJsonRequest(url, 'POST', { ...base, reporter }));
+      expect(history.status).toBe(401);
+      expect(await findStoredIds()).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('FEEDBACK_IDENTITY_SECRET'));
+      warn.mockRestore();
+    });
+  });
+
+  describe('when off', () => {
+    it.each(['', 'false'])('keeps text-only feedback and browser capabilities working for %j', async (value) => {
+      vi.stubEnv('FEEDBACK_REQUIRE_VERIFIED_IDENTITY', value);
+      const created = await createFeedback(createJsonRequest(feedbackUrl, 'POST', input));
+      const body = await created.json();
+      expect(created.status).toBe(201);
+      expect(body.conversationSecret).toMatch(/^[a-f0-9]{64}$/);
+      const history = await POST(createJsonRequest(url, 'POST', { ...base, secrets: [body.conversationSecret] }));
+      expect((await history.json()).threads.map((thread: { id: string }) => thread.id)).toEqual([body.feedback.id]);
+    });
+  });
+});

@@ -38,9 +38,14 @@ async function handleRequest(request: Request, write: boolean) {
     const project = findProject(input.projectKey);
     if (!project) return createApiErrorResponse(404, 'project_not_found', 'Project not found.');
     if (!isOriginAllowed(project, input.hostOrigin)) return createApiErrorResponse(403, 'origin_not_allowed', 'Origin not allowed.');
+    const verifiedReporterId = findVerifiedReporterIdentity(project, input.reporter)?.reporterId ?? null;
+    if (project.requireVerifiedIdentity && verifiedReporterId === null) {
+      return createApiErrorResponse(401, 'verification_required', 'A verified identity is required.');
+    }
     const credentials = {
-      verifiedReporterId: findVerifiedReporterIdentity(project, input.reporter)?.reporterId ?? null,
-      browserSecretHashes: input.secrets.map(hashConversationSecret),
+      verifiedReporterId,
+      // Browser secrets are never accepted when the project requires a verified identity.
+      browserSecretHashes: project.requireVerifiedIdentity ? [] : input.secrets.map(hashConversationSecret),
     };
     const repository = getFeedbackRepository();
     if ('message' in input && typeof input.message === 'string' && 'feedbackId' in input && typeof input.feedbackId === 'string') {
