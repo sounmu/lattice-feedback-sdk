@@ -82,7 +82,7 @@ ${SDK_HOVER_MEDIA} { .comment-box button:hover { background-image: ${getStateLay
 .comment-box button:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; transform: ${SDK_PRESSED_SCALE}; }
 .comment-box button[data-action="submit"] { background-color: ${SDK_THEME.accent}; color: ${SDK_THEME.onAccent}; }
 ${SDK_HOVER_MEDIA} { .comment-box button[data-action="submit"]:hover { background-image: ${getStateLayer(SDK_THEME.accentHover)}; } }
-.comment-box button[data-action="submit"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; }
+.comment-box button[data-action="submit"]:active { background-image: ${getStateLayer(SDK_THEME.accentPressed)}; }
 .comment-box button[data-action="remove"] { background-color: ${SDK_THEME.errorMuted}; color: ${SDK_THEME.onErrorMuted}; }
 .comment-pin:focus-visible, .comment-box button:focus-visible {
   outline: ${SDK_FOCUS_OUTLINE.line} ${SDK_THEME.accent}; outline-offset: ${SDK_FOCUS_OUTLINE.offset};

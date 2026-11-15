@@ -69,7 +69,7 @@ ${SDK_HOVER_MEDIA} { .capture-status button:hover { background-image: ${getState
 .capture-status button:focus-visible { outline: ${SDK_FOCUS_OUTLINE.line} ${DARK.accent}; outline-offset: ${SDK_FOCUS_OUTLINE.offset}; }
 .capture-status button[data-action="stop"] { background-color: ${DARK.accent}; color: ${DARK.onAccent}; }
 ${SDK_HOVER_MEDIA} { .capture-status button[data-action="stop"]:hover { background-image: ${getStateLayer(DARK.accentHover)}; } }
-.capture-status button[data-action="stop"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; }
+.capture-status button[data-action="stop"]:active { background-image: ${getStateLayer(DARK.accentPressed)}; }
 .capture-status button[hidden] { display: none; }
 .capture-recording-frame {
   position: fixed;

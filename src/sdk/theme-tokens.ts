@@ -6,7 +6,7 @@
 //
 // Sources: @astryxdesign/theme-neutral/dist/theme.css (the light and dark value of each token) and
 // @astryxdesign/core/dist/astryx.css (focus outline, control box, motion). Brand and shape overrides
-// match src/app/widget/widget.css; Astryx uses a scoped hover overlay rather than an accent-hover token.
+// match src/app/widget/widget.css; Astryx uses scoped hover and press overlays rather than accent-state tokens.
 
 /** The stack the widget sets on --font-family-body (src/app/widget/widget.css). No web font is loaded. */
 export const SDK_FONT_FAMILY = [
@@ -28,6 +28,8 @@ export const SDK_THEME = {
   accent: '#3b5bfd',
   /** Primary action's --color-overlay-hover override */
   accentHover: '#2f4ae0',
+  /** Primary action's --color-overlay-pressed override: one step darker than the hover */
+  accentPressed: '#2740c8',
   /** --color-on-accent */
   onAccent: '#ffffff',
   /** --color-background-popover */
@@ -68,6 +70,8 @@ export const SDK_THEME_DARK = {
   accent: '#3b5bfd',
   /** Primary action's --color-overlay-hover override */
   accentHover: '#2f4ae0',
+  /** Primary action's --color-overlay-pressed override: one step darker than the hover */
+  accentPressed: '#2740c8',
   /** --color-on-accent */
   onAccent: '#ffffff',
   /** --color-text-primary */

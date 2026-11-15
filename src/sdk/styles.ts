@@ -81,7 +81,7 @@ ${SDK_HOVER_MEDIA} {
 }
 
 .launcher:active {
-  background-image: ${getStateLayer(SDK_THEME.overlayPressed)};
+  background-image: ${getStateLayer(SDK_THEME.accentPressed)};
   transform: ${SDK_PRESSED_SCALE};
 }
 
