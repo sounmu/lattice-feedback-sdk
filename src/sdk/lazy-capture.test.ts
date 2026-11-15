@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CapturePolicy } from '@/lib/capture-policy';
 import { createCaptureCommand } from '@/lib/capture-protocol';
-import { getFlowSessionKey } from '@/sdk/flow-session';
+import { createFlowSession, getFlowSessionKey, readFlowSession, writeFlowSession } from '@/sdk/flow-session';
 import { MemoryStorage } from '@/sdk/flow-test-fixtures';
-import { createLazyCapture, type LazyCaptureOptions } from '@/sdk/lazy-capture';
+import { createLazyCapture, type LazyCapture, type LazyCaptureOptions } from '@/sdk/lazy-capture';
 import type { CaptureRuntime } from '@/sdk/runtime-loader';
 import type { CaptureState } from '@/types/sdk-message';
 
 const PROJECT_KEY = 'demo';
 const FLOW_KEY = getFlowSessionKey(PROJECT_KEY);
+const NOW = 1_800_000_000_000;
 
 type LoadRuntime = LazyCaptureOptions['loadRuntime'];
 
@@ -235,6 +236,35 @@ describe('a Flow being recorded in this tab', () => {
     listeners.get('pageshow')?.({ persisted: true });
 
     expect(loadRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'keeps a stored Flow for the controller to go on with', reset: (): void => undefined, found: 'restored' },
+    {
+      name: 'ends a stored Flow when the draft is sent before the tools are loaded',
+      reset: (capture: LazyCapture): void => capture.reset(), found: 'empty',
+    },
+    {
+      name: 'ends a stored Flow when the reporter starts another draft before the tools are loaded',
+      reset: (capture: LazyCapture): void => capture.handleCommand(createCaptureCommand({ type: 'draft:reset', payload: {} })),
+      found: 'empty',
+    },
+  ])('$name', async ({ reset, found }) => {
+    const { storage } = stubWindow();
+    writeFlowSession(storage, FLOW_KEY, createFlowSession(NOW, false));
+    const { runtime, exports, controller } = createFakeRuntime();
+    const foundAtAttach: string[] = [];
+    exports.createCaptureController.mockImplementation(() => {
+      const everything = { isPathAllowed: () => true, isTargetAllowed: () => true };
+      foundAtAttach.push(readFlowSession(storage, FLOW_KEY, everything, NOW).kind);
+      return controller;
+    });
+    const { capture } = createCapture(async () => runtime);
+
+    reset(capture);
+    await capture.load();
+
+    expect(foundAtAttach).toEqual([found]);
   });
 });
 

@@ -108,6 +108,20 @@ export function createLazyCapture(options: LazyCaptureOptions) {
     if (event.persisted && !controller && hasStoredFlow()) warm();
   }
 
+  // The controller ends the Flow kept in session storage. Without a controller the same is done here, so
+  // that one attached later finds no recording to go on with.
+  function endStoredFlow(): void {
+    const storage = findSessionStorage();
+    if (storage) clearFlowSession(storage, getFlowSessionKey(projectKey));
+  }
+
+  // A new draft starts clean, as with the controller: a Flow kept from the last one is ended, and a load
+  // failure shown for it is dropped.
+  function resetWithoutController(): void {
+    endStoredFlow();
+    emitIdleState(null);
+  }
+
   function destroy(): void {
     if (isDestroyed) return;
     isDestroyed = true;
@@ -116,9 +130,7 @@ export function createLazyCapture(options: LazyCaptureOptions) {
     if (controller) {
       controller.destroy();
     } else {
-      // The controller ends a Flow kept for the next document. Without one, the same is done here.
-      const storage = findSessionStorage();
-      if (storage) clearFlowSession(storage, getFlowSessionKey(projectKey));
+      endStoredFlow();
     }
     previewPanel?.destroy();
   }
@@ -143,7 +155,7 @@ export function createLazyCapture(options: LazyCaptureOptions) {
     maskTitle,
     handleCommand(command: CaptureCommand): void {
       if (controller) controller.handleCommand(command);
-      else if (command.type === 'draft:reset') emitIdleState(null);
+      else if (command.type === 'draft:reset') resetWithoutController();
     },
     sync(): void {
       if (controller) controller.sync();
@@ -159,10 +171,9 @@ export function createLazyCapture(options: LazyCaptureOptions) {
       else emitIdleState(null);
     },
     cancelTransient: () => controller?.cancelTransient(),
-    // A new draft starts clean, as with the controller: a load failure shown for the last one is dropped.
     reset(): void {
       if (controller) controller.reset();
-      else emitIdleState(null);
+      else resetWithoutController();
     },
     takeFlowReplay: () => controller?.takeFlowReplay() ?? Promise.resolve(null),
     getCommentPinSources: () => controller?.getCommentPinSources() ?? [],
