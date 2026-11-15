@@ -47,13 +47,16 @@
   max-block-size: calc(4lh + var(--spacing-2));
 }
 
-/* A segment is 8px shorter than its track. The press area reaches the track's full height. */
-.widget-root .astryx-segmented-control-item {
-  position: relative;
-}
+/* A segment is 8px shorter than its 44px track. Under a finger the track itself takes the tap for the
+   segment below it. Under a mouse this extends the segment's press area to the track's full height. */
+@media (pointer: fine) {
+  .widget-root .astryx-segmented-control-item {
+    position: relative;
+  }
 
-.widget-root .astryx-segmented-control-item::after {
-  content: '';
-  position: absolute;
-  inset: calc(var(--spacing-1) * -1) 0;
+  .widget-root .astryx-segmented-control-item::after {
+    content: '';
+    position: absolute;
+    inset: calc(var(--spacing-1) * -1) 0;
+  }
 }
