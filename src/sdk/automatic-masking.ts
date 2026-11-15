@@ -71,15 +71,43 @@ export function shouldIndexScriptLiteral(literal: string): boolean {
   return !(/\d/.test(literal) && !/\p{L}/u.test(literal));
 }
 
+type QuoteCharacter = '"' | "'" | '`';
+
+function isQuoteCharacter(character: string): character is QuoteCharacter {
+  return character === '"' || character === "'" || character === '`';
+}
+
+/**
+ * Where the string opened by the quote at start closes. A quoted string cannot span lines and a template can.
+ * When there is no closing quote, end is where the search gave up.
+ */
+function findStringEnd(source: string, start: number): { isClosed: boolean; end: number } {
+  const quote = source[start];
+  let position = start + 1;
+  while (position < source.length) {
+    const character = source[position];
+    if (character === quote) return { isClosed: true, end: position };
+    if (character === '\n' && quote !== '`') return { isClosed: false, end: position };
+    // An escaped character, a line break included, belongs to the string.
+    position += character === '\\' ? 2 : 1;
+  }
+  return { isClosed: false, end: source.length };
+}
+
 /**
  * Literal strings and adjacent literal concatenation only; never evaluate host JavaScript. A run of concatenated
  * literals is added once as a whole: its shorter prefixes are never a value of the expression, and keeping
  * them would make a long chain cost the square of its length.
+ *
+ * Comments and regular expressions are not recognized (a regular expression like /\/\// would read as a comment),
+ * so a quote inside one can open a string that never closes. That quote is skipped and reading goes on right
+ * after it, so an apostrophe in a comment does not hide the literals that follow. Every later quote of the same
+ * kind before the point where the search gave up is an escaped quote of that failed string and cannot close
+ * either, so it is skipped without searching again: each character is read a bounded number of times.
  */
 export function extractScriptLiterals(source: string): string[] {
   const literals: string[] = [];
-  // Quoted strings cannot span lines, so an apostrophe in a comment or regex cannot desynchronize the rest.
-  const pattern = /(["'])((?:\\[\s\S]|(?!\1)[^\\\n])*)\1|`((?:\\[\s\S]|[^\\`])*)`/g;
+  const unclosedUntil: Record<QuoteCharacter, number> = { '"': 0, "'": 0, '`': 0 };
   let previousEnd = -1;
   let run = '';
   let runPieces = 0;
@@ -87,9 +115,23 @@ export function extractScriptLiterals(source: string): string[] {
     if (runPieces > 1) literals.push(run);
     runPieces = 0;
   };
-  for (const match of source.matchAll(pattern)) {
-    const body = match[2] ?? match[3];
-    if (match[1] === undefined && body.includes('${')) {
+  let position = 0;
+  while (position < source.length) {
+    const quote = source[position];
+    if (!isQuoteCharacter(quote) || position < unclosedUntil[quote]) {
+      position += 1;
+      continue;
+    }
+    const start = position;
+    const { isClosed, end } = findStringEnd(source, start);
+    if (!isClosed) {
+      unclosedUntil[quote] = end;
+      position += 1;
+      continue;
+    }
+    const body = source.slice(start + 1, end);
+    position = end + 1;
+    if (quote === '`' && body.includes('${')) {
       endRun();
       previousEnd = -1;
       continue;
@@ -98,7 +140,7 @@ export function extractScriptLiterals(source: string): string[] {
       if (unicode || hex) return String.fromCharCode(parseInt(unicode ?? hex, 16));
       return ({ n: '\n', r: '\r', t: '\t' }[String(escaped)] ?? String(escaped));
     });
-    if (previousEnd >= 0 && /^\s*\+\s*$/.test(source.slice(previousEnd, match.index))) {
+    if (previousEnd >= 0 && /^\s*\+\s*$/.test(source.slice(previousEnd, start))) {
       run += value;
       runPieces += 1;
     } else {
@@ -107,7 +149,7 @@ export function extractScriptLiterals(source: string): string[] {
       runPieces = 1;
     }
     literals.push(value);
-    previousEnd = match.index + match[0].length;
+    previousEnd = position;
   }
   endRun();
   return literals;

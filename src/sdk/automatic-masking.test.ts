@@ -103,3 +103,17 @@ describe('literals a script concatenates', () => {
       .toEqual(['Order ', 'total', 'Order total', 'Saved ', 'now', 'Saved now', 'x', 'z']);
   });
 });
+
+describe('reading a script for its literals', () => {
+  it('reads a long line of escaped quotes without starting over at each of them', () => {
+    const source = `// ${'\\"'.repeat(100_000)} 'kept'\nconst label="Save";`;
+
+    expect(extractScriptLiterals(source)).toEqual(['kept', 'Save']);
+  });
+
+  it('keeps the literals after a quote that never closes, in a comment or a regular expression', () => {
+    const lines = ["// don't say \"hi\"", "url = /^https?:\\/\\//; save = \"Save\"; note = 'it\\'s'; text = `two", 'lines`; last = "x\\'];
+
+    expect(extractScriptLiterals(lines.join('\n'))).toEqual(['hi', 'Save', "it's", 'two\nlines']);
+  });
+});
