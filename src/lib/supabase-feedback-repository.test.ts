@@ -1,6 +1,7 @@
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { once } from 'node:events';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { createFeedbackBody } from '@/app/api/feedback/feedback-test-fixtures';
 import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
@@ -149,55 +150,46 @@ describe('Supabase REST repository contract', () => {
     });
   });
 
-  it('continues through capped responses and requests a stable newest-first order', async () => {
-    const first = { ...storedRow, id: '00000000-0000-4000-8000-000000000003' };
-    const second = { ...storedRow, id: '00000000-0000-4000-8000-000000000002' };
-    responseBodies = [JSON.stringify([first, second]), JSON.stringify([storedRow]), '[]'];
+  it.each([{ cap: 2, count: 3 }, { cap: 100, count: 101 }, { cap: 100, count: 200 }, { cap: 100, count: 0 }])(
+    'traverses $count rows with cap $cap, timestamp ties and concurrent inserts without loss or duplication',
+    async ({ cap, count }) => {
+      const originalRows = Array.from({ length: count }, (_, index) => ({
+        ...storedRow,
+        id: `00000000-0000-4000-8000-${String(count - index).padStart(12, '0')}`,
+      }));
+      if (originalRows.length) originalRows[originalRows.length - 1] = {
+        ...storedRow, id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', createdAt: '2026-11-11T12:00:00+00:00',
+      };
+      const databaseRows = [...originalRows];
+      let pageRequests = 0;
+      respondToRequest = ({ url, body }) => {
+        const cursor = body ? z.object({ p_project: z.string(), p_created_at: z.string(), p_id: z.uuid() }).parse(JSON.parse(body)) : null;
+        const project = cursor?.p_project ?? url.searchParams.get('project_key')?.slice(3);
+        if (project !== 'demo' || (pageRequests > 0 && !cursor)) return [];
+        const page = databaseRows.filter((row) => !cursor || row.createdAt < cursor.p_created_at ||
+          (row.createdAt === cursor.p_created_at && row.id < cursor.p_id)).slice(0, cap);
+        if (pageRequests++ === 0) {
+          databaseRows.unshift({
+            ...storedRow,
+            id: '00000000-0000-4000-8000-000000000999',
+            createdAt: '2026-11-12T13:00:00+00:00',
+          });
+        }
+        return page;
+      };
 
-    const items = await createSupabaseFeedbackRepository().findMany('demo');
+      const items = await createSupabaseFeedbackRepository().findMany('demo');
 
-    expect(items.map((item) => item.id)).toEqual([first.id, second.id, storedRow.id]);
-    expect(received.map((request) => request.url.searchParams.get('or'))).toEqual([
-      null,
-      `(created_at.lt.${second.createdAt},and(created_at.eq.${second.createdAt},id.lt.${second.id}))`,
-      `(created_at.lt.${storedRow.createdAt},and(created_at.eq.${storedRow.createdAt},id.lt.${storedRow.id}))`,
-    ]);
-    for (const request of received) {
-      expect(request.url.searchParams.get('project_key')).toBe('eq.demo');
-      expect(request.url.searchParams.get('order')).toBe('created_at.desc,id.desc');
-      expect(request.url.searchParams.get('limit')).toBe('100');
-    }
-  });
-
-  it('does not duplicate rows when a new feedback arrives between pages', async () => {
-    const originalRows = Array.from({ length: 101 }, (_, index) => ({
-      ...storedRow,
-      id: `00000000-0000-4000-8000-${String(101 - index).padStart(12, '0')}`,
-    }));
-    const databaseRows = [...originalRows];
-    let pageRequests = 0;
-    respondToRequest = ({ url }) => {
-      const cursor = url.searchParams.get('or')?.match(/created_at\.lt\.([^,]+),and\(created_at\.eq\.[^,]+,id\.lt\.([^)]+)/);
-      const matchingRows = databaseRows.filter((row) => {
-        if (!cursor) return true;
-        return row.createdAt < cursor[1] || (row.createdAt === cursor[1] && row.id < cursor[2]);
-      });
-      const offset = Number(url.searchParams.get('offset') ?? 0);
-      const page = matchingRows.slice(offset, offset + Number(url.searchParams.get('limit')));
-      if (pageRequests++ === 0) {
-        databaseRows.unshift({
-          ...storedRow,
-          id: '00000000-0000-4000-8000-000000000999',
-          createdAt: '2026-11-12T13:00:00+00:00',
-        });
+      expect(items.map((item) => item.id)).toEqual(originalRows.map((row) => row.id));
+      expect(received.slice(1).map((request) => JSON.parse(request.body))).toEqual(originalRows
+        .filter((_, index) => (index + 1) % cap === 0 || index === count - 1)
+        .map((row) => ({ p_project: 'demo', p_created_at: row.createdAt, p_id: row.id })));
+      for (const request of received) {
+        expect(request.url.pathname).toBe(request.method === 'POST' ? '/rest/v1/rpc/read_feedback_before' : '/rest/v1/feedback');
+        expect(request.url.searchParams.get('order')).toBe('created_at.desc,id.desc');
+        expect(request.url.searchParams.get('limit')).toBe('100');
       }
-      return page;
-    };
-
-    const items = await createSupabaseFeedbackRepository().findMany('demo');
-
-    expect(items.map((item) => item.id)).toEqual(originalRows.map((row) => row.id));
-  });
+    });
 
   it('scopes detail and update requests to the project even when the ID is known', async () => {
     const repository = createSupabaseFeedbackRepository();
