@@ -5,8 +5,8 @@
 // color-mix() are avoided because the customer's browser may be older than the widget needs.
 //
 // Sources: @astryxdesign/theme-neutral/dist/theme.css (the light and dark value of each token) and
-// @astryxdesign/core/dist/astryx.css (focus outline, control box, motion). Brand overrides match
-// src/app/widget/widget.css; Astryx uses a scoped hover overlay rather than an accent-hover token.
+// @astryxdesign/core/dist/astryx.css (focus outline, control box, motion). Brand and shape overrides
+// match src/app/widget/widget.css; Astryx uses a scoped hover overlay rather than an accent-hover token.
 
 /** The stack the widget sets on --font-family-body (src/app/widget/widget.css). No web font is loaded. */
 export const SDK_FONT_FAMILY = [
@@ -88,13 +88,19 @@ export const SDK_THEME_DARK = {
   textError: '#ffaea7',
 } as const;
 
-/** --radius-inner, --radius-element, --radius-container, --radius-full */
-export const SDK_RADIUS = { inner: '6px', element: '10px', container: '12px', full: '9999px' } as const;
+/**
+ * --radius-inner, --radius-element, --radius-container, --radius-page and --radius-full, with the widget's
+ * rounder inner, element and container values. The launcher's corner sits between container and page.
+ */
+export const SDK_RADIUS = {
+  inner: '8px', element: '12px', container: '16px', launcher: '20px', page: '28px', full: '9999px',
+} as const;
 
-/** --shadow-med and --shadow-high, light values. */
+/** --shadow-med and --shadow-high, light values, and the wider, softer shadow under the panel. */
 export const SDK_SHADOW = {
   medium: '0 2px 4px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.1)',
   high: '0 4px 6px rgba(0, 0, 0, 0.1), 0 12px 24px rgba(0, 0, 0, 0.15)',
+  panel: '0 8px 16px rgba(0, 0, 0, 0.08), 0 20px 48px rgba(0, 0, 0, 0.16)',
 } as const;
 
 /** --focus-outline-width, --focus-outline-style and --focus-outline-offset. The colour is the accent of the surface. */

@@ -20,6 +20,13 @@
   --font-family-heading: var(--font-family-body);
   /* Large controls are the widget's touch targets: 44px instead of the theme's 36px. */
   --size-element-lg: 2.75rem;
+  /* Shape, after the messenger the widget is modelled on: rounder controls and cards than the theme's,
+     and 16px chat bubbles whose grouped corner tightens to the inner radius. src/sdk/theme-tokens.ts
+     carries the same values for the SDK's own UI on the host page. */
+  --radius-inner: 0.5rem;
+  --radius-element: 0.75rem;
+  --radius-container: 1rem;
+  --radius-chat: 1rem;
 }
 
 /* Astryx paints hover/press with shared overlays, rather than accent-state tokens.
