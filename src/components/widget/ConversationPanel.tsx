@@ -92,7 +92,11 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
         }
       }
     }
-    return startConversationLoader({ load, loadNow, poll: polling });
+    const stop = startConversationLoader({ load, loadNow, poll: polling });
+    // A request cut short (a Strict Mode replay, or leaving the tab mid-load) is loaded again by the next run.
+    return () => {
+      if (stop()) previousLoaderRun.current = null;
+    };
   }, [config, identityKey, owner, reporter, isOpen, refresh, polling]);
 
   async function send() {

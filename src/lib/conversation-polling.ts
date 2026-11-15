@@ -29,19 +29,25 @@ interface ConversationLoaderOptions {
   poll: boolean;
 }
 
-export function startConversationLoader({ load, loadNow, poll }: ConversationLoaderOptions): () => void {
+/** Starts loading; the returned stop function says whether it cut a request short, which then has to be retried. */
+export function startConversationLoader({ load, loadNow, poll }: ConversationLoaderOptions): () => boolean {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let isLoading = false;
   async function run() {
+    isLoading = true;
     try {
       await load(controller.signal);
     } finally {
+      isLoading = false;
       if (poll && !controller.signal.aborted) timer = setTimeout(run, CONVERSATION_POLL_INTERVAL_MS);
     }
   }
   if (loadNow) void run();
   return () => {
+    const wasLoading = isLoading;
     controller.abort();
     clearTimeout(timer);
+    return wasLoading;
   };
 }

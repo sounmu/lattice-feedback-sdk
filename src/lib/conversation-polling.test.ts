@@ -69,6 +69,18 @@ describe('startConversationLoader', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a request that cleanup cut short, so the next run loads again', async () => {
+    let finish: () => void = () => {};
+    const load = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const interrupted = startConversationLoader({ load, loadNow: true, poll: false });
+    expect(interrupted()).toBe(true);
+    finish();
+
+    const completed = startConversationLoader({ load: vi.fn(async () => {}), loadNow: true, poll: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(completed()).toBe(false);
+  });
+
   it('does not reschedule after cleanup while a request is still pending', async () => {
     let finish: () => void = () => {};
     const load = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
