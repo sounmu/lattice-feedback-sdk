@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CapturePolicy } from '@/lib/capture-policy';
 import { createCaptureCommand } from '@/lib/capture-protocol';
 import { getFlowSessionKey } from '@/sdk/flow-session';
+import { MemoryStorage } from '@/sdk/flow-test-fixtures';
 import { createLazyCapture } from '@/sdk/lazy-capture';
 import type { CaptureRuntime } from '@/sdk/runtime-loader';
 import type { CaptureState } from '@/types/sdk-message';
@@ -10,18 +11,16 @@ const PROJECT_KEY = 'demo';
 const FLOW_KEY = getFlowSessionKey(PROJECT_KEY);
 
 function stubWindow(storedFlow = false) {
-  const items = new Map<string, string>(storedFlow ? [[FLOW_KEY, '{}']] : []);
+  const storage = new MemoryStorage();
+  if (storedFlow) storage.setItem(FLOW_KEY, '{}');
   const listeners = new Map<string, (event: { persisted: boolean }) => void>();
   vi.stubGlobal('window', {
     location: { pathname: '/orders' },
-    sessionStorage: {
-      getItem: (key: string) => items.get(key) ?? null,
-      removeItem: (key: string) => void items.delete(key),
-    },
+    sessionStorage: storage,
     addEventListener: (type: string, listener: (event: { persisted: boolean }) => void) => void listeners.set(type, listener),
     removeEventListener: (type: string) => void listeners.delete(type),
   });
-  return { items, listeners };
+  return { storage, items: storage.items, listeners };
 }
 
 function createFakeRuntime() {
@@ -197,6 +196,17 @@ describe('a Flow being recorded in this tab', () => {
     listeners.get('pageshow')?.({ persisted: true });
 
     expect(loadRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes session storage that cannot be read as holding no Flow', () => {
+    const { storage, listeners } = stubWindow(true);
+    storage.failReads = true;
+    const loadRuntime = vi.fn(async () => createFakeRuntime().runtime);
+
+    createCapture(loadRuntime);
+    listeners.get('pageshow')?.({ persisted: true });
+
+    expect(loadRuntime).not.toHaveBeenCalled();
   });
 });
 

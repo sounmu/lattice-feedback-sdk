@@ -78,7 +78,13 @@ export function createLazyCapture(options: LazyCaptureOptions) {
 
   function hasStoredFlow(): boolean {
     const storage = findSessionStorage();
-    return storage !== null && storage.getItem(getFlowSessionKey(projectKey)) !== null;
+    try {
+      return storage !== null && storage.getItem(getFlowSessionKey(projectKey)) !== null;
+    } catch (error) {
+      // Storage the browser refuses to read is treated as absent: there is no Flow to go on with.
+      if (!(error instanceof DOMException)) throw error;
+      return false;
+    }
   }
 
   // A document restored from the back/forward cache may find a Flow that was started on a later page. The
