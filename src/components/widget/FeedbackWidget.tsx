@@ -18,6 +18,7 @@ import { useHostBridge } from '@/hooks/useHostBridge';
 import { ConversationPanel } from '@/components/widget/ConversationPanel';
 import { ANONYMOUS_REPORTER_ID } from '@/lib/conversation';
 import { rememberConversationSecret } from '@/lib/browser-conversations';
+import { useScreenPreview } from '@/hooks/useScreenPreview';
 import { useScreenSnapshots, type ScreenSaveStatus } from '@/hooks/useScreenSnapshots';
 import { useSubmitFeedback } from '@/hooks/useSubmitFeedback';
 import {
@@ -136,8 +137,11 @@ export function FeedbackWidget() {
   const {
     config, errorMessage: bridgeErrorMessage, reporter, page, isInitialized, isOpen, notifyClose, notifySubmitted,
     captureState, sendCaptureCommand, subscribeToScreenCapture, subscribeToCaptureUpdate, requestScreenCapture, requestFlowCapture,
+    requestPreview, requestPreviewClose, subscribeToPreviewClosed,
   } = useHostBridge();
   const screens = useScreenSnapshots({ config, subscribeToScreenCapture, requestScreenCapture, requestFlowCapture });
+  const preview = useScreenPreview({ requestPreview, requestPreviewClose, subscribeToPreviewClosed });
+  const { screenId: previewId, close: closePreview } = preview;
   const { syncMarkKeys, captureForMarks, captureFlow } = screens;
   const commentCount = useRef(0);
   const editCount = useRef(0);
@@ -236,11 +240,16 @@ export function FeedbackWidget() {
     }
   }, [counts, status, showAttachmentNotice]);
 
-  // Escape leaves whatever is open: a comment or edit mode, otherwise the panel. A running Flow is
-  // never ended by a key the reporter may be pressing for the page itself.
+  // Escape leaves whatever is open: the large preview first, then a comment or edit mode, otherwise the
+  // panel. A running Flow is never ended by a key the reporter may be pressing for the page itself.
   useEffect(() => {
     function handleKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) {
+        return;
+      }
+      if (previewId !== null) {
+        event.preventDefault();
+        closePreview();
         return;
       }
       if (activeMode === 'flow') {
@@ -255,7 +264,7 @@ export function FeedbackWidget() {
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeMode, sendCaptureCommand, notifyClose]);
+  }, [activeMode, previewId, closePreview, sendCaptureCommand, notifyClose]);
 
   useEffect(() => {
     if (!isInitialized || !isNothingFocused()) {
@@ -517,6 +526,9 @@ export function FeedbackWidget() {
                     truncatedFlowScreenIds={screens.truncatedFlowScreenIds}
                     disabled={isBusy}
                     onRemove={screens.remove}
+                    previewId={previewId}
+                    onPreview={preview.show}
+                    onPreviewClose={closePreview}
                   />
                 </ul>
               </VStack>

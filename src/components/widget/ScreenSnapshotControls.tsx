@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { ToggleButton } from '@astryxdesign/core/ToggleButton';
 
-import { ScreenSnapshotPreview } from '@/components/widget/ScreenSnapshotPreview';
 import { CameraIcon } from '@/components/widget/WidgetIcons';
 import { AttachmentCard } from '@/components/widget/WidgetLayout';
+import { PREVIEW_TOGGLE_ATTRIBUTE } from '@/hooks/useScreenPreview';
+import type { PreviewContent } from '@/types/sdk-message';
 import type { ScreenCapture, ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
 interface ScreenSnapshotControlsProps {
@@ -20,34 +21,40 @@ interface ScreenSnapshotControlsProps {
   truncatedFlowScreenIds: ReadonlySet<string>;
   disabled: boolean;
   onRemove: (id: string) => void;
+  /** The screen the large preview is showing, if it is open. */
+  previewId: string | null;
+  onPreview: (id: string, content: PreviewContent) => void;
+  onPreviewClose: () => void;
 }
 
 interface ScreenCardText {
-  title: string;
+  name: string;
+  /** What the screen holds besides the page, when it was saved automatically. */
+  kind: string | null;
   /** Why the screen was saved, when it was saved automatically. */
   origin: string | null;
 }
 
 function getScreenCardText(index: number, isMarked: boolean, isFlow: boolean, isTruncatedFlow: boolean): ScreenCardText {
-  const title = `저장한 화면 ${index + 1}`;
+  const name = `저장한 화면 ${index + 1}`;
   if (isTruncatedFlow) {
-    return { title: `${title} · 흐름 재생(뒷부분 잘림)`, origin: '흐름 기록을 마칠 때 자동으로 저장됐어요' };
+    return { name, kind: '흐름 재생(뒷부분 잘림)', origin: '흐름 기록을 마칠 때 자동으로 저장됐어요' };
   }
   if (isFlow) {
-    return { title: `${title} · 흐름 재생`, origin: '흐름 기록을 마칠 때 자동으로 저장됐어요' };
+    return { name, kind: '흐름 재생', origin: '흐름 기록을 마칠 때 자동으로 저장됐어요' };
   }
   if (isMarked) {
-    return { title: `${title} · 코멘트·편집 위치 포함`, origin: '코멘트·편집 위치를 표시하려고 자동으로 저장됐어요' };
+    return { name, kind: '코멘트·편집 위치 포함', origin: '코멘트·편집 위치를 표시하려고 자동으로 저장됐어요' };
   }
-  return { title, origin: null };
+  return { name, kind: null, origin: null };
 }
 
-function getScreenDescription(snapshot: ScreenSnapshotSummary, origin: string | null): string {
+function getScreenDescription(snapshot: ScreenSnapshotSummary, lead: string | null): string {
   const { viewportWidth, viewportHeight } = snapshot.page;
   const time = new Date(snapshot.capturedAt).toLocaleTimeString('ko-KR');
   const parts = [`${viewportWidth}×${viewportHeight}`, time];
-  if (origin) {
-    parts.unshift(origin);
+  if (lead) {
+    parts.unshift(lead);
   }
   if (snapshot.missingAssets.length > 0) {
     parts.push(`가림·누락 기록 ${snapshot.missingAssets.length}개`);
@@ -55,7 +62,7 @@ function getScreenDescription(snapshot: ScreenSnapshotSummary, origin: string | 
   return parts.join(' · ');
 }
 
-/** Cards for the saved screens, after the comment, edit and Flow cards, plus the preview of one of them. */
+/** Cards for the saved screens, after the comment, edit and Flow cards. Each opens the large preview of its screen. */
 export function ScreenSnapshotControls({
   snapshots,
   captures,
@@ -64,34 +71,51 @@ export function ScreenSnapshotControls({
   truncatedFlowScreenIds,
   disabled,
   onRemove,
+  previewId,
+  onPreview,
+  onPreviewClose,
 }: ScreenSnapshotControlsProps) {
-  // A removed or replaced screen has no capture any more, which also closes its preview.
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const previewIndex = snapshots.findIndex((snapshot) => snapshot.id === previewId);
-  const previewCapture = previewId === null ? undefined : captures.get(previewId);
+  // The preview belongs to a listed screen. A removed or replaced screen has no capture any more, which
+  // closes its preview, and so does this list going away.
+  const isPreviewedScreenGone = previewId !== null && !captures.has(previewId);
+  useEffect(() => {
+    if (isPreviewedScreenGone) {
+      onPreviewClose();
+    }
+  }, [isPreviewedScreenGone, onPreviewClose]);
+  useEffect(() => onPreviewClose, [onPreviewClose]);
 
   return (
     <>
       {snapshots.map((snapshot, index) => {
         const { id } = snapshot;
-        const { title, origin } = getScreenCardText(index, markedScreenIds.has(id), flowScreenIds.has(id), truncatedFlowScreenIds.has(id));
+        const { name, kind, origin } = getScreenCardText(index, markedScreenIds.has(id), flowScreenIds.has(id), truncatedFlowScreenIds.has(id));
+        const capture = captures.get(id);
+        const previewTitle = `${name} 미리보기`;
         return (
           <AttachmentCard
             key={id}
             kind="screen"
             icon={CameraIcon}
-            title={title}
+            title={kind ? `${name} · ${kind}` : name}
             description={getScreenDescription(snapshot, origin)}
-            removeLabel={`저장한 화면 ${index + 1} 삭제`}
+            removeLabel={`${name} 삭제`}
             disabled={disabled}
             onRemove={() => onRemove(id)}
             actions={
-              captures.has(id) ? (
+              capture ? (
                 <ToggleButton
-                  label={`저장한 화면 ${index + 1} 미리보기`}
+                  label={previewTitle}
                   size="lg"
                   isPressed={id === previewId}
-                  onPressedChange={(isPressed) => setPreviewId(isPressed ? id : null)}
+                  onPressedChange={(isPressed) => {
+                    if (isPressed) {
+                      onPreview(id, { title: previewTitle, subtitle: getScreenDescription(snapshot, kind), capture });
+                    } else {
+                      onPreviewClose();
+                    }
+                  }}
+                  {...{ [PREVIEW_TOGGLE_ATTRIBUTE]: id }}
                 >
                   미리보기
                 </ToggleButton>
@@ -100,16 +124,6 @@ export function ScreenSnapshotControls({
           />
         );
       })}
-      {previewCapture && previewIndex !== -1 ? (
-        <li className="list-none">
-          <ScreenSnapshotPreview
-            key={previewId}
-            capture={previewCapture}
-            title={`저장한 화면 ${previewIndex + 1}`}
-            onClose={() => setPreviewId(null)}
-          />
-        </li>
-      ) : null}
     </>
   );
 }
