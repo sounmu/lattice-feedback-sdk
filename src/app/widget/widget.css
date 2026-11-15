@@ -183,8 +183,8 @@
 .widget-composer .astryx-button {
   position: relative;
   flex-shrink: 0;
-  inline-size: calc(var(--size-element-lg) - var(--spacing-2));
-  block-size: calc(var(--size-element-lg) - var(--spacing-2));
+  inline-size: var(--widget-pill-size);
+  block-size: var(--widget-pill-size);
   min-inline-size: 0;
   min-block-size: 0;
   margin: var(--spacing-1);
