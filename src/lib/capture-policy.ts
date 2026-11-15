@@ -3,6 +3,10 @@ import type { CreateFeedbackInput, ElementTarget } from '@/types/feedback';
 export interface CapturePolicy {
   readonly allowedPaths: readonly string[];
   readonly targets: readonly { readonly id: string; readonly selector: string }[];
+  readonly automaticMasking?: {
+    readonly enabled?: boolean;
+    readonly keepCommentedText?: boolean;
+  };
 }
 
 export const MAX_STRUCTURAL_SELECTOR_LENGTH = 500;
@@ -71,6 +75,15 @@ export function findCapturePolicy(value: unknown): CapturePolicy | null {
       return null;
     }
     targets.push({ id: target.id, selector: target.selector });
+  }
+  if (value.automaticMasking !== undefined) {
+    const masking = value.automaticMasking;
+    if (!isRecord(masking) ||
+      (masking.enabled !== undefined && typeof masking.enabled !== 'boolean') ||
+      (masking.keepCommentedText !== undefined && typeof masking.keepCommentedText !== 'boolean')) return null;
+    return { allowedPaths, targets, automaticMasking: {
+      enabled: masking.enabled, keepCommentedText: masking.keepCommentedText,
+    } };
   }
   return { allowedPaths, targets };
 }

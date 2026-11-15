@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Order workspace</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef2f6; color: #182335; font: 16px/1.5 monospace; }
+    main { max-width: 1000px; padding: 32px; margin: auto; }
+    section { padding: 20px; margin: 16px 0; border: 1px solid #ccd3dd; background: white; border-radius: 8px; }
+    table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+    td, th { text-align: left; padding: 12px; border-bottom: 1px solid #ccd3dd; overflow-wrap: anywhere; }
+    label { display: block; margin: 12px 0; }
+    input, textarea, select { width: 100%; padding: 8px; font: inherit; }
+    button { padding: 12px 20px; font: inherit; cursor: pointer; }
+    [contenteditable] { padding: 8px; border: 1px solid #ccd3dd; }
+  </style>
+</head>
+<body>
+<main>
+  <img src="mark.svg" alt="Workspace mark" width="32" height="32">
+  <h1>Order workspace</h1>
+  <p>Review &amp; approve orders</p>
+  <section>
+    <h2 id="summary"></h2>
+    <table>
+      <thead><tr><th>Customer</th><th>Order number</th><th>Amount</th></tr></thead>
+      <tbody><tr><td id="customer"></td><td id="order"></td><td id="amount"></td></tr></tbody>
+    </table>
+    <p id="updated"></p>
+    <button id="refresh">Refresh order</button>
+  </section>
+  <section>
+    <h2>Delivery details</h2>
+    <label>Recipient<input id="recipient" placeholder="Recipient name"></label>
+    <label>Instructions<textarea id="instructions"></textarea></label>
+    <label>Warehouse<select id="warehouse"><option id="warehouse-option"></option></select></label>
+    <div contenteditable="true" id="editable"></div>
+    <p id="attributes">Account details</p>
+    <label>Password<input id="password" type="password"></label>
+    <p data-lattice-mask id="masked"></p>
+    <p data-lattice-block id="blocked"></p>
+    <p data-lattice-keep id="safe"></p>
+  </section>
+</main>
+<script src="host.js"></script>
+</body>
+</html>

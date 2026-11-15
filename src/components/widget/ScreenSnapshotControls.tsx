@@ -49,7 +49,7 @@ function getScreenDescription(snapshot: ScreenSnapshotSummary, origin: string | 
     parts.unshift(origin);
   }
   if (snapshot.missingAssets.length > 0) {
-    parts.push(`글꼴·이미지 ${snapshot.missingAssets.length}개 누락`);
+    parts.push(`가림·누락 기록 ${snapshot.missingAssets.length}개`);
   }
   return parts.join(' · ');
 }

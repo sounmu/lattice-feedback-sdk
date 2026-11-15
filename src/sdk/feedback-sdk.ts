@@ -1,11 +1,15 @@
 import { createHostToWidgetMessage, isWidgetToHostMessage } from '@/lib/sdk-protocol';
 import { createCaptureUpdate, isCaptureCommand } from '@/lib/capture-protocol';
 import { findCapturePolicy, type CapturePolicy } from '@/lib/capture-policy';
+import { CapturePageNotAllowedError } from '@/sdk/capture-guard';
+import { isCapturePageAllowed } from '@/sdk/capture-policy';
 import { createCaptureController } from '@/sdk/capture-controller';
+import { createPendingStartGate } from '@/sdk/pending-start';
 import { trackHistory } from '@/sdk/history-tracking';
 import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
 import { captureRecording, captureScreen } from '@/sdk/screen-capture';
+import { configureAutomaticMasking, onStaticIndexSettled, prepareStaticTextIndex, warmStaticTextIndex } from '@/sdk/static-text-index';
 import { HOST_ELEMENT_STYLE, PANEL_OPEN_CLASS_NAME, SDK_STYLES } from '@/sdk/styles';
 import type { FeedbackSdkInitOptions } from '@/sdk/types';
 import type { FeedbackReporter } from '@/types/feedback';
@@ -33,6 +37,10 @@ export class FeedbackSdk {
   private pendingResizeFrame: number | null = null;
   // Each save serializes the page as soon as it is asked, so a save asked during another keeps its own moment.
   private activeScreenCaptures = 0;
+  // Starts waiting for the static text index; close, cancel, reset and submit make them stale.
+  private readonly pendingStarts = createPendingStartGate();
+  // The page title is classified against the index, so it is sent again once the index has finished.
+  private stopWatchingIndex: (() => void) | null = null;
 
   constructor(appOrigin: string) {
     this.appOrigin = appOrigin;
@@ -56,6 +64,8 @@ export class FeedbackSdk {
     this.capturePolicy = options.capturePolicy === undefined
       ? null
       : findCapturePolicy(options.capturePolicy) ?? { allowedPaths: [], targets: [] };
+    configureAutomaticMasking(this.capturePolicy?.automaticMasking);
+    this.stopWatchingIndex = onStaticIndexSettled(() => this.updatePageContext());
     window.addEventListener('message', this.handleMessage);
     this.stopHistoryTracking = trackHistory(this.handleNavigation);
     if (document.body) {
@@ -89,6 +99,7 @@ export class FeedbackSdk {
     this.launcherButton.setAttribute('aria-expanded', 'true');
     this.isPanelOpen = true;
     this.postToWidget(createHostToWidgetMessage('visibility:update', { isOpen: true }));
+    warmStaticTextIndex();
     // Keyboard focus follows the panel in, so the next Tab lands inside it instead of back on the page.
     this.iframeElement?.focus({ preventScroll: true });
     // The viewport may have changed since the iframe was created, so refresh on every open.
@@ -98,6 +109,7 @@ export class FeedbackSdk {
   }
 
   close(): void {
+    this.pendingStarts.invalidate();
     this.captureController?.cancelTransient();
     this.hideForCapture();
   }
@@ -115,6 +127,9 @@ export class FeedbackSdk {
   }
 
   destroy(): void {
+    this.pendingStarts.invalidate();
+    this.stopWatchingIndex?.();
+    this.stopWatchingIndex = null;
     window.removeEventListener('message', this.handleMessage);
     document.removeEventListener('DOMContentLoaded', this.handleDomContentLoaded);
     this.stopResizeTracking();
@@ -243,6 +258,7 @@ export class FeedbackSdk {
 
   private readonly handleNavigation = (): void => {
     if (this.isDestroyed) return;
+    this.pendingStarts.pageChanged();
     this.captureController?.pageChanged();
     this.updatePageContext();
   };
@@ -269,11 +285,13 @@ export class FeedbackSdk {
       const capture = await captureScreen(HOST_ELEMENT_TAG_NAME, {
         comments: this.captureController?.getCommentPinSources() ?? [],
         edits: this.captureController?.getEditMoveSources() ?? [],
-      });
+      }, () => isCapturePageAllowed(this.capturePolicy));
+      this.updatePageContext();
       this.postToWidget(createHostToWidgetMessage('screen:captured', { ...capture, requestId }));
     } catch (error) {
       console.warn(`${LOG_PREFIX} Saving the screen failed.`, error);
-      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
+      const reason = error instanceof CapturePageNotAllowedError ? 'page_not_allowed' : 'capture_failed';
+      this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason }));
     } finally {
       this.activeScreenCaptures -= 1;
     }
@@ -302,7 +320,15 @@ export class FeedbackSdk {
     }
     const message: unknown = event.data;
     if (isCaptureCommand(message)) {
-      this.captureController?.handleCommand(message);
+      if (message.type === 'capture:start') {
+        const isCurrent = this.pendingStarts.begin(message.payload.mode !== 'flow');
+        void prepareStaticTextIndex().then(() => {
+          if (isCurrent() && !this.isDestroyed) this.captureController?.handleCommand(message);
+        });
+      } else {
+        if (message.type === 'capture:cancel' || message.type === 'draft:reset') this.pendingStarts.invalidate();
+        this.captureController?.handleCommand(message);
+      }
       return;
     }
     if (!isWidgetToHostMessage(message)) {
@@ -317,6 +343,7 @@ export class FeedbackSdk {
         this.close();
         break;
       case 'submitted':
+        this.pendingStarts.invalidate();
         this.captureController?.reset();
         break;
       case 'screen:capture':

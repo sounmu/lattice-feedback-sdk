@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MAX_PLAIN_REPLAY_BYTES, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS } from '@/lib/feedback-limits';
 import { startReplayRecording } from '@/sdk/flow-replay-recorder';
+import { configureAutomaticMasking } from '@/sdk/static-text-index';
 import type { ReplayChunk, ReplayProgress } from '@/sdk/flow-replay-session';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
@@ -119,6 +120,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  configureAutomaticMasking({});
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -216,7 +218,8 @@ it.each([
     return MAX_PLAIN_REPLAY_BYTES;
   }],
 ])('stops before page changes outgrow %s, keeping the first snapshot and the changes that fit', async (_name, getLimit) => {
-  // Three of these fit the budget; the fourth does not.
+  // Three of these fit the budget; the fourth does not. Masking is off so the size is the size recorded.
+  configureAutomaticMasking({ enabled: false });
   const text = 'x'.repeat(Math.floor(getLimit() / 3.5));
   const recording = startReplayRecording(SDK, FRESH);
   emitPage(START);
@@ -228,6 +231,34 @@ it.each([
 
   expect(result?.segments[0].events.map((event) => event.type)).toEqual([4, 2, 3, 3, 3]);
   expect(result?.truncated).toBe(true);
+});
+
+it.each([
+  ['an upload', () => MAX_REPLAY_BYTES],
+  ['a plain upload when the browser cannot compress', () => {
+    vi.stubGlobal('CompressionStream', undefined);
+    return MAX_PLAIN_REPLAY_BYTES;
+  }],
+])('counts the cleaned events against %s: masked text takes three bytes a character', async (_name, getLimit) => {
+  // Recorded, all five would fit twice over; after masking only two of them do.
+  const text = 'x'.repeat(Math.floor(getLimit() / 7.5));
+  const recording = startReplayRecording(SDK, FRESH);
+  emitPage(START);
+  for (let index = 0; index < 5; index += 1) {
+    recorder.emit({ type: 3, timestamp: START + 1, data: { source: 0, texts: [{ id: 1, value: text }] } });
+  }
+  await Promise.resolve();
+  const savedBytes = saved.chunks.reduce((total, chunk) => total + chunk.bytes, 0);
+
+  const result = await recording.stop();
+  const kept = result?.segments[0].events ?? [];
+
+  expect(kept.map((event) => event.type)).toEqual([4, 2, 3, 3]);
+  expect(result?.truncated).toBe(true);
+  expect(JSON.stringify(kept)).not.toContain('xxx');
+  const keptBytes = kept.reduce((total, event) => total + new TextEncoder().encode(JSON.stringify(event)).length, 0);
+  expect(keptBytes).toBeLessThanOrEqual(getLimit());
+  expect(savedBytes).toBe(keptBytes);
 });
 
 it('saves cleaned events as they are recorded and continues the replay in the next document', async () => {

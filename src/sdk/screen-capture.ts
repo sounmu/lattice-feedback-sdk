@@ -20,6 +20,7 @@ import {
   SCREEN_SNAPSHOT_FORMAT,
 } from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
+import { serializeAfterWait } from '@/sdk/capture-guard';
 import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError } from '@/sdk/snapshot-assets';
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
@@ -29,6 +30,10 @@ import { createSegmentedReplayAssetRoot } from '@/sdk/replay-assets';
 import { createCommentPins, createEditMoves, type CommentPinSource, type EditMoveSource } from '@/sdk/screen-marks';
 
 import type { CapturedScreen, ScreenCapture } from '@/types/screen-snapshot';
+import { createAutomaticMasker, prepareStaticTextIndex } from '@/sdk/static-text-index';
+import { SnapshotMasker } from '@/sdk/snapshot-masking';
+import { getMaskingOmissions, getReplayMaskingOmissions } from '@/sdk/masking-report';
+import { MAX_MISSING_SNAPSHOT_ASSETS } from '@/lib/feedback-limits';
 
 /** Comments and proposed moves to mark on the saved screen. */
 export interface ScreenMarkSources {
@@ -45,7 +50,7 @@ const CSS_IMAGE_PROPERTIES = ['background-image', 'border-image-source', 'list-s
 const PSEUDO_ELEMENTS = [null, '::before', '::after'] as const;
 const CSS_IMAGE_URL_PATTERN = /url\(\s*"([^"]*)"\s*\)/g;
 
-function isMaskedInput(element: HTMLElement): boolean {
+export function isMaskedInput(element: HTMLElement): boolean {
   if (element.closest(MASKED_SELECTOR)) {
     return true;
   }
@@ -107,10 +112,7 @@ export function findUsedCssImageUrls(excludedSelector: string): Set<string> {
   return urls;
 }
 
-export async function captureScreen(
-  sdkSelector: string,
-  marks: ScreenMarkSources = { comments: [], edits: [] },
-): Promise<ScreenCapture> {
+function serializeScreen(sdkSelector: string, marks: ScreenMarkSources) {
   const capturedAt = Date.now();
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
   const mirror = createMirror();
@@ -132,12 +134,15 @@ export async function captureScreen(
   }
   removeInlineScripts(node);
   removeHiddenValues(node);
+  const masker = createAutomaticMasker();
+  const commentedIds = new Set(marks.comments.map(({ element }) => mirror.getId(element)));
+  new SnapshotMasker(masker, commentedIds).node(node);
 
   // Read together with the DOM, before any await: the reporter may scroll or navigate while files download.
   const url = getPageUrl(window.location.href);
   const page: CapturedScreen['page'] = {
     url,
-    title: truncateText(document.title, MAX_PAGE_TITLE_LENGTH),
+    title: truncateText(masker.text(document.title), MAX_PAGE_TITLE_LENGTH),
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
     scrollX: window.scrollX,
@@ -149,6 +154,19 @@ export async function captureScreen(
     scrollX: page.scrollX,
     scrollY: page.scrollY,
   });
+  return { capturedAt, excludedSelector, mirror, node, page, pins, moves, url, masker };
+}
+
+export async function captureScreen(
+  sdkSelector: string,
+  marks: ScreenMarkSources = { comments: [], edits: [] },
+  isPageAllowed: () => boolean = () => true,
+): Promise<ScreenCapture> {
+  const { capturedAt, excludedSelector, mirror, node, page, pins, moves, url, masker } = await serializeAfterWait(
+    prepareStaticTextIndex(),
+    { startPathname: window.location.pathname, getPathname: () => window.location.pathname, isAllowed: isPageAllowed },
+    () => serializeScreen(sdkSelector, marks),
+  );
   const { assetFiles, missingAssets } = await extractSnapshotAssets(node, {
     pageOrigin: window.location.origin,
     loadedFontFamilies: findLoadedFontFamilies(),
@@ -185,7 +203,7 @@ export async function captureScreen(
       ...pins.map((pin) => createCommentPinEvent(pin, capturedAt)),
       ...moves.map((move) => createEditMoveEvent(move, capturedAt)),
     ],
-    missingAssets,
+    missingAssets: [...getMaskingOmissions(masker), ...missingAssets].slice(0, MAX_MISSING_SNAPSHOT_ASSETS),
   };
   return { screen, assetFiles };
 }
@@ -239,7 +257,7 @@ export async function captureRecording(recording: ReplayRecording, sdkSelector: 
     capturedAt: recording.startedAt,
     page: recording.page,
     events,
-    missingAssets,
+    missingAssets: [...getReplayMaskingOmissions(events), ...missingAssets].slice(0, MAX_MISSING_SNAPSHOT_ASSETS),
   };
   return { screen, assetFiles };
 }
