@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 /** Called only after authorization and a fresh repository read, for successful admin GETs. */
 export function createPrivateJsonResponse(request: Request, body: object): Response {
-  const json = JSON.stringify(body);
+  const json = Buffer.from(JSON.stringify(body));
   // Hash the representation, not updatedAt: linked screens and duplicate links can change independently.
   const tag = `"${createHash('sha256').update(json).digest('base64url')}"`;
   const headers = {
