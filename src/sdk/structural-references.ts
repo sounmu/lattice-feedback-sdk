@@ -7,10 +7,10 @@ type ReferenceKind = 'name' | 'names' | 'parts' | 'target';
 
 const REFERENCE_ATTRIBUTES: ReadonlyMap<string, ReferenceKind> = new Map<string, ReferenceKind>([
   // A name this element declares, or exactly one name it points at.
-  ['id', 'name'], ['name', 'name'], ['slot', 'name'], ['for', 'name'], ['form', 'name'], ['list', 'name'],
-  ['aria-activedescendant', 'name'], ['popovertarget', 'name'], ['commandfor', 'name'], ['anchor', 'name'],
-  // Space separated lists of names.
-  ['aria-labelledby', 'names'], ['aria-describedby', 'names'], ['aria-controls', 'names'], ['aria-owns', 'names'],
+  ['id', 'name'], ['name', 'name'], ['slot', 'name'], ['form', 'name'], ['list', 'name'],
+  ['aria-activedescendant', 'name'], ['popovertarget', 'name'], ['commandfor', 'name'], ['interestfor', 'name'], ['anchor', 'name'],
+  // Space separated lists of names (a label has one, an output can have several).
+  ['for', 'names'], ['aria-labelledby', 'names'], ['aria-describedby', 'names'], ['aria-controls', 'names'], ['aria-owns', 'names'],
   ['aria-flowto', 'names'], ['aria-details', 'names'], ['aria-errormessage', 'names'], ['headers', 'names'],
   ['itemref', 'names'], ['part', 'names'],
   ['exportparts', 'parts'],
@@ -20,8 +20,6 @@ const REFERENCE_ATTRIBUTES: ReadonlyMap<string, ReferenceKind> = new Map<string,
 const FRAGMENT_ATTRIBUTES = new Set(['href', 'xlink:href', 'usemap']);
 const TARGET_KEYWORDS = new Set(['_blank', '_self', '_parent', '_top']);
 const URL_REFERENCE = /url\(\s*(["']?)#([^"')\s]+)\1\s*\)/g;
-// #id, ::part(name) and [attribute=value] selectors: a page's stylesheet names these literally.
-const CSS_NAME = /#((?:\\.|[\w\u00a1-\uffff-])+)|::part\(([^)]*)\)|\[[^\]=~|^$*\s]+\s*[~|^$*]?=\s*(?:"([^"]*)"|'([^']*)'|([^\s\]]+))/g;
 
 export type TokenRemapper = (token: string) => string;
 
@@ -39,16 +37,8 @@ function remapFragment(fragment: string, remap: TokenRemapper): string {
   return mapped === decoded ? fragment : mapped;
 }
 
-/** Names and attribute values that stylesheet text mentions literally. Such a value is part of the page's code. */
-export function findCssNames(cssText: string): Set<string> {
-  const names = new Set<string>();
-  for (const match of cssText.matchAll(CSS_NAME)) {
-    if (match[1] !== undefined) names.add(match[1].replace(/\\(.)/g, '$1'));
-    if (match[2] !== undefined) match[2].split(/\s+/).filter(Boolean).forEach((part) => names.add(part));
-    const value = match[3] ?? match[4] ?? match[5];
-    if (value !== undefined) names.add(value);
-  }
-  return names;
+export function isReferenceAttribute(attribute: string): boolean {
+  return REFERENCE_ATTRIBUTES.has(attribute.toLowerCase());
 }
 
 /** The value with every name in it passed through remap. Values that name nothing come back unchanged. */

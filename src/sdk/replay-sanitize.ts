@@ -11,6 +11,10 @@ import { addMaskingReport } from '@/sdk/masking-report';
 // rrweb IncrementalSource.Mutation and IncrementalSource.Input.
 export const MUTATION_SOURCE = 0;
 const INPUT_SOURCE = 5;
+// rrweb IncrementalSource.StyleSheetRule, StyleDeclaration and AdoptedStyleSheet: stylesheet text that arrives after the snapshot.
+const STYLE_SHEET_RULE_SOURCE = 8;
+const STYLE_DECLARATION_SOURCE = 13;
+const ADOPTED_STYLE_SHEET_SOURCE = 15;
 // rrweb NodeType.Element.
 export const ELEMENT_NODE_TYPE = 2;
 
@@ -70,6 +74,27 @@ function sanitizeAttributeChange(change: AttributeChange, elements: RecordedElem
   }
 }
 
+interface StyleEventData {
+  source?: number;
+  adds?: { rule: string }[];
+  replace?: string;
+  replaceSync?: string;
+  set?: { value: string | null };
+  styles?: { rules: { rule: string }[] }[];
+}
+
+function maskStyleEvent(data: StyleEventData, masking: SnapshotMasker): void {
+  if (data.source === STYLE_SHEET_RULE_SOURCE) {
+    data.adds?.forEach((add) => { add.rule = masking.css(add.rule); });
+    if (typeof data.replace === 'string') data.replace = masking.css(data.replace);
+    if (typeof data.replaceSync === 'string') data.replaceSync = masking.css(data.replaceSync);
+  } else if (data.source === STYLE_DECLARATION_SOURCE) {
+    if (typeof data.set?.value === 'string') data.set.value = masking.declaration(data.set.value);
+  } else if (data.source === ADOPTED_STYLE_SHEET_SOURCE) {
+    data.styles?.forEach((style) => style.rules.forEach((rule) => { rule.rule = masking.css(rule.rule); }));
+  }
+}
+
 function isHiddenInputEvent(event: ScreenSnapshotEvent, elements: RecordedElements): boolean {
   const data = event.data as { source?: unknown; id?: unknown };
   if (event.type !== RRWEB_INCREMENTAL_EVENT_TYPE || data.source !== INPUT_SOURCE || typeof data.id !== 'number') {
@@ -117,6 +142,7 @@ export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], ele
       if (event.type === RRWEB_INCREMENTAL_EVENT_TYPE && data.source === INPUT_SOURCE && typeof data.text === 'string') {
         data.text = masking?.text(data.id ?? -1, data.text) ?? data.text;
       }
+      if (event.type === RRWEB_INCREMENTAL_EVENT_TYPE && masking) maskStyleEvent(event.data as StyleEventData, masking);
       if (masking) addMaskingReport(event, masking.masker);
       continue;
     }

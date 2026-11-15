@@ -1,9 +1,10 @@
 import { AutomaticMasker, type TextMaskingContext } from '@/sdk/automatic-masking';
 import type { SnapshotNode, SnapshotStyleChange } from '@/sdk/snapshot-assets';
-import { findCssNames, rewriteReferences } from '@/sdk/structural-references';
+import { findSelectorRanges, maskOutsideRanges, rewriteCssNames, scanCssSelectors, type AttributeSelector } from '@/sdk/css-selectors';
+import { rewriteReferences } from '@/sdk/structural-references';
 
 // Displayed or submitted text. Names that other nodes point at are handled by structural-references instead.
-const TEXT_ATTRIBUTES = /^(value|placeholder|title|alt|aria-label|aria-description|label|content|data-.*)$/i;
+const TEXT_ATTRIBUTES = /^(value|placeholder|title|alt|aria-label|aria-description|aria-valuetext|aria-roledescription|aria-placeholder|aria-braillelabel|aria-brailleroledescription|label|content|abbr|summary|datetime|download|data-.*)$/i;
 const CONTROL_ATTRIBUTES = new Set(['data-lattice-mask', 'data-lattice-block', 'data-lattice-keep']);
 
 /** What a node declares by itself. What applies to it also depends on its ancestors, so that is derived, never stored. */
@@ -58,9 +59,12 @@ export class SnapshotMasker {
   private readonly children = new Map<number, Set<number>>();
   // Nodes a page change removed. A node that was only moved is recorded again by the same change.
   private readonly detached = new Set<number>();
-  // Names and values the page's own stylesheets spell out. Masking one would break the rule that uses it.
+  // Names the page's own stylesheets spell out. Masking one would break the rule that uses it.
   private readonly cssNames = new Set<string>();
-  // A name that is not proven static becomes one opaque token everywhere it appears in this document.
+  // What stylesheets select data-* attributes by, per attribute: the part of a value a selector needs stays readable.
+  private readonly dataSelectors = new Map<string, AttributeSelector[]>();
+  private readonly knownSelectors = new Set<string>();
+  // A name that is not proven static becomes one opaque token everywhere it appears in this document, stylesheets that arrive later included.
   private readonly opaqueNames = new Map<string, string>();
   private opaqueCount = 0;
 
@@ -120,36 +124,68 @@ export class SnapshotMasker {
   }
 
   private readonly remapName = (name: string): string => {
+    // A name that has a token keeps it, whatever stylesheets or the index learn afterwards.
+    const established = this.opaqueNames.get(name);
+    if (established !== undefined) return established;
     if (!name.trim() || this.cssNames.has(name) || this.masker.isStatic(name)) return name;
-    let opaque = this.opaqueNames.get(name);
-    if (opaque === undefined) {
-      do {
-        this.opaqueCount += 1;
-        opaque = `lattice-ref-${this.opaqueCount}`;
-      } while (this.masker.known.has(opaque));
-      this.opaqueNames.set(name, opaque);
-      this.masker.countMasked(name);
-    }
+    let opaque: string;
+    do {
+      this.opaqueCount += 1;
+      opaque = `lattice-ref-${this.opaqueCount}`;
+    } while (this.masker.known.has(opaque));
+    this.opaqueNames.set(name, opaque);
+    this.masker.countMasked(name);
     return opaque;
   };
 
   private maskAttribute(name: string, value: string, context: RecordedTextContext): string {
-    if (TEXT_ATTRIBUTES.test(name)) {
-      const namedByStylesheet = name.toLowerCase().startsWith('data-') && this.cssNames.has(value);
-      return this.masker.text(value, namedByStylesheet ? { ...context, safe: true } : context);
-    }
+    if (name === '_cssText') return this.css(value);
+    if (TEXT_ATTRIBUTES.test(name)) return this.maskTextAttribute(name, value, context);
     return rewriteReferences(name, value, this.remapName);
+  }
+
+  // Only the attribute a selector names, and only the part of its value that selector depends on, stays readable.
+  private maskTextAttribute(name: string, value: string, context: RecordedTextContext): string {
+    const selectors = this.dataSelectors.get(name.toLowerCase());
+    if (!selectors || context.forced || this.masker.isStatic(value, context)) return this.masker.text(value, context);
+    return maskOutsideRanges(value, findSelectorRanges(value, selectors), (gap) => this.masker.text(gap, context));
+  }
+
+  private registerCss(cssText: string): void {
+    const { names, dataSelectors } = scanCssSelectors(cssText);
+    names.forEach((name) => {
+      if (!this.opaqueNames.has(name)) this.cssNames.add(name);
+    });
+    for (const selector of dataSelectors) {
+      const key = [selector.attribute, selector.operator, selector.ignoreCase, selector.value].join('\u0000');
+      if (this.knownSelectors.has(key)) continue;
+      this.knownSelectors.add(key);
+      this.dataSelectors.set(selector.attribute, [...(this.dataSelectors.get(selector.attribute) ?? []), selector]);
+    }
+  }
+
+  /** Stylesheet text from any route: names it mentions that already have a token are written with it, the rest stay. */
+  css(cssText: string): string {
+    this.registerCss(cssText);
+    return rewriteCssNames(cssText, (name) => this.opaqueNames.get(name));
   }
 
   private collectCssNames(node: SnapshotNode): void {
     const serialized = node.attributes?._cssText;
-    if (typeof serialized === 'string') findCssNames(serialized).forEach((name) => this.cssNames.add(name));
+    if (typeof serialized === 'string') this.registerCss(serialized);
     if (node.tagName === 'style') {
       node.childNodes?.forEach((child) => {
-        if (typeof child.textContent === 'string') findCssNames(child.textContent).forEach((name) => this.cssNames.add(name));
+        if (typeof child.textContent === 'string') this.registerCss(child.textContent);
       });
     }
     node.childNodes?.forEach((child) => this.collectCssNames(child));
+  }
+
+  // A node that is serialized again keeps what it was known to be: a password field stays a secret after its type changed.
+  private withEstablishedMarkers(id: number | undefined, markers: NodeMarkers): NodeMarkers {
+    const established = id === undefined ? undefined : this.nodes.get(id)?.markers;
+    if (!established) return markers;
+    return { ...markers, secret: markers.secret || established.secret, script: markers.script || established.script };
   }
 
   node(node: SnapshotNode, parentId?: number): void {
@@ -161,7 +197,7 @@ export class SnapshotMasker {
     if (node.tagName === 'script') {
       for (const child of [node, ...(node.childNodes ?? [])]) {
         if (child.id === undefined) continue;
-        const markers = { ...readMarkers({ type: child.type }), script: true };
+        const markers = this.withEstablishedMarkers(child.id, { ...readMarkers({ type: child.type }), script: true });
         this.record(child.id, { tagName: 'script', parentId: child === node ? parentId : node.id, markers });
       }
       node.tagName = 'noscript';
@@ -171,7 +207,7 @@ export class SnapshotMasker {
     }
     const parent = this.context(parentId);
     const attributes = node.attributes ?? {};
-    const markers = readMarkers(node);
+    const markers = this.withEstablishedMarkers(node.id, readMarkers(node));
     const context: RecordedTextContext = {
       forced: parent.forced || isForcedBy(markers),
       safe: parent.safe || markers.keep,
@@ -184,6 +220,8 @@ export class SnapshotMasker {
         // Only a direct text child of the exact pin target, never its descendants or attributes.
         commented: parentId !== undefined && this.commentedIds.has(parentId),
       });
+    } else if (typeof node.textContent === 'string') {
+      node.textContent = this.css(node.textContent);
     }
     // Viewport is structural metadata. Other meta content can contain business data.
     const isViewportMeta = node.tagName === 'meta' && attributes.name === 'viewport';
@@ -200,10 +238,7 @@ export class SnapshotMasker {
   text(id: number, value: string): string {
     const context = this.context(id);
     if (context.tagName === 'script') return '';
-    if (context.tagName === 'style') {
-      findCssNames(value).forEach((name) => this.cssNames.add(name));
-      return value;
-    }
+    if (context.tagName === 'style') return this.css(value);
     return this.masker.text(value, context);
   }
 
@@ -215,6 +250,11 @@ export class SnapshotMasker {
     if (known || Object.values(markers).some(Boolean)) {
       this.record(id, { tagName: known?.tagName, parentId: known?.parentId, markers });
     }
+  }
+
+  /** The value of one style declaration: a url(#name) in it follows the same mapping as in an attribute. */
+  declaration(value: string): string {
+    return rewriteReferences('style', value, this.remapName);
   }
 
   // rrweb records a changed inline style property by property. A url(#name) in one follows the same mapping as in text.

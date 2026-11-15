@@ -65,15 +65,16 @@ Earlier saved snapshots and Flow recordings are never retrospectively unmasked.
 | Flow added nodes and changed text | Classified before the recorder appends its event to browser storage |
 | input, textarea, select values | Classified by the rrweb input hook and serialized-event sanitizer; passwords stay forced |
 | Password/hidden inputs and token meta | Existing removal plus forced password masking wins over exemptions |
-| value, placeholder, title, alt, aria-label, aria-description, label, content, data-* | Classified; viewport meta content remains structural |
-| id, name | Classified against source attributes/literals |
+| value, placeholder, title, alt, label, content, abbr, summary, datetime, download, aria-label/-description/-valuetext/-roledescription/-placeholder, data-* | Classified; viewport meta content remains structural |
+| id, name, slot and what points at them: for, aria-labelledby/-describedby/-controls/-owns/..., headers, list, form, href="#...", url(#...) in attributes, inline styles and later stylesheet text | A name that is not source text becomes one opaque token (`lattice-ref-N`) everywhere in that document, so links, filters and rules still match. A name that has a token keeps it, whatever the index or later stylesheets learn |
+| data-* values a stylesheet selects on | Only the attribute the selector names keeps the part its operator needs (whole value for `=`, the word for `~=`, the prefix and hyphen for `\|=`, the prefix for `^=`, the suffix for `$=`, each occurrence for `*=`); the rest is classified as usual |
 | class, style | Not classified: layout vocabulary, not text; use `data-lattice-block` if a class encodes data |
 | Comment/Edit pin labels | Existing configured identifiers or tag names, never element text |
 | Flow target labels | Existing configured identifiers or tag names, never element text |
-| Page title | Classified before metadata transmission and storage |
+| Page title | Classified before metadata transmission and storage; a title classified before the index finished is sent again when it has |
 | Page URLs / event paths | Existing origin/path contract retained; query and fragment omitted from page metadata |
 | DOM/CSS resource URLs | Existing section 5 contract retained, including query strings; use `data-lattice-block` for sensitive URLs |
-| CSS | Retained as layout instructions; automatic classification does not parse CSS-generated business text |
+| CSS (snapshot, later style text, inserted rules, adopted sheets) | Retained as layout instructions, with names it mentions written as the tokens above; automatic classification does not parse CSS-generated business text |
 | Widget preview / admin replay | Render the same already-masked payload; no original text is sent for later UI masking |
 | Omissions | Counts only, plus incomplete-index status; no original text in diagnostics |
 
@@ -90,6 +91,9 @@ lazy scripts may cause over-masking. A resumed Flow waits for the index before
 its first snapshot. Text that mixes a static phrase with a value in one text node
 ("Showing 14 of 14 orders") is masked whole. Turning automatic masking off keeps
 the earlier behavior: Flow inputs stay masked as `*`.
+
+Selectors on a name by prefix, suffix or substring (`[id^="row-"]`) cannot survive a token, and SMIL `begin`/`end` references to animation ids are not rewritten.
+A password field that is already a text field when it is first seen, with no password autocomplete hint, cannot be told from any other field.
 
 Business values encoded into URL paths, resource URLs, CSS, pixels, or unsupported
 rendering surfaces are outside text classification. Exclude those regions with
