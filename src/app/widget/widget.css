@@ -212,8 +212,8 @@
 }
 
 /* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would
-   truncate. Its usage count sits beside the icon. A name too long for a narrow panel wraps, and the
-   icons still line up because each tool starts at the top of its cell. */
+   truncate. A name too long for a narrow panel wraps, and the icons still line up because each tool
+   starts at the top of its cell. */
 .widget-root .widget-tool {
   align-items: flex-start;
   block-size: auto;
@@ -221,17 +221,25 @@
   padding: var(--spacing-2) var(--spacing-1);
 }
 
+/* Astryx wraps a button's content in a box that hugs it and clips it. A tool's content spans its cell
+   instead and may draw outside its own box, so the usage count can hang beside the icon. */
+.widget-root .widget-tool :has(> .widget-tool-content) {
+  inline-size: 100%;
+  overflow: visible;
+}
+
 .widget-tool-content {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-0-5);
+  inline-size: 100%;
 }
 
 .widget-tool-glyph {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: var(--spacing-1);
 }
 
 .widget-tool-usage,
@@ -240,9 +248,29 @@
   line-height: var(--text-supporting-leading);
 }
 
+/* The count hangs beside the icon without taking part in its centring, so the icon does not move when a
+   count appears. It may reach the cell's edge, less a hairline: the gap it keeps from the icon equals the
+   cell's own inline padding, so the two cancel out. Where "count/limit" is wider than that, the limit
+   wraps onto a second line, which is cut off, and the count shows alone. */
 .widget-tool-usage {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: calc(100% + var(--spacing-1));
+  display: flex;
+  flex-wrap: wrap;
+  inline-size: max-content;
+  max-inline-size: calc((100cqi - 100%) / 2 - var(--border-width));
+  block-size: 1lh;
+  overflow: hidden;
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
+  translate: 0 -50%;
+  white-space: nowrap;
+}
+
+/* Digits that take room without showing: they pad a count to the width of the widest one in the row. */
+.widget-tool-usage-filler {
+  visibility: hidden;
 }
 
 .widget-tool-label {
