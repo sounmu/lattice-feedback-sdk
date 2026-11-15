@@ -8,6 +8,7 @@ import { startElementDrag } from '@/sdk/element-drag';
 import { startElementSelection, type SelectionPoint } from '@/sdk/element-selection';
 import { createFlowRecorder, type FlowRecorder, type FlowRecorderState } from '@/sdk/flow-recorder';
 import { startReplayRecording, type ReplayRecorder, type ReplayRecording } from '@/sdk/flow-replay-recorder';
+import { isStaticIndexReady, prepareStaticTextIndex } from '@/sdk/static-text-index';
 import { clearFlowSession, findSessionStorage, getFlowSessionKey } from '@/sdk/flow-session';
 import type { AttachmentKind, CaptureCommand, CaptureMode, CaptureState } from '@/types/sdk-message';
 import type { ElementTarget, FeedbackAttachments, FlowAttachment } from '@/types/feedback';
@@ -51,7 +52,6 @@ export function createCaptureController(options: CaptureControllerOptions) {
   // Likewise for the dragged element of each edit.
   let editElements: HTMLElement[] = [];
   let commentPoints: SelectionPoint[] = [];
-  let isDragging = false;
   let transientHandle: { cancel(): void } | null = null;
   // Bumped whenever a transient run ends, so callbacks fired by our own cancel() (drag calls onCancel synchronously) are ignored.
   let transientToken = 0;
@@ -79,7 +79,10 @@ export function createCaptureController(options: CaptureControllerOptions) {
         showWidget();
       }
     },
-    onCancel: cancelActiveMode,
+    onCancel: () => {
+      cancelActiveMode();
+      showWidget();
+    },
     onShow: showWidget,
   });
 
@@ -94,7 +97,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
   }
 
   function renderStatus(): void {
-    status.render(getState(), activeMode !== null && !isPanelVisible && !isDragging);
+    status.render(getState(), activeMode !== null && !isPanelVisible);
   }
 
   function emit(): void {
@@ -126,7 +129,6 @@ export function createCaptureController(options: CaptureControllerOptions) {
     handle?.cancel();
     selection = null;
     selectionElement = null;
-    isDragging = false;
     if (activeMode === 'comment' || activeMode === 'edit') activeMode = null;
   }
 
@@ -158,7 +160,8 @@ export function createCaptureController(options: CaptureControllerOptions) {
       });
       return;
     }
-    isDragging = true;
+    // The dragged element is published as the selection so the mode bar and the widget can name it.
+    selection = target.target;
     emit();
     const handle = startElementDrag(target, {
       onComplete: (edit) => {
@@ -318,43 +321,83 @@ export function createCaptureController(options: CaptureControllerOptions) {
       if (state.sessionId) startReplay(state.sessionId, !isStartingFlow);
     } else if (!state.recording && activeMode === 'flow') {
       activeMode = null;
+      replayStartToken += 1;
       // A replay that was cut off has no recorder left and is kept as it is.
       if (replayRecorder) {
         stoppedReplay = replayRecorder.stop();
         replayRecorder = null;
+      } else if (pendingReplayStart?.resumed) {
+        // Stopped before the index finished: the earlier documents are handed over, this one is not recorded.
+        stoppedReplay = openEarlierReplay(pendingReplayStart.sessionId).stop();
       }
+      pendingReplayStart = null;
       queueMicrotask(emit);
       return;
     }
     emit();
   }
 
+  // Text is classified as it is recorded, so the first snapshot waits for the static text index (a resumed Flow starts without a click).
+  let replayStartToken = 0;
+  // The page was left for one the policy excludes while the replay waited for the index; it is not recorded after returning.
+  let isReplayStartCutOff = false;
+  // The replay that waits for the index, until it launches or ends. Its earlier documents are already in storage.
+  let pendingReplayStart: { sessionId: string; resumed: boolean } | null = null;
+
+  // Opens the replay of the earlier documents without recording this one, to hand it over or to remove it.
+  function openEarlierReplay(sessionId: string): ReplayRecorder {
+    return startReplayRecording(options.sdkSelector, {
+      projectKey: options.projectKey,
+      sessionId,
+      resumed: true,
+      recordPage: false,
+    });
+  }
+
   function startReplay(sessionId: string, resumed: boolean): void {
     discardReplay();
     finishedReplay = null;
     stoppedReplay = null;
-    // On an excluded page, recover earlier segments without recording this document.
-    replayRecorder = startReplayRecording(options.sdkSelector, {
-      projectKey: options.projectKey,
-      sessionId,
-      resumed,
-      recordPage: isCapturePageAllowed(policy),
-    });
+    isReplayStartCutOff = false;
+    const token = replayStartToken;
+    const launch = (): void => {
+      if (isDestroyed || token !== replayStartToken) return;
+      pendingReplayStart = null;
+      // On an excluded page, recover earlier segments without recording this document.
+      replayRecorder = startReplayRecording(options.sdkSelector, {
+        projectKey: options.projectKey,
+        sessionId,
+        resumed,
+        recordPage: isCapturePageAllowed(policy) && !isReplayStartCutOff,
+      });
+    };
+    if (isStaticIndexReady()) {
+      launch();
+      return;
+    }
+    pendingReplayStart = { sessionId, resumed };
+    void prepareStaticTextIndex().then(launch);
   }
 
   // The replay must not carry a page the policy leaves out. Once cut off it is not resumed, even back on an allowed page.
   function cutOffReplayOnDisallowedPage(): void {
-    if (!replayRecorder || isCapturePageAllowed(policy)) return;
-    replayRecorder.cutOff();
+    if (isCapturePageAllowed(policy)) return;
+    if (replayRecorder) replayRecorder.cutOff();
+    else if (pendingReplayStart) isReplayStartCutOff = true;
   }
 
   function discardReplay(): void {
+    replayStartToken += 1;
+    // A launch that never happened still leaves the earlier documents in storage; they go with the discard.
+    if (pendingReplayStart?.resumed) openEarlierReplay(pendingReplayStart.sessionId).discard();
+    pendingReplayStart = null;
     replayRecorder?.discard();
     replayRecorder = null;
   }
 
   function handleFlowComplete(flow: FlowAttachment): void {
     if (isDestroyed) return;
+    replayStartToken += 1;
     finishedReplay = stoppedReplay ?? replayRecorder?.stop() ?? null;
     stoppedReplay = null;
     replayRecorder = null;

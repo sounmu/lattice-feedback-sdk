@@ -1,4 +1,4 @@
-import type { ElementTarget, FeedbackAttachments, FeedbackStatus, FeedbackType } from '@/types/feedback';
+import type { ElementTarget, FeedbackAttachments, FeedbackStatus, FeedbackType, ReporterOrganization } from '@/types/feedback';
 
 export const FEEDBACK_TYPE_LABELS: Record<FeedbackType, string> = {
   bug: '버그',
@@ -75,6 +75,16 @@ export function getPagePath(pageUrl: string): string {
   } catch {
     return pageUrl;
   }
+}
+
+/**
+ * The display name sent with a verified organization. Only the id is signed, so the name is shown apart from it and
+ * marked unverified: a reporter could otherwise pass another company's name off as confirmed.
+ */
+export function findUnverifiedOrganizationName(organization: ReporterOrganization): string | null {
+  const name = organization.name?.trim();
+  if (!name || name === organization.id) return null;
+  return name;
 }
 
 export function getElementLabel(target: ElementTarget): string {

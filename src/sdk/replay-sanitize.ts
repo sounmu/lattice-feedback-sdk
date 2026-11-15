@@ -5,10 +5,16 @@ import type { SnapshotAttributes, SnapshotNode } from '@/sdk/snapshot-assets';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
 import { removeInlineScripts } from '@/sdk/snapshot-scripts';
 import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
+import type { SnapshotMasker } from '@/sdk/snapshot-masking';
+import { addMaskingReport } from '@/sdk/masking-report';
 
 // rrweb IncrementalSource.Mutation and IncrementalSource.Input.
 export const MUTATION_SOURCE = 0;
 const INPUT_SOURCE = 5;
+// rrweb IncrementalSource.StyleSheetRule, StyleDeclaration and AdoptedStyleSheet: stylesheet text that arrives after the snapshot.
+const STYLE_SHEET_RULE_SOURCE = 8;
+const STYLE_DECLARATION_SOURCE = 13;
+const ADOPTED_STYLE_SHEET_SOURCE = 15;
 // rrweb NodeType.Element.
 export const ELEMENT_NODE_TYPE = 2;
 
@@ -21,6 +27,8 @@ export interface AttributeChange {
 export interface MutationData {
   source: number;
   adds?: { node: SnapshotNode; parentId?: number }[];
+  /** A node that is only moved is listed here and added again by the same change. */
+  removes?: { id: number; parentId?: number }[];
   attributes?: AttributeChange[];
   /** New text of text nodes. The text of a <style> element is CSS. */
   texts?: { id: number; value: string | null }[];
@@ -66,6 +74,27 @@ function sanitizeAttributeChange(change: AttributeChange, elements: RecordedElem
   }
 }
 
+interface StyleEventData {
+  source?: number;
+  adds?: { rule: string }[];
+  replace?: string;
+  replaceSync?: string;
+  set?: { value: string | null };
+  styles?: { rules: { rule: string }[] }[];
+}
+
+function maskStyleEvent(data: StyleEventData, masking: SnapshotMasker): void {
+  if (data.source === STYLE_SHEET_RULE_SOURCE) {
+    data.adds?.forEach((add) => { add.rule = masking.css(add.rule); });
+    if (typeof data.replace === 'string') data.replace = masking.css(data.replace);
+    if (typeof data.replaceSync === 'string') data.replaceSync = masking.css(data.replaceSync);
+  } else if (data.source === STYLE_DECLARATION_SOURCE) {
+    if (typeof data.set?.value === 'string') data.set.value = masking.declaration(data.set.value);
+  } else if (data.source === ADOPTED_STYLE_SHEET_SOURCE) {
+    data.styles?.forEach((style) => style.rules.forEach((rule) => { rule.rule = masking.css(rule.rule); }));
+  }
+}
+
 function isHiddenInputEvent(event: ScreenSnapshotEvent, elements: RecordedElements): boolean {
   const data = event.data as { source?: unknown; id?: unknown };
   if (event.type !== RRWEB_INCREMENTAL_EVENT_TYPE || data.source !== INPUT_SOURCE || typeof data.id !== 'number') {
@@ -95,10 +124,12 @@ export function trimReplayStart(events: readonly ScreenSnapshotEvent[], pageUrl:
  * Cleans the recorded events of one document in place, in order, and returns what is known about each
  * recorded element. A recorder cleaning events one at a time passes the same elements back in with each.
  */
-export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], elements: RecordedElements = new Map()): RecordedElements {
+export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], elements: RecordedElements = new Map(), masking?: SnapshotMasker): RecordedElements {
   for (const event of events) {
     if (event.type === RRWEB_FULL_SNAPSHOT_EVENT_TYPE) {
       sanitizeNode((event.data as { node: SnapshotNode }).node, elements);
+      masking?.node((event.data as { node: SnapshotNode }).node);
+      if (masking) addMaskingReport(event, masking.masker);
       continue;
     }
     if (isHiddenInputEvent(event, elements)) {
@@ -107,11 +138,27 @@ export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], ele
       continue;
     }
     if (!isMutationEvent(event)) {
+      const data = event.data as { source?: number; id?: number; text?: string };
+      if (event.type === RRWEB_INCREMENTAL_EVENT_TYPE && data.source === INPUT_SOURCE && typeof data.text === 'string') {
+        data.text = masking?.text(data.id ?? -1, data.text) ?? data.text;
+      }
+      if (event.type === RRWEB_INCREMENTAL_EVENT_TYPE && masking) maskStyleEvent(event.data as StyleEventData, masking);
+      if (masking) addMaskingReport(event, masking.masker);
       continue;
     }
     const data = event.data as MutationData;
+    data.removes?.forEach((remove) => masking?.detach(remove.id));
     data.adds?.forEach((add) => sanitizeNode(add.node, elements));
     data.attributes?.forEach((change) => sanitizeAttributeChange(change, elements));
+    // Markers first: what this change adds is classified by the markers the change leaves on its ancestors.
+    data.attributes?.forEach((change) => masking?.markers(change.id, change.attributes));
+    data.adds?.forEach((add) => masking?.node(add.node, add.parentId));
+    data.attributes?.forEach((change) => masking?.attributes(change.id, change.attributes));
+    data.texts?.forEach((change) => {
+      if (change.value !== null) change.value = masking?.text(change.id, change.value) ?? change.value;
+    });
+    masking?.forgetDetached();
+    if (masking) addMaskingReport(event, masking.masker);
   }
   return elements;
 }

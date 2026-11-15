@@ -1,6 +1,7 @@
 // Comment pins and the comment editor on the live host page, rendered inside the SDK ShadowRoot so saved
 // screens leave them out. They show only the reporter's own comment and a tag name or configured id.
 import { MAX_COMMENT_LENGTH, truncateText } from '@/lib/feedback-limits';
+import { describeTarget } from '@/lib/target-labels';
 import type { CaptureTarget } from '@/sdk/capture-policy';
 import type { SelectionPoint } from '@/sdk/element-selection';
 import type { CommentPinSource } from '@/sdk/screen-marks';
@@ -47,7 +48,14 @@ const COMMENT_STYLES = `
   font: 700 13px/24px ${FONT}; text-align: center; cursor: pointer; box-shadow: 0 2px 8px rgba(17, 24, 39, 0.35);
 }
 .comment-pin::after { content: ""; position: absolute; inset: -10px; }
-.comment-pin.is-pending { background: #111827; pointer-events: none; }
+.comment-pin.is-pending {
+  width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 3px solid #2563eb; background: transparent;
+  box-shadow: 0 0 0 2px #ffffff, 0 2px 8px rgba(17, 24, 39, 0.35); pointer-events: none;
+}
+.comment-pin.is-pending::before {
+  content: ""; position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
+  border-radius: 50%; background: #2563eb;
+}
 .comment-box {
   z-index: ${SDK_Z_INDEX}; width: min(300px, calc(100vw - 16px)); padding: 12px; border-radius: 12px;
   background: #ffffff; color: #111827; font: 400 14px/1.5 ${FONT}; box-shadow: 0 12px 40px rgba(17, 24, 39, 0.3);
@@ -72,15 +80,25 @@ const COMMENT_STYLES = `
 }
 `;
 
-const EDITOR_LABEL = 'Comment 입력';
-const PLACEHOLDER = '이 위치에 남길 의견을 입력하세요';
-const SUBMIT_LABEL = '첨부';
+const EDITOR_LABEL = '코멘트 입력';
+const PIN_LABEL = '코멘트';
+const PLACEHOLDER = '이 자리에 남길 의견을 적어 주세요';
+const SUBMIT_LABEL = '코멘트 첨부';
 const CANCEL_LABEL = '취소';
 const REMOVE_LABEL = '삭제';
 const GAP = 16;
 const EDGE = 8;
 const SCROLL_OPTIONS: AddEventListenerOptions = { capture: true, passive: true };
 const KEY_EVENTS = ['keydown', 'keyup', 'keypress'] as const;
+// While the editor is open the host page must not react to a stray click (a button firing or a link
+// navigating would lose the draft). Scrolling is left alone, so touchstart/touchmove are not guarded.
+const GUARDED_HOST_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick'] as const;
+const GUARD_OPTIONS: AddEventListenerOptions = { capture: true, passive: false };
+const SDK_ELEMENTS = 'lattice-feedback-root, [data-lattice-overlay]';
+
+function isSdkTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(SDK_ELEMENTS) !== null;
+}
 
 function createButton(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const button = document.createElement('button');
@@ -143,6 +161,7 @@ export function createCommentOverlay(root: ShadowRoot): CommentOverlay {
   let openKey: string | null = null;
   let editor: OpenEditor | null = null;
   let isListening = false;
+  let isGuarding = false;
   let isDestroyed = false;
 
   function refresh(): void {
@@ -165,17 +184,39 @@ export function createCommentOverlay(root: ShadowRoot): CommentOverlay {
     }
   }
 
-  // The host page is listened to only while there is something to keep in place.
+  // An outside click never reaches the host. With nothing typed it closes the editor so the next click
+  // picks again; with a draft it only brings the reporter back to the text they were writing.
+  function handleHostPointer(event: Event): void {
+    if (!editor || isSdkTarget(event.target)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.type !== 'click') return;
+    if (editor.textarea.value.trim().length === 0) {
+      cancelEditor();
+      return;
+    }
+    editor.textarea.focus();
+  }
+
+  // The host page is listened to only while there is something to keep in place or to protect.
   function syncListeners(): void {
     const isNeeded = !isDestroyed && (marks.length > 0 || editor !== null);
-    if (isNeeded === isListening) return;
-    isListening = isNeeded;
-    if (isNeeded) {
-      window.addEventListener('scroll', refresh, SCROLL_OPTIONS);
-      window.addEventListener('resize', refresh);
-    } else {
-      window.removeEventListener('scroll', refresh, SCROLL_OPTIONS);
-      window.removeEventListener('resize', refresh);
+    if (isNeeded !== isListening) {
+      isListening = isNeeded;
+      if (isNeeded) {
+        window.addEventListener('scroll', refresh, SCROLL_OPTIONS);
+        window.addEventListener('resize', refresh);
+      } else {
+        window.removeEventListener('scroll', refresh, SCROLL_OPTIONS);
+        window.removeEventListener('resize', refresh);
+      }
+    }
+    const isGuardNeeded = !isDestroyed && editor !== null;
+    if (isGuardNeeded === isGuarding) return;
+    isGuarding = isGuardNeeded;
+    for (const type of GUARDED_HOST_EVENTS) {
+      if (isGuardNeeded) window.addEventListener(type, handleHostPointer, GUARD_OPTIONS);
+      else window.removeEventListener(type, handleHostPointer, GUARD_OPTIONS);
     }
   }
 
@@ -193,7 +234,7 @@ export function createCommentOverlay(root: ShadowRoot): CommentOverlay {
     pin.type = 'button';
     pin.className = 'comment-pin';
     pin.textContent = String(source.number);
-    pin.setAttribute('aria-label', `Comment ${source.number}: ${source.label}`);
+    pin.setAttribute('aria-label', `${PIN_LABEL} ${source.number}: ${source.label}`);
     pin.addEventListener('click', () => {
       openKey = openKey === source.key ? null : source.key;
       refresh();
@@ -201,7 +242,7 @@ export function createCommentOverlay(root: ShadowRoot): CommentOverlay {
     const remark = document.createElement('div');
     remark.className = 'comment-box';
     remark.setAttribute('role', 'group');
-    remark.setAttribute('aria-label', `Comment ${source.number}`);
+    remark.setAttribute('aria-label', `${PIN_LABEL} ${source.number}`);
     const text = document.createElement('p');
     text.textContent = source.comment;
     remark.append(text, createActions(createButton('remove', REMOVE_LABEL, () => removePin(source.key))));
@@ -261,7 +302,7 @@ export function createCommentOverlay(root: ShadowRoot): CommentOverlay {
     box.setAttribute('aria-label', EDITOR_LABEL);
     const label = document.createElement('label');
     const caption = document.createElement('span');
-    caption.textContent = `${EDITOR_LABEL} · ${target.target.feedbackId ?? target.target.tagName}`;
+    caption.textContent = `${EDITOR_LABEL} · ${describeTarget(target.target)}`;
     const textarea = document.createElement('textarea');
     textarea.maxLength = MAX_COMMENT_LENGTH;
     textarea.placeholder = PLACEHOLDER;
@@ -273,7 +314,6 @@ export function createCommentOverlay(root: ShadowRoot): CommentOverlay {
     const marker = document.createElement('div');
     marker.className = 'comment-pin is-pending';
     marker.setAttribute('aria-hidden', 'true');
-    marker.textContent = '+';
     layer.append(marker, box);
     editor = { box, marker, textarea, target, point, callbacks };
     syncListeners();

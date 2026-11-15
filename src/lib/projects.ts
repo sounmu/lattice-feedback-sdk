@@ -5,12 +5,16 @@ export interface Project {
   name: string;
   allowedOrigins: string[];
   adminToken: string | null;
+  identitySecret?: string | null;
+  requireVerifiedIdentity?: boolean;
   capturePolicy: CapturePolicy | null;
 }
 
 const DEMO_PROJECT_KEY = 'demo';
 const DEFAULT_ALLOWED_ORIGIN = 'http://localhost:4000';
 const DEVELOPMENT_ADMIN_TOKEN = 'dev-admin-token';
+
+let hasWarnedMissingIdentitySecret = false;
 
 function getAllowedOrigins(): string[] {
   const rawValue = process.env.FEEDBACK_ALLOWED_ORIGINS;
@@ -38,15 +42,36 @@ function findAdminToken(): string | null {
   return null;
 }
 
+function isRequireVerifiedIdentityEnabled(): boolean {
+  const value = process.env.FEEDBACK_REQUIRE_VERIFIED_IDENTITY?.trim().toLowerCase();
+  return value === 'true' || value === '1';
+}
+
+// With the option on and no secret, no signature can verify, so every request fails closed. Say so once.
+function warnIfIdentitySecretMissing(requireVerifiedIdentity: boolean, identitySecret: string | null) {
+  if (!requireVerifiedIdentity || identitySecret || hasWarnedMissingIdentitySecret) {
+    return;
+  }
+  hasWarnedMissingIdentitySecret = true;
+  console.warn(
+    'FEEDBACK_REQUIRE_VERIFIED_IDENTITY is on but FEEDBACK_IDENTITY_SECRET is not set: all feedback and conversation requests will be refused.',
+  );
+}
+
 export function findProject(projectKey: string): Project | undefined {
   if (projectKey !== DEMO_PROJECT_KEY) {
     return undefined;
   }
+  const identitySecret = process.env.FEEDBACK_IDENTITY_SECRET || null;
+  const requireVerifiedIdentity = isRequireVerifiedIdentityEnabled();
+  warnIfIdentitySecretMissing(requireVerifiedIdentity, identitySecret);
   return {
     projectKey: DEMO_PROJECT_KEY,
     name: 'Demo project',
     allowedOrigins: getAllowedOrigins(),
     adminToken: findAdminToken(),
+    identitySecret,
+    requireVerifiedIdentity,
     capturePolicy: resolveCapturePolicyFromJson(process.env.FEEDBACK_CAPTURE_POLICY),
   };
 }

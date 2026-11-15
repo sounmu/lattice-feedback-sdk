@@ -1,0 +1,187 @@
+'use client';
+
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { z } from 'zod';
+import { CONVERSATION_SAVED_EVENT, getBrowserConversationSecrets } from '@/lib/browser-conversations';
+import { shouldLoadConversationsNow, shouldPollConversations, startConversationLoader } from '@/lib/conversation-polling';
+import { conversationMessagesSchema } from '@/lib/validation/conversation-schema';
+import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS, WidgetBody, WidgetFooter, WidgetHeader } from '@/components/widget/WidgetLayout';
+import type { FeedbackReporter } from '@/types/feedback';
+
+const threadSchema = z.object({
+  id: z.uuid(), status: z.string(), createdAt: z.string(),
+  messages: conversationMessagesSchema,
+});
+const threadsSchema = z.object({ threads: z.array(threadSchema) });
+type Thread = z.infer<typeof threadSchema>;
+const VERIFICATION_REQUIRED_MESSAGE = '로그인한 사용자만 대화를 볼 수 있어요. 로그인 후 다시 열어 주세요.';
+
+function subscribeToVisibility(onChange: () => void) {
+  document.addEventListener('visibilitychange', onChange);
+  return () => document.removeEventListener('visibilitychange', onChange);
+}
+const getIsVisible = () => document.visibilityState === 'visible';
+const getServerIsVisible = () => true;
+const ROLE_LABELS = { reporter: '나', admin: '담당자', sdk: 'SDK 관찰', ai: 'AI 생성' } as const;
+
+interface ConversationPanelProps {
+  config: { projectKey: string; hostOrigin: string };
+  reporter: FeedbackReporter | null;
+  isOpen: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}
+
+export function ConversationPanel({ config, reporter, isOpen, onClose, children }: ConversationPanelProps) {
+  const [showHistory, setShowHistory] = useState(false);
+  const [result, setResult] = useState<{ owner: string; threads: Thread[]; error: string; verificationRequired?: boolean } | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [sending, setSending] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const isVisible = useSyncExternalStore(subscribeToVisibility, getIsVisible, getServerIsVisible);
+  const polling = shouldPollConversations({ isOpen, showHistory, isVisible });
+  const previousLoaderRun = useRef<{ inputs: readonly unknown[]; polling: boolean } | null>(null);
+  const identityKey = JSON.stringify(reporter);
+  // A result is shown only to the reporter it was loaded for, so a user switch never displays the previous
+  // user's threads, even for a moment or through a response that was already in flight.
+  const owner = JSON.stringify(reporter?.id ?? null);
+  const current = result?.owner === owner ? result : null;
+  const threads = current?.threads ?? [];
+  const error = current?.error ?? '';
+  const verificationRequired = current?.verificationRequired === true;
+  const loading = current === null;
+  const selected = threads.find((thread) => thread.id === selectedId);
+  const draft = selectedId ? drafts[selectedId] ?? '' : '';
+
+  function getRequest() {
+    return {
+      ...config,
+      reporter: reporter ? { id: reporter.id, name: reporter.name, organization: reporter.organization, identity: reporter.identity } : null,
+      secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin, reporter?.id ?? null),
+    };
+  }
+
+  useEffect(() => {
+    const saved = () => setRefresh((value) => value + 1);
+    window.addEventListener(CONVERSATION_SAVED_EVENT, saved);
+    return () => window.removeEventListener(CONVERSATION_SAVED_EVENT, saved);
+  }, []);
+
+  useEffect(() => {
+    const inputs = [config, identityKey, owner, reporter, isOpen, refresh];
+    const loadNow = shouldLoadConversationsNow(previousLoaderRun.current, { inputs, polling });
+    previousLoaderRun.current = { inputs, polling };
+    if (!isOpen) return;
+    async function load(signal: AbortSignal) {
+      try {
+        const response = await fetch('/api/conversations', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...config,
+            reporter: reporter ? { id: reporter.id, name: reporter.name, organization: reporter.organization, identity: reporter.identity } : null,
+            secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin, reporter?.id ?? null),
+          }),
+          signal,
+        });
+        if (response.status === 401) {
+          if (!signal.aborted) setResult({ owner, threads: [], error: '', verificationRequired: true });
+          return;
+        }
+        if (!response.ok) throw new Error('대화를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+        const loaded = threadsSchema.parse(await response.json());
+        if (!signal.aborted) setResult({ owner, threads: loaded.threads, error: '' });
+      } catch (failure) {
+        if (!signal.aborted) {
+          const message = failure instanceof Error ? failure.message : '대화를 불러오지 못했어요.';
+          setResult((previous) => ({ owner, threads: previous?.owner === owner ? previous.threads : [], error: message }));
+        }
+      }
+    }
+    const stop = startConversationLoader({ load, loadNow, poll: polling });
+    // A request cut short (a Strict Mode replay, or leaving the tab mid-load) is loaded again by the next run.
+    return () => {
+      if (stop()) previousLoaderRun.current = null;
+    };
+  }, [config, identityKey, owner, reporter, isOpen, refresh, polling]);
+
+  async function send() {
+    if (!selected || !draft.trim() || sending) return;
+    const id = selected.id;
+    setSending(true);
+    try {
+      const response = await fetch('/api/conversations', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...getRequest(), feedbackId: id, message: draft.trim() }),
+      });
+      if (response.status === 401) throw new Error(VERIFICATION_REQUIRED_MESSAGE);
+      if (!response.ok) throw new Error('보내지 못했어요. 대화가 가득 찼거나 연결이 끊겼을 수 있어요.');
+      const sent = z.object({ thread: threadSchema }).parse(await response.json());
+      setResult((previous) => previous?.owner === owner
+        ? { owner, threads: previous.threads.map((item) => item.id === id ? sent.thread : item), error: '' }
+        : previous);
+      setDrafts((values) => ({ ...values, [id]: '' }));
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : '보내지 못했어요.';
+      setResult((previous) => previous?.owner === owner ? { ...previous, error: message } : previous);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <>
+      <nav aria-label="피드백 메뉴" className="flex shrink-0 gap-2 border-b border-fw-border p-2">
+        <button type="button" className={SECONDARY_BUTTON_CLASS} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}>새 피드백</button>
+        <button type="button" className={SECONDARY_BUTTON_CLASS} aria-pressed={showHistory} onClick={() => setShowHistory(true)}>내 대화 {threads.length}</button>
+      </nav>
+      {!showHistory ? children : (
+        <>
+          <WidgetHeader title="내 대화" subtitle="이 브라우저의 대화와 인증된 계정의 대화" onClose={onClose} />
+          <WidgetBody>
+            {error ? <p role="alert" className="text-fw-danger">{error}</p> : null}
+            {loading ? <p role="status">대화를 불러오는 중이에요…</p> : null}
+            {verificationRequired ? <p role="status">{VERIFICATION_REQUIRED_MESSAGE}</p> : null}
+            {!loading && !verificationRequired && threads.length === 0 ? <p>아직 대화가 없어요. 새 피드백을 보내 주세요.</p> : null}
+            {selected ? (
+              <>
+                <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={() => setSelectedId(null)}>대화 목록으로</button>
+                <ol aria-label="대화 내역" className="flex flex-col gap-4">
+                  {selected.messages.map((message) => (
+                    <li key={message.id} className="min-w-0 border-b border-fw-border pb-3">
+                      <p className="font-semibold">{ROLE_LABELS[message.authorRole]}</p>
+                      <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
+                      <time dateTime={message.createdAt} className="text-xs text-fw-sub">{new Date(message.createdAt).toLocaleString()}</time>
+                    </li>
+                  ))}
+                </ol>
+              </>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {threads.map((thread) => (
+                  <li key={thread.id}>
+                    <button type="button" className="min-h-11 w-full rounded-xl border border-fw-border p-3 text-left hover:bg-fw-surface focus-visible:outline-2 focus-visible:outline-fw-primary" onClick={() => setSelectedId(thread.id)}>
+                      <span className="line-clamp-2 [overflow-wrap:anywhere]">{thread.messages[0]?.body}</span>
+                      <span className="text-xs text-fw-sub">메시지 {thread.messages.length}개</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </WidgetBody>
+          {selected ? (
+            <WidgetFooter>
+              <label htmlFor="conversation-followup" className="font-semibold">추가 메시지</label>
+              <textarea id="conversation-followup" value={draft} maxLength={5000} rows={3} disabled={sending}
+                onChange={(event) => setDrafts((values) => ({ ...values, [selected.id]: event.target.value }))}
+                className="w-full resize-none rounded-xl border border-fw-border p-3 focus-visible:outline-2 focus-visible:outline-fw-primary" />
+              <button type="button" className={PRIMARY_BUTTON_CLASS} disabled={sending || !draft.trim() || selected.messages.length >= 100} onClick={() => void send()}>
+                {sending ? '보내는 중…' : '메시지 보내기'}
+              </button>
+            </WidgetFooter>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}

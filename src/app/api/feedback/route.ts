@@ -12,7 +12,8 @@ import { findProject, isOriginAllowed } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import { createFeedbackWithClaimedScreens } from '@/lib/feedback-submission';
-import type { CreateFeedbackResponse, Feedback, FeedbackListResponse } from '@/types/feedback';
+import { createConversationSecret, findVerifiedReporterIdentity, hashConversationSecret } from '@/lib/reporter-identity';
+import type { CreateFeedbackResponse, Feedback, FeedbackListResponse, FeedbackReporter } from '@/types/feedback';
 
 const MAX_BODY_BYTES = 65536;
 
@@ -67,7 +68,24 @@ export async function POST(request: Request) {
     return createApiErrorResponse(403, 'capture_not_allowed', 'Captured context is not allowed for this project.');
   }
 
+  const verifiedIdentity = findVerifiedReporterIdentity(project, parsed.data.reporter);
+  if (project.requireVerifiedIdentity && verifiedIdentity === null) {
+    return createApiErrorResponse(401, 'verification_required', 'A verified identity is required to send feedback.');
+  }
+
   const { screenSnapshotIds, ...feedbackInput } = parsed.data;
+  const conversationSecret = createConversationSecret();
+  const access = {
+    browserSecretHash: hashConversationSecret(conversationSecret),
+    verifiedReporterId: verifiedIdentity?.reporterId ?? null,
+  };
+  // An organization is stored only when the signature covers its id; an unsigned claim is dropped.
+  const verifiedOrganization = verifiedIdentity?.organizationId ? feedbackInput.reporter.organization : undefined;
+  // The identity proof is a bearer credential, never reporter metadata.
+  const reporter: FeedbackReporter = feedbackInput.reporter;
+  delete reporter.identity;
+  delete reporter.organization;
+  if (verifiedOrganization) reporter.verifiedOrganization = verifiedOrganization;
   try {
     // Screens are claimed for the new id before the feedback is stored, so two submissions can never
     // both report success for the same screen.
@@ -86,12 +104,14 @@ export async function POST(request: Request) {
         screenSnapshotRepository: getScreenSnapshotRepository(),
         input: feedbackInput,
         id: feedbackId,
+        access,
       });
     } else {
-      feedback = await feedbackRepository.create(feedbackInput, feedbackId);
+      feedback = await feedbackRepository.create(feedbackInput, feedbackId, access);
     }
-    const body: CreateFeedbackResponse = { feedback };
-    return NextResponse.json(body, { status: 201 });
+    // A project that requires verified identity never hands out a browser capability.
+    const body: CreateFeedbackResponse = project.requireVerifiedIdentity ? { feedback } : { feedback, conversationSecret };
+    return NextResponse.json(body, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof FeedbackStorageFullError) {
       return createApiErrorResponse(503, 'storage_full', 'Feedback storage is full.');

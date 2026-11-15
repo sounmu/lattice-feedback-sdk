@@ -1,0 +1,14 @@
+{
+  "customer": "Mina Rowan",
+  "order": "ORD-782961",
+  "amount": "$48,291.75",
+  "recipient": "Nora Vale",
+  "instructions": "Dock seventeen",
+  "warehouse": "Depot Kestrel",
+  "editable": "Invoice Atlas",
+  "attribute": "ACCOUNT-93017",
+  "password": "PASSWORD-DO-NOT-SAVE-6172",
+  "masked": "MASK-DO-NOT-SAVE-8372",
+  "blocked": "BLOCK-DO-NOT-SAVE-2846",
+  "safe": "Explicit public notice"
+}

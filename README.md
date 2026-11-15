@@ -45,6 +45,10 @@ FEEDBACK_ADMIN_TOKEN=local-demo-admin-token
 FEEDBACK_CAPTURE_POLICY=
 ```
 
+운영에서 로그인한 사용자만 허용하려면 `FEEDBACK_IDENTITY_SECRET`과 `FEEDBACK_REQUIRE_VERIFIED_IDENTITY=true`를
+함께 설정합니다(기본값은 꺼짐). 켜면 서명된 사용자만 피드백 전송·대화 조회·추가 메시지가 가능하고,
+시크릿이 없으면 모든 요청을 거부하며 경고를 기록합니다. 자세한 내용은 `CONVERSATIONS.md`를 참고하세요.
+
 `local-demo-admin-token`은 로컬 확인용 예시입니다. 운영에서는 별도의 긴 임의 값을 사용합니다.
 메모리 모드에서는 서버를 다시 시작하면 피드백이 사라집니다.
 

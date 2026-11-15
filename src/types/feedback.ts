@@ -1,18 +1,32 @@
 // Shared feedback domain types. Types only: no runtime code lives here.
-// Data minimization (AGENTS.md section 5): nothing in these shapes may carry
-// input values, query strings, hashes, cookies, tokens, or raw DOM/CSS.
+// Capture context excludes credentials. Reporter identity proofs and conversation
+// capabilities are transient authentication fields, never persisted as feedback metadata.
 
 import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
+import type { ConversationMessage, ReporterSignature } from '@/types/conversation';
 
 export type FeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'rejected' | 'duplicate';
 
 export type FeedbackType = 'bug' | 'improvement' | 'question' | 'other';
+
+/** The company or department a reporter belongs to. Only the id is covered by an identity signature. */
+export interface ReporterOrganization {
+  id: string;
+  /** Display text supplied alongside the id; never signed. */
+  name?: string;
+}
 
 /** Set by the host page through the SDK's setUser. */
 export interface FeedbackReporter {
   id: string;
   name: string;
   email?: string;
+  /** The host page's claim. Transient: stripped before persistence, and never shown as verified. */
+  organization?: ReporterOrganization;
+  /** Transient identity proof; stripped before persistence. */
+  identity?: ReporterSignature;
+  /** Set by the server only, when a valid v2 signature covers this organization's id. Absent otherwise. */
+  verifiedOrganization?: ReporterOrganization;
 }
 
 export interface PageContext {
@@ -97,6 +111,7 @@ export interface Feedback {
   page: PageContext;
   attachments: FeedbackAttachments;
   adminReply: string | null;
+  messages?: ConversationMessage[];
   /** ISO timestamp. */
   createdAt: string;
   /** ISO timestamp. */
@@ -114,6 +129,7 @@ export type UpdateFeedbackInput = Partial<Pick<Feedback, 'status' | 'adminReply'
 
 export interface CreateFeedbackResponse {
   feedback: Feedback;
+  conversationSecret?: string;
 }
 
 export interface FeedbackListResponse {

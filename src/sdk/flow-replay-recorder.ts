@@ -1,5 +1,5 @@
 // Records what happens on the page while Flow is on, so the admin can watch it back.
-// Inputs are always masked here: Flow keeps that an input happened, never its value (AGENTS.md section 3).
+// Input data is classified before recording; password and explicit mask exclusions always win.
 // Each event is cleaned before it is kept, and saved as it is recorded, so the replay continues in the next
 // document after a reload or full navigation instead of starting over.
 import { record } from '@rrweb/record';
@@ -14,15 +14,17 @@ import {
 } from '@/lib/feedback-limits';
 import { isGzipSupported } from '@/lib/gzip';
 import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_INCREMENTAL_EVENT_TYPE, RRWEB_META_EVENT_TYPE } from '@/lib/screen-snapshot';
-import { mergeReplayChunks, type ReplaySegment } from '@/sdk/flow-replay-segment';
+import { findGapBefore, mergeReplayChunks, type ReplaySegment } from '@/sdk/flow-replay-segment';
 import { openReplayStore, type ReplayChunk } from '@/sdk/flow-replay-session';
 import { getPageUrl } from '@/sdk/page-context';
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { isMutationEvent, sanitizeReplayEvents, trimReplayStart, type MutationData, type RecordedElements } from '@/sdk/replay-sanitize';
 import { findStyleSheetOwnerId, resolveStyleSheetChange } from '@/sdk/replay-assets';
-import { BLOCKED_SELECTOR, findLoadedFontFamilies, findUsedCssImageUrls, MASKED_SELECTOR } from '@/sdk/screen-capture';
+import { BLOCKED_SELECTOR, findLoadedFontFamilies, findUsedCssImageUrls, isMaskedInput, MASKED_SELECTOR } from '@/sdk/screen-capture';
 import type { SnapshotNode } from '@/sdk/snapshot-assets';
 import type { ScreenSnapshotEvent, ScreenSnapshotPage } from '@/types/screen-snapshot';
+import { createAutomaticMasker } from '@/sdk/static-text-index';
+import { SnapshotMasker } from '@/sdk/snapshot-masking';
 
 // Reading every element's computed style is costly, so page changes are sampled at most once per second.
 const CSS_USAGE_SAMPLE_INTERVAL_MS = 1000;
@@ -79,10 +81,11 @@ function resolveLinkedStyleSheetUrls(event: ScreenSnapshotEvent): ScreenSnapshot
 }
 
 export function startReplayRecording(sdkSelector: string, session: ReplaySession): ReplayRecorder {
+  const masking = new SnapshotMasker(createAutomaticMasker());
   const store = openReplayStore(session.projectKey, session.sessionId);
   const page: ScreenSnapshotPage = {
     url: getPageUrl(window.location.href),
-    title: truncateText(document.title, MAX_PAGE_TITLE_LENGTH),
+    title: truncateText(masking.masker.text(document.title), MAX_PAGE_TITLE_LENGTH),
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
     scrollX: window.scrollX,
@@ -103,6 +106,8 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
   // Events and bytes of the whole Flow so far, earlier documents included.
   let totalCount = 0;
   let totalBytes = 0;
+  // Events the earlier documents saved, which the next document is told about with this one's own.
+  let recordedBefore = 0;
   let truncated = !session.recordPage;
   let isRemoved = false;
   // Events wait here until the saved part is read, because the limits count it too. Null from then on.
@@ -190,22 +195,26 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
       return;
     }
     const isChange = event.type === RRWEB_INCREMENTAL_EVENT_TYPE;
-    const text = JSON.stringify(event);
-    const bytes = encoder.encode(text).length;
-    // Only the very first snapshot is kept whatever its size; everything after it has to fit an upload,
-    // so a long recording is saved cut short instead of being rejected whole.
-    const isOverBytes = (isChange || earlier.length > 0) && totalBytes + bytes > maxReplayBytes;
-    if (totalCount >= MAX_REPLAY_EVENTS || event.timestamp - startedAtMs > MAX_REPLAY_DURATION_MS || isOverBytes) {
+    if (totalCount >= MAX_REPLAY_EVENTS || event.timestamp - startedAtMs > MAX_REPLAY_DURATION_MS) {
       finish();
       return;
     }
     // rrweb keeps the nodes it emitted as its own record of the page, so a copy is what gets cleaned and kept.
-    const recorded = JSON.parse(text) as ScreenSnapshotEvent;
+    const recorded = JSON.parse(JSON.stringify(event)) as ScreenSnapshotEvent;
     if (recorded.type === RRWEB_META_EVENT_TYPE) {
       // The Meta event carries window.location.href; the kept one gets the URL without query and fragment.
       recorded.data = { ...(recorded.data as Record<string, unknown>), href: page.url };
     }
-    sanitizeReplayEvents([recorded], elements);
+    sanitizeReplayEvents([recorded], elements, masking);
+    // What is kept and uploaded is the cleaned copy: each masked character is three bytes and the masking
+    // report adds more, so the original size says little about it.
+    const bytes = encoder.encode(JSON.stringify(recorded)).length;
+    // Only the very first snapshot is kept whatever its size; everything after it has to fit an upload,
+    // so a long recording is saved cut short instead of being rejected whole.
+    if ((isChange || earlier.length > 0) && totalBytes + bytes > maxReplayBytes) {
+      finish();
+      return;
+    }
     events.push(recorded);
     unsaved.events.push(recorded);
     unsaved.bytes += bytes;
@@ -250,9 +259,8 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
     const progress = store.findProgress();
     earlier = saved.segments;
     segment = saved.lastSegment + 1;
-    // The document before this one notes how many events it recorded as it is left. Fewer saved than that,
-    // or no note from it, means events were lost on the way here.
-    gapBefore = saved.hasGapAfter || progress?.segment !== saved.lastSegment || progress.eventCount > saved.lastEventCount;
+    gapBefore = findGapBefore(saved, progress);
+    recordedBefore = saved.recordedCount;
     totalCount = saved.eventCount + (gapBefore ? 1 : 0);
     totalBytes = saved.bytes;
     startedAtMs = earlier[0]?.events[0].timestamp ?? startedAtMs;
@@ -271,7 +279,9 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
       sampleAssetUsage(Date.now());
     }
     save();
-    store.saveProgress({ segment, eventCount: events.length });
+    store.saveProgress({ segment, eventCount: events.length, totalEventCount: recordedBefore + events.length });
+    // IndexedDB may not finish writing before this document goes; the next one merges the stash in.
+    store.stashPending();
   }
 
   // A restored document starts a fresh snapshot after the pages recorded while it was suspended.
@@ -303,6 +313,9 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
       blockSelector: excludedSelector,
       maskTextSelector: MASKED_SELECTOR,
       maskAllInputs: true,
+      maskInputFn: (text, element) => masking.masker.options.enabled === false
+        ? '*'.repeat(text.length)
+        : masking.masker.text(text, { forced: isMaskedInput(element), safe: element.closest('[data-lattice-keep]') !== null }),
       slimDOMOptions: { script: true },
       inlineStylesheet: true,
       inlineImages: false,
