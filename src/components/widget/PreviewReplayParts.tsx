@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { Card } from '@astryxdesign/core/Card';
 import { HStack } from '@astryxdesign/core/HStack';
 import { Icon } from '@astryxdesign/core/Icon';
@@ -186,9 +187,13 @@ function PreviewEditMoveOverlay(props: EditMoveOverlayProps) {
   return <EditMoveOverlay {...props} skin={MOVE_SKIN} />;
 }
 
-// Escape closes an open comment first; the press only reaches the preview's own Escape when none is open.
-function PreviewCommentPinOverlay({ boxes, selectedNumber, onSelect, ...overlay }: CommentPinOverlayProps) {
-  const namedBoxes = boxes.map((box) => ({ ...box, pin: { ...box.pin, label: describeMarkedElement(box.pin.label) } }));
+interface OpenCommentScopeProps extends Pick<CommentPinOverlayProps, 'selectedNumber' | 'onSelect'> {
+  children: ReactNode;
+}
+
+// Escape pressed on a pin or on a comment's row closes the open comment first. The press only reaches the
+// preview's own Escape when no comment is open.
+function OpenCommentScope({ selectedNumber, onSelect, children }: OpenCommentScopeProps) {
   return (
     <div
       className="contents"
@@ -199,8 +204,17 @@ function PreviewCommentPinOverlay({ boxes, selectedNumber, onSelect, ...overlay 
         }
       }}
     >
-      <CommentPinOverlay {...overlay} boxes={namedBoxes} selectedNumber={selectedNumber} onSelect={onSelect} skin={PIN_SKIN} />
+      {children}
     </div>
+  );
+}
+
+function PreviewCommentPinOverlay({ boxes, selectedNumber, onSelect, ...overlay }: CommentPinOverlayProps) {
+  const namedBoxes = boxes.map((box) => ({ ...box, pin: { ...box.pin, label: describeMarkedElement(box.pin.label) } }));
+  return (
+    <OpenCommentScope selectedNumber={selectedNumber} onSelect={onSelect}>
+      <CommentPinOverlay {...overlay} boxes={namedBoxes} selectedNumber={selectedNumber} onSelect={onSelect} skin={PIN_SKIN} />
+    </OpenCommentScope>
   );
 }
 
@@ -238,26 +252,28 @@ function PreviewEditMoveList({ moves, showsProposed, onToggle }: EditMoveListPro
 function PreviewCommentPinList({ pins, selectedNumber, onSelect }: CommentPinListProps) {
   const title = `코멘트 ${pins.length}개`;
   return (
-    <section aria-label={title}>
-      <VStack gap={1.5}>
-        <Text as="p" type="label">
-          {title}
-        </Text>
-        <List>
-          {pins.map((pin) => (
-            <ListItem
-              key={pin.number}
-              align="start"
-              startContent={<span className="widget-mark-number">{pin.number}</span>}
-              label={<span className="whitespace-pre-wrap">{pin.comment}</span>}
-              description={describeMarkedElement(pin.label)}
-              isSelected={pin.number === selectedNumber}
-              onClick={() => onSelect(pin.number === selectedNumber ? null : pin.number)}
-            />
-          ))}
-        </List>
-      </VStack>
-    </section>
+    <OpenCommentScope selectedNumber={selectedNumber} onSelect={onSelect}>
+      <section aria-label={title}>
+        <VStack gap={1.5}>
+          <Text as="p" type="label">
+            {title}
+          </Text>
+          <List>
+            {pins.map((pin) => (
+              <ListItem
+                key={pin.number}
+                align="start"
+                startContent={<span className="widget-mark-number">{pin.number}</span>}
+                label={<span className="whitespace-pre-wrap">{pin.comment}</span>}
+                description={describeMarkedElement(pin.label)}
+                isSelected={pin.number === selectedNumber}
+                onClick={() => onSelect(pin.number === selectedNumber ? null : pin.number)}
+              />
+            ))}
+          </List>
+        </VStack>
+      </section>
+    </OpenCommentScope>
   );
 }
 
