@@ -78,8 +78,12 @@
   word-break: keep-all;
 }
 
+/* A tooltip stays clear of the focus ring of the control it names. The theme's 4px offset put it on the
+   ring's outer edge, which reaches 5px out. The browser moves this margin to the other side when the
+   tooltip flips below its control. */
 [data-astryx-theme='neutral'] .astryx-tooltip {
   overflow-wrap: anywhere;
+  margin-block-end: calc(var(--focus-outline-offset) + var(--focus-outline-width) + var(--spacing-0-5));
 }
 
 /* Typed text wraps plainly, so earlier lines do not move while the user is writing. */
@@ -127,6 +131,15 @@
    sides off a row's focus ring, so the ring is drawn just inside the row. */
 .widget-root .astryx-list-item {
   outline-offset: calc(var(--focus-outline-width) * -1);
+}
+
+/* A message's time is a tab stop: focusing it opens a card with the full date. It shows the widget's focus
+   ring in place of the browser's, drawn close to the small text so it stays clear of that card, which
+   opens 4px above the time. */
+.widget-root .astryx-timestamp time:focus-visible {
+  border-radius: var(--radius-inner);
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: var(--border-width);
 }
 
 /* The reporter's own messages are accent bubbles. The theme paints both sides neutral. */
