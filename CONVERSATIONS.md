@@ -1,6 +1,6 @@
 # Conversation sessions
 
-Apply `supabase/migrations/20261114000600-conversation-sessions.sql` before deploying.
+Apply `supabase/migrations/20261115000000-conversation-sessions.sql` before deploying.
 Memory storage supports the same behavior but disappears when the server restarts.
 
 ## Customer identity
