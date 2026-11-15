@@ -91,20 +91,48 @@ export async function GET(request: Request, context: RouteContext) {
   if (!authorizeAdmin(request, project)) {
     return createApiErrorResponse(401, 'unauthorized', 'Admin authorization is required.');
   }
+  if (!SNAPSHOT_ASSET_HASH_PATTERN.test(hash)) {
+    return createApiErrorResponse(404, 'screen_snapshot_asset_not_found', 'Saved screen file not found.');
+  }
   try {
-    const asset = SNAPSHOT_ASSET_HASH_PATTERN.test(hash)
-      ? await getScreenSnapshotRepository().findAsset(project.projectKey, hash)
-      : null;
+    const repository = getScreenSnapshotRepository();
+    const etag = `"${hash}"`;
+    const headers = {
+      // Hash-addressed bytes never change. Private caches must also distinguish admin credentials.
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      // Next.js may gzip the HTTP representation; the hash identifies its decoded content.
+      ETag: `W/${etag}`,
+      Vary: 'Authorization, Accept-Encoding',
+      'Content-Security-Policy': "sandbox; default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+    };
+    const validator = request.headers.get('if-none-match');
+    const matches = validator?.trim() === '*' ||
+      validator?.split(',').some((tag) => tag.trim() === etag || tag.trim() === `W/${etag}`);
+    if (matches) {
+      // Check this project's existence without loading the bytea payload, after authorization.
+      const missing = await repository.findMissingAssetHashes(project.projectKey, [hash]);
+      if (missing.length > 0) {
+        return createApiErrorResponse(404, 'screen_snapshot_asset_not_found', 'Saved screen file not found.');
+      }
+      return new Response(null, { status: 304, headers });
+    }
+    const asset = await repository.findAsset(project.projectKey, hash);
     if (!asset) {
       return createApiErrorResponse(404, 'screen_snapshot_asset_not_found', 'Saved screen file not found.');
     }
-    return new Response(asset.data.slice(), {
+    // The store's immutable bytes can be streamed without slice() and Response's second buffer copy.
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(asset.data);
+        controller.close();
+      },
+    });
+    return new Response(body, {
       headers: {
+        ...headers,
         'Content-Type': asset.contentType,
-        // Customer data behind the admin token: never kept by the browser, so every read is authorized again.
-        'Cache-Control': 'no-store',
-        'Content-Security-Policy': "sandbox; default-src 'none'",
-        'X-Content-Type-Options': 'nosniff',
+        'Content-Length': String(asset.data.byteLength),
       },
     });
   } catch (error) {
