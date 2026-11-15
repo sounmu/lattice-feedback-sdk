@@ -9,13 +9,24 @@ export type FeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'rejected' | 
 
 export type FeedbackType = 'bug' | 'improvement' | 'question' | 'other';
 
+/** The company or department a reporter belongs to. Only the id is covered by an identity signature. */
+export interface ReporterOrganization {
+  id: string;
+  /** Display text supplied alongside the id; never signed. */
+  name?: string;
+}
+
 /** Set by the host page through the SDK's setUser. */
 export interface FeedbackReporter {
   id: string;
   name: string;
   email?: string;
+  /** The host page's claim. Transient: stripped before persistence, and never shown as verified. */
+  organization?: ReporterOrganization;
   /** Transient identity proof; stripped before persistence. */
   identity?: ReporterSignature;
+  /** Set by the server only, when a valid v2 signature covers this organization's id. Absent otherwise. */
+  verifiedOrganization?: ReporterOrganization;
 }
 
 export interface PageContext {

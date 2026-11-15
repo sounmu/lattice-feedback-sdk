@@ -112,6 +112,17 @@ describe('Supabase REST repository contract', () => {
     expect(result).not.toHaveProperty('browserSecretHash');
   });
 
+  it('persists only the verified organization inside the reporter column and parses it back', async () => {
+    const verifiedOrganization = { id: 'acme', name: 'Acme Corp' };
+    responseBodies = [JSON.stringify([{ ...storedRow, reporter: { ...input.reporter, verifiedOrganization } }])];
+    const result = await createSupabaseFeedbackRepository().create({
+      ...input, reporter: { ...input.reporter, organization: { id: 'claimed' }, verifiedOrganization },
+    });
+    const sentReporter = JSON.parse(received[0].body).reporter;
+    expect(sentReporter).toEqual({ id: input.reporter.id, name: input.reporter.name, verifiedOrganization });
+    expect(result.reporter.verifiedOrganization).toEqual(verifiedOrganization);
+  });
+
   it('fails closed when the conversation RPC returns invalid storage data', async () => {
     responseBodies = [JSON.stringify([{ ...storedRow, messages: [{ authorRole: 'owner', body: 'bad' }] }])];
     await expect(createSupabaseFeedbackRepository().findMany('demo', { browserSecretHashes: [], verifiedReporterId: 'alice' }))

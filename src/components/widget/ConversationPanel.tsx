@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { z } from 'zod';
 import { CONVERSATION_SAVED_EVENT, getBrowserConversationSecrets } from '@/lib/browser-conversations';
+import { shouldLoadConversationsNow, shouldPollConversations, startConversationLoader } from '@/lib/conversation-polling';
 import { conversationMessagesSchema } from '@/lib/validation/conversation-schema';
 import { PRIMARY_BUTTON_CLASS, SECONDARY_BUTTON_CLASS, WidgetBody, WidgetFooter, WidgetHeader } from '@/components/widget/WidgetLayout';
 import type { FeedbackReporter } from '@/types/feedback';
@@ -14,6 +15,13 @@ const threadSchema = z.object({
 const threadsSchema = z.object({ threads: z.array(threadSchema) });
 type Thread = z.infer<typeof threadSchema>;
 const VERIFICATION_REQUIRED_MESSAGE = '로그인한 사용자만 대화를 볼 수 있어요. 로그인 후 다시 열어 주세요.';
+
+function subscribeToVisibility(onChange: () => void) {
+  document.addEventListener('visibilitychange', onChange);
+  return () => document.removeEventListener('visibilitychange', onChange);
+}
+const getIsVisible = () => document.visibilityState === 'visible';
+const getServerIsVisible = () => true;
 const ROLE_LABELS = { reporter: '나', admin: '담당자', sdk: 'SDK 관찰', ai: 'AI 생성' } as const;
 
 interface ConversationPanelProps {
@@ -31,6 +39,9 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const isVisible = useSyncExternalStore(subscribeToVisibility, getIsVisible, getServerIsVisible);
+  const polling = shouldPollConversations({ isOpen, showHistory, isVisible });
+  const previousLoaderRun = useRef<{ inputs: readonly unknown[]; polling: boolean } | null>(null);
   const identityKey = JSON.stringify(reporter);
   // A result is shown only to the reporter it was loaded for, so a user switch never displays the previous
   // user's threads, even for a moment or through a response that was already in flight.
@@ -46,7 +57,7 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
   function getRequest() {
     return {
       ...config,
-      reporter: reporter ? { id: reporter.id, name: reporter.name, identity: reporter.identity } : null,
+      reporter: reporter ? { id: reporter.id, name: reporter.name, organization: reporter.organization, identity: reporter.identity } : null,
       secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin, reporter?.id ?? null),
     };
   }
@@ -58,41 +69,41 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
   }, []);
 
   useEffect(() => {
+    const inputs = [config, identityKey, owner, reporter, isOpen, refresh];
+    const loadNow = shouldLoadConversationsNow(previousLoaderRun.current, { inputs, polling });
+    previousLoaderRun.current = { inputs, polling };
     if (!isOpen) return;
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    async function load() {
+    async function load(signal: AbortSignal) {
       try {
         const response = await fetch('/api/conversations', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...config,
-            reporter: reporter ? { id: reporter.id, name: reporter.name, identity: reporter.identity } : null,
+            reporter: reporter ? { id: reporter.id, name: reporter.name, organization: reporter.organization, identity: reporter.identity } : null,
             secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin, reporter?.id ?? null),
           }),
-          signal: controller.signal,
+          signal,
         });
         if (response.status === 401) {
-          if (!controller.signal.aborted) setResult({ owner, threads: [], error: '', verificationRequired: true });
+          if (!signal.aborted) setResult({ owner, threads: [], error: '', verificationRequired: true });
           return;
         }
         if (!response.ok) throw new Error('대화를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
         const loaded = threadsSchema.parse(await response.json());
-        if (!controller.signal.aborted) setResult({ owner, threads: loaded.threads, error: '' });
+        if (!signal.aborted) setResult({ owner, threads: loaded.threads, error: '' });
       } catch (failure) {
-        if (!controller.signal.aborted) {
+        if (!signal.aborted) {
           const message = failure instanceof Error ? failure.message : '대화를 불러오지 못했어요.';
           setResult((previous) => ({ owner, threads: previous?.owner === owner ? previous.threads : [], error: message }));
         }
-      } finally {
-        if (!controller.signal.aborted) {
-          timer = setTimeout(load, 10_000);
-        }
       }
     }
-    void load();
-    return () => { controller.abort(); clearTimeout(timer); };
-  }, [config, identityKey, owner, reporter, isOpen, refresh]);
+    const stop = startConversationLoader({ load, loadNow, poll: polling });
+    // A request cut short (a Strict Mode replay, or leaving the tab mid-load) is loaded again by the next run.
+    return () => {
+      if (stop()) previousLoaderRun.current = null;
+    };
+  }, [config, identityKey, owner, reporter, isOpen, refresh, polling]);
 
   async function send() {
     if (!selected || !draft.trim() || sending) return;

@@ -45,6 +45,7 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
         reporter: {
           id: input.reporter.id, name: input.reporter.name,
           ...(input.reporter.email === undefined ? {} : { email: input.reporter.email }),
+          ...(input.reporter.verifiedOrganization === undefined ? {} : { verifiedOrganization: input.reporter.verifiedOrganization }),
         },
         page: input.page,
         attachments: {

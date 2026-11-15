@@ -11,31 +11,66 @@ backend. It is independent of `FEEDBACK_ADMIN_TOKEN`; never put either secret in
 browser code. Future projects must each have their own identity secret in the
 project registry.
 
-After authenticating the customer in your backend, sign the authenticated user id:
+After authenticating the customer in your backend, sign the authenticated user id
+and, when the user belongs to a company or department, its organization id:
 
 ```ts
 import { createHmac } from 'node:crypto';
 
 const projectKey = 'demo';
 const id = authenticatedUser.id; // From your server session, not a request parameter.
+const organization = authenticatedUser.organization; // { id, name } from your server session, or null.
 const expiresAt = Math.floor(Date.now() / 1000) + 3600;
 const signature = createHmac('sha256', process.env.FEEDBACK_IDENTITY_SECRET!)
-  .update(JSON.stringify(['lattice-identity-v1', projectKey, id, expiresAt]))
+  .update(JSON.stringify(['lattice-identity-v2', projectKey, id, organization?.id ?? null, expiresAt]))
   .digest('hex');
 
 // Return this object only to this authenticated customer's browser.
 const user = {
   id,
   name: authenticatedUser.name,
+  ...(organization ? { organization: { id: organization.id, name: organization.name } } : {}),
   identity: { expiresAt, signature },
 };
 ```
 
 In that browser call `window.LatticeFeedback.setUser(user)`. The name is display
-metadata; the signature binds the version, project, id and expiry. Proofs expire
-within 24 hours (one hour recommended); refresh them through the customer backend.
-They are bearer credentials, so use HTTPS. The app compares signatures in constant
-time and strips the proof before storing or returning feedback.
+metadata; the signature binds the version, project, id, organization id (or
+`null`) and expiry. Proofs expire within 24 hours (one hour recommended); refresh
+them through the customer backend. They are bearer credentials, so use HTTPS. The
+app compares signatures in constant time and strips the proof before storing or
+returning feedback.
+
+### Verified organization
+
+The administrator sees which company or department a reporter belongs to without
+trusting the browser:
+
+- `reporter.organization` is only a claim from the host page. It is never stored.
+- When a valid v2 signature covers that organization id, the server stores it as
+  `reporter.verifiedOrganization` (in the existing `reporter` JSON column, so no
+  migration is needed). The admin detail ("소속 · 서명 확인됨"), the list, and the
+  ticket draft show it.
+- Only the organization **id** is signed. The `name` is display text next to a
+  signed id, like the reporter name; the id is what identifies the organization.
+  The admin screens and ticket drafts therefore always show the signed id and label the name as unverified.
+- A claimed organization that the signature does not cover is dropped, not stored
+  as "unverified": the admin never has an organization value to mistake for a
+  verified one, and attacker-chosen text never reaches the admin screen. The detail
+  shows "확인되지 않음" in that case.
+- If a client changes the organization id after the customer signed (a different id
+  than the signed one), no signature matches and the whole proof is treated as
+  unverified, including the reporter id. If the customer signed `null` and the
+  client adds an organization, the reporter stays verified and the organization is
+  dropped.
+
+### Signature versions
+
+`lattice-identity-v1` (`['lattice-identity-v1', projectKey, id, expiresAt]`) is still
+accepted so existing integrations keep working. A v1 proof verifies the reporter id
+and nothing else, so an organization sent with it is never verified. Move to
+`lattice-identity-v2` to get a verified organization; send `null` for users without
+one. The version is part of the signed text, so a v1 proof can never pass as v2.
 
 Only threads created with a verified identity are associated with that account.
 A new browser with the same valid proof can see and continue those threads.
