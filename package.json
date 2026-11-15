@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build:sdk": "esbuild src/sdk/index.ts --bundle --minify --format=iife --target=es2019 --outfile=public/sdk.js",
+    "build:sdk": "node scripts/build-sdk.mjs",
     "dev": "npm run build:sdk && next dev",
     "build": "npm run build:sdk && next build",
     "start": "next start",
