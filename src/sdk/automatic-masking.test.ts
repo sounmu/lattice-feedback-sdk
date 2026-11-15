@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AutomaticMasker, classifyText, extractScriptLiterals, maskText, normalizeStaticText, shouldIndexScriptLiteral,
+  AutomaticMasker, classifyText, createScriptLiteralReader, maskText, normalizeStaticText, shouldIndexScriptLiteral,
 } from '@/sdk/automatic-masking';
 import { SnapshotMasker } from '@/sdk/snapshot-masking';
 import type { SnapshotNode } from '@/sdk/snapshot-assets';
+
+// Reads a few characters at a time, so every expectation below also holds across the places where reading pauses.
+function extractScriptLiterals(source: string, stretch = 7): string[] {
+  const read = createScriptLiteralReader(source);
+  const literals: string[] = [];
+  for (let found = read(stretch); found !== null; found = read(stretch)) literals.push(...found);
+  return literals;
+}
 
 describe('automatic text masking', () => {
   it('keeps normalized proven static text and masks unknown values including punctuation and digits', () => {
@@ -115,5 +123,19 @@ describe('reading a script for its literals', () => {
     const lines = ["// don't say \"hi\"", "url = /^https?:\\/\\//; save = \"Save\"; note = 'it\\'s'; text = `two", 'lines`; last = "x\\'];
 
     expect(extractScriptLiterals(lines.join('\n'))).toEqual(['hi', 'Save', "it's", 'two\nlines']);
+  });
+
+  it.each([1, 2, 3, 16, 1_000_000])('finds the same literals in the same order when it pauses every %i characters', (stretch) => {
+    const source = `// don't\na = 'Order ' + 'total' + suffix + "Saved " +\n "now"; b = \`\${y}\` + 'x'; c = "caf\\u00e9" + 'z`;
+
+    expect(extractScriptLiterals(source, stretch)).toEqual(['Order ', 'total', 'Order total', 'Saved ', 'now', 'Saved now', 'x', 'café']);
+  });
+
+  it('returns null once the source is read, and an empty stretch where there is no literal', () => {
+    const read = createScriptLiteralReader('const a = 1; const b = "B";');
+
+    expect(read(5)).toEqual([]);
+    expect(read(1_000)).toEqual(['B']);
+    expect(read(1_000)).toBeNull();
   });
 });

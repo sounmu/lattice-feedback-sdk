@@ -1,12 +1,13 @@
 import {
   AutomaticMasker,
-  extractScriptLiterals,
+  createScriptLiteralReader,
   normalizeStaticText,
   shouldIndexScriptLiteral,
   type AutomaticMaskingOptions,
 } from '@/sdk/automatic-masking';
 import { readTextWithinBudget } from '@/sdk/bounded-source';
 import { createListenerSet } from '@/sdk/listener-set';
+import { createWorkPacer } from '@/sdk/work-pacer';
 
 // Sized for real application bundles: one unsplit bundle of several megabytes is common, and a page whose
 // bundle does not fit has every label masked.
@@ -16,6 +17,10 @@ const MAX_LITERALS = 100_000;
 const MAX_LITERAL_LENGTH = 4096;
 const INDEX_TIMEOUT_MS = 8000;
 const WARM_DELAY_MS = 200;
+// How much is read between two looks at the clock: a bundle of several megabytes, or the nodes of a long page,
+// would otherwise be one task that stalls the page.
+const SCRIPT_STRETCH_CHARACTERS = 32 * 1024;
+const NODES_PER_STRETCH = 256;
 // Class names and inline styles are layout vocabulary, not text; masking them would break the replayed layout.
 const UNINDEXED_ATTRIBUTES = new Set(['class', 'style']);
 const known = new Set<string>();
@@ -124,15 +129,20 @@ async function buildIndex(): Promise<void> {
     }
     return source.text;
   };
-  const addScript = (source: string, decoder: HTMLTextAreaElement): void => {
-    for (const literal of extractScriptLiterals(source)) {
-      if (!shouldIndexScriptLiteral(literal)) continue;
-      add(literal);
-      // Strings rendered as HTML can spell entities rather than the displayed characters.
-      if (literal.includes('&')) {
-        decoder.innerHTML = literal;
-        add(decoder.value);
+  const pace = createWorkPacer();
+  const addScript = async (source: string, decoder: HTMLTextAreaElement): Promise<void> => {
+    const read = createScriptLiteralReader(source);
+    for (let literals = read(SCRIPT_STRETCH_CHARACTERS); literals !== null; literals = read(SCRIPT_STRETCH_CHARACTERS)) {
+      for (const literal of literals) {
+        if (!shouldIndexScriptLiteral(literal)) continue;
+        add(literal);
+        // Strings rendered as HTML can spell entities rather than the displayed characters.
+        if (literal.includes('&')) {
+          decoder.innerHTML = literal;
+          add(decoder.value);
+        }
       }
+      await pace();
     }
   };
   let documentRead = false;
@@ -141,26 +151,30 @@ async function buildIndex(): Promise<void> {
     documentRead = true;
     const parsed = new DOMParser().parseFromString(html, 'text/html');
     const walker = parsed.createTreeWalker(parsed, NodeFilter.SHOW_TEXT);
-    while (walker.nextNode()) {
+    for (let count = 1; walker.nextNode(); count += 1) {
       const parent = walker.currentNode.parentElement;
       if (parent && !parent.closest('script, style, [data-lattice-mask], [data-lattice-block]')) {
         add(walker.currentNode.textContent ?? '');
       }
+      if (count % NODES_PER_STRETCH === 0) await pace();
     }
-    for (const element of parsed.querySelectorAll('*')) {
-      for (const attribute of element.attributes) {
+    // The parsed copy belongs to this run alone, so the page changing while it is read makes no difference.
+    const elements = parsed.querySelectorAll('*');
+    for (let index = 0; index < elements.length; index += 1) {
+      for (const attribute of elements[index].attributes) {
         if (!UNINDEXED_ATTRIBUTES.has(attribute.name)) add(attribute.value);
       }
+      if ((index + 1) % NODES_PER_STRETCH === 0) await pace();
     }
     const decoder = parsed.createElement('textarea');
     for (const script of parsed.scripts) {
-      if (!script.getAttribute('src')) addScript(script.textContent ?? '', decoder);
+      if (!script.getAttribute('src')) await addScript(script.textContent ?? '', decoder);
     }
     const { urls, crossOrigin } = findScriptUrls(parsed);
     if (crossOrigin || urls.length > MAX_SCRIPTS) omitted = true;
     for (const url of urls.slice(0, MAX_SCRIPTS)) {
       try {
-        addScript(await readSource(url), decoder);
+        await addScript(await readSource(url), decoder);
       } catch {
         omitted = true;
       }

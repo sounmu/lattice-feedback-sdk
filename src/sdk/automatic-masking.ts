@@ -104,53 +104,67 @@ function findStringEnd(source: string, start: number): { isClosed: boolean; end:
  * after it, so an apostrophe in a comment does not hide the literals that follow. Every later quote of the same
  * kind before the point where the search gave up is an escaped quote of that failed string and cannot close
  * either, so it is skipped without searching again: each character is read a bounded number of times.
+ *
+ * The script is read a stretch at a time, so the caller can let the page run in between: reading a bundle of
+ * several megabytes in one go stalls the page. Each call reads on for about maxCharacters and returns the
+ * literals it found, in order, and null once the whole source has been read.
  */
-export function extractScriptLiterals(source: string): string[] {
-  const literals: string[] = [];
+export function createScriptLiteralReader(source: string): (maxCharacters: number) => string[] | null {
   const unclosedUntil: Record<QuoteCharacter, number> = { '"': 0, "'": 0, '`': 0 };
+  let literals: string[] = [];
   let previousEnd = -1;
   let run = '';
   let runPieces = 0;
+  let position = 0;
+  let isRead = false;
   const endRun = (): void => {
     if (runPieces > 1) literals.push(run);
     runPieces = 0;
   };
-  let position = 0;
-  while (position < source.length) {
-    const quote = source[position];
-    if (!isQuoteCharacter(quote) || position < unclosedUntil[quote]) {
-      position += 1;
-      continue;
+  return (maxCharacters) => {
+    if (isRead) return null;
+    const stretchEnd = position + maxCharacters;
+    while (position < source.length && position < stretchEnd) {
+      const quote = source[position];
+      if (!isQuoteCharacter(quote) || position < unclosedUntil[quote]) {
+        position += 1;
+        continue;
+      }
+      const start = position;
+      const { isClosed, end } = findStringEnd(source, start);
+      if (!isClosed) {
+        unclosedUntil[quote] = end;
+        position += 1;
+        continue;
+      }
+      const body = source.slice(start + 1, end);
+      position = end + 1;
+      if (quote === '`' && body.includes('${')) {
+        endRun();
+        previousEnd = -1;
+        continue;
+      }
+      const value = body.replace(/\\(?:u([0-9a-f]{4})|x([0-9a-f]{2})|([\\'"`nrt]))/gi, (_match, unicode, hex, escaped) => {
+        if (unicode || hex) return String.fromCharCode(parseInt(unicode ?? hex, 16));
+        return ({ n: '\n', r: '\r', t: '\t' }[String(escaped)] ?? String(escaped));
+      });
+      if (previousEnd >= 0 && /^\s*\+\s*$/.test(source.slice(previousEnd, start))) {
+        run += value;
+        runPieces += 1;
+      } else {
+        endRun();
+        run = value;
+        runPieces = 1;
+      }
+      literals.push(value);
+      previousEnd = position;
     }
-    const start = position;
-    const { isClosed, end } = findStringEnd(source, start);
-    if (!isClosed) {
-      unclosedUntil[quote] = end;
-      position += 1;
-      continue;
-    }
-    const body = source.slice(start + 1, end);
-    position = end + 1;
-    if (quote === '`' && body.includes('${')) {
+    if (position >= source.length) {
       endRun();
-      previousEnd = -1;
-      continue;
+      isRead = true;
     }
-    const value = body.replace(/\\(?:u([0-9a-f]{4})|x([0-9a-f]{2})|([\\'"`nrt]))/gi, (_match, unicode, hex, escaped) => {
-      if (unicode || hex) return String.fromCharCode(parseInt(unicode ?? hex, 16));
-      return ({ n: '\n', r: '\r', t: '\t' }[String(escaped)] ?? String(escaped));
-    });
-    if (previousEnd >= 0 && /^\s*\+\s*$/.test(source.slice(previousEnd, start))) {
-      run += value;
-      runPieces += 1;
-    } else {
-      endRun();
-      run = value;
-      runPieces = 1;
-    }
-    literals.push(value);
-    previousEnd = position;
-  }
-  endRun();
-  return literals;
+    const found = literals;
+    literals = [];
+    return found;
+  };
 }
