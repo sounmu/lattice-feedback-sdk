@@ -22,9 +22,11 @@
   font-family: var(--font-family-body);
   font-size: var(--text-body-size);
   line-height: var(--text-body-leading);
-  /* Korean words stay whole; only a token longer than the line breaks. */
+  /* Korean words stay whole; only a token longer than the line breaks. The last line is not left with
+     one short word where the browser can avoid it. */
   word-break: keep-all;
   overflow-wrap: anywhere;
+  text-wrap: pretty;
   caret-color: var(--color-accent);
   scrollbar-color: var(--color-border-emphasized) transparent;
   scrollbar-width: thin;
@@ -35,8 +37,22 @@
   color: var(--color-text-primary);
 }
 
+/* Astryx's text, chat bubble and tooltip set their own word-break, which lets Korean split inside a word.
+   They keep words whole like the rest of the widget. The tooltip is rendered outside the widget root. */
+.widget-root .astryx-text,
+.widget-root .astryx-chat-message-bubble,
+[data-astryx-theme='neutral'] :is(.astryx-tooltip, .astryx-tooltip *) {
+  word-break: keep-all;
+}
+
+[data-astryx-theme='neutral'] .astryx-tooltip {
+  overflow-wrap: anywhere;
+}
+
+/* Typed text wraps plainly, so earlier lines do not move while the user is writing. */
 .widget-root textarea {
   resize: none;
+  text-wrap: wrap;
 }
 
 /* The message field grows with its text, from two lines up to four. The block padding matches the
