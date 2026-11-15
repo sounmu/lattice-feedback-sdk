@@ -1,5 +1,5 @@
 import { AutomaticMasker, type TextMaskingContext } from '@/sdk/automatic-masking';
-import type { SnapshotNode } from '@/sdk/snapshot-assets';
+import type { SnapshotNode, SnapshotStyleChange } from '@/sdk/snapshot-assets';
 import { findCssNames, rewriteReferences } from '@/sdk/structural-references';
 
 // Displayed or submitted text. Names that other nodes point at are handled by structural-references instead.
@@ -207,20 +207,38 @@ export class SnapshotMasker {
     return this.masker.text(value, context);
   }
 
-  attributes(id: number, attributes: NonNullable<SnapshotNode['attributes']>): void {
-    // The markers change first: a keep marker removed, or a mask added, in this change applies to its own values.
+  /** Only the marker changes of an attribute change. A page change applies these before it classifies what it adds. */
+  markers(id: number, attributes: NonNullable<SnapshotNode['attributes']>): void {
     const known = this.nodes.get(id);
     const markers = known ? { ...known.markers } : readMarkers({ type: 2 });
     applyMarkerChanges(markers, attributes);
     if (known || Object.values(markers).some(Boolean)) {
       this.record(id, { tagName: known?.tagName, parentId: known?.parentId, markers });
     }
+  }
+
+  // rrweb records a changed inline style property by property. A url(#name) in one follows the same mapping as in text.
+  private rewriteStyleChange(name: string, style: SnapshotStyleChange): void {
+    for (const [property, value] of Object.entries(style)) {
+      if (typeof value === 'string') {
+        style[property] = rewriteReferences(name, value, this.remapName);
+      } else if (Array.isArray(value)) {
+        style[property] = [rewriteReferences(name, value[0], this.remapName), value[1]];
+      }
+    }
+  }
+
+  attributes(id: number, attributes: NonNullable<SnapshotNode['attributes']>): void {
+    // The markers change first: a keep marker removed, or a mask added, in this change applies to its own values.
+    this.markers(id, attributes);
     const context = this.context(id);
     for (const [name, value] of Object.entries(attributes)) {
       if (CONTROL_ATTRIBUTES.has(name)) {
         if (value !== null) attributes[name] = '';
       } else if (typeof value === 'string') {
         attributes[name] = this.maskAttribute(name, value, context);
+      } else if (typeof value === 'object' && value !== null) {
+        this.rewriteStyleChange(name, value);
       }
     }
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AutomaticMasker } from '@/sdk/automatic-masking';
-import type { SnapshotNode } from '@/sdk/snapshot-assets';
+import type { SnapshotNode, SnapshotStyleChange } from '@/sdk/snapshot-assets';
 import { SnapshotMasker } from '@/sdk/snapshot-masking';
 import { findCssNames, rewriteReferences } from '@/sdk/structural-references';
 import { sanitizeReplayEvents } from '@/sdk/replay-sanitize';
@@ -246,5 +246,46 @@ describe('the context of nodes that a page change moves or removes', () => {
     sanitizeReplayEvents([mutation({ removes: [{ id: 1, parentId: 0 }] })], new Map(), masking);
 
     expect(masking.text(3, PRIVATE_TEXT)).toBe(MASKED_TEXT);
+  });
+});
+
+describe('a page change is cleaned as the state it leaves behind', () => {
+  it('maps fragment references inside a changed style dictionary to the name their target got', () => {
+    const masking = new SnapshotMasker(new AutomaticMasker(new Set()));
+    const filter = recorded(2, 'filter', { id: 'blur-generated' });
+    masking.node(recorded(1, 'svg', {}, [filter, recorded(3, 'rect', {})]));
+    const style: SnapshotStyleChange = {
+      filter: 'url(#blur-generated)',
+      'clip-path': ['url("#blur-generated")', 'important'],
+      color: 'red',
+      mask: false,
+    };
+
+    sanitizeReplayEvents([mutation({ attributes: [{ id: 3, attributes: { style } }] })], new Map(), masking);
+
+    const opaque = attributesOf(filter).id;
+    expect(opaque).toMatch(/^lattice-ref-\d+$/);
+    expect(style).toEqual({ filter: `url(#${opaque})`, 'clip-path': [`url("#${opaque}")`, 'important'], color: 'red', mask: false });
+  });
+
+  it('masks content added by the change that removes the keep marker from its container', () => {
+    const masking = createKeptSubtree();
+    const added = recorded(10, 'span', { title: PRIVATE_TEXT }, [textNode(11, PRIVATE_TEXT)]);
+    const change = mutation({ attributes: [{ id: 1, attributes: { 'data-lattice-keep': null } }], adds: [{ parentId: 1, node: added }] });
+
+    sanitizeReplayEvents([change], new Map(), masking);
+
+    expect(attributesOf(added).title).toBe(MASKED_TEXT);
+    expect(added.childNodes?.[0].textContent).toBe(MASKED_TEXT);
+  });
+
+  it('keeps content added by the change that puts the keep marker on its container', () => {
+    const masking = createKeptSubtree({});
+    const added = recorded(10, 'span', {}, [textNode(11, PRIVATE_TEXT)]);
+    const change = mutation({ attributes: [{ id: 1, attributes: { 'data-lattice-keep': '' } }], adds: [{ parentId: 1, node: added }] });
+
+    sanitizeReplayEvents([change], new Map(), masking);
+
+    expect(added.childNodes?.[0].textContent).toBe(PRIVATE_TEXT);
   });
 });

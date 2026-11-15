@@ -124,6 +124,8 @@ export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], ele
     data.removes?.forEach((remove) => masking?.detach(remove.id));
     data.adds?.forEach((add) => sanitizeNode(add.node, elements));
     data.attributes?.forEach((change) => sanitizeAttributeChange(change, elements));
+    // Markers first: what this change adds is classified by the markers the change leaves on its ancestors.
+    data.attributes?.forEach((change) => masking?.markers(change.id, change.attributes));
     data.adds?.forEach((add) => masking?.node(add.node, add.parentId));
     data.attributes?.forEach((change) => masking?.attributes(change.id, change.attributes));
     data.texts?.forEach((change) => {
