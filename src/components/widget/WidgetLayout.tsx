@@ -39,7 +39,7 @@ interface WidgetHeaderProps {
 export function WidgetHeader({ title, subtitle, onClose, onBack, backLabel = BACK_LABEL }: WidgetHeaderProps) {
   const slot = useContext(WidgetHeaderSlotContext);
   const header = (
-    <HStack as="header" gap={3} align="center" paddingInlineStart={onBack ? 2 : 4} paddingInlineEnd={2} paddingBlock={1.5} className="shrink-0">
+    <HStack as="header" gap={3} align="center" paddingInlineStart={onBack ? 3 : 4} paddingInlineEnd={3} paddingBlock={1.5} className="shrink-0">
       {onBack ? (
         <IconButton label={backLabel} tooltip={backLabel} icon={<Icon icon="chevronLeft" />} variant="ghost" size="lg" onClick={onBack} />
       ) : (
