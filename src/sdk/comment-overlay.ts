@@ -7,8 +7,8 @@ import type { SelectionPoint } from '@/sdk/element-selection';
 import type { CommentPinSource } from '@/sdk/screen-marks';
 import { PANEL_OPEN_CLASS_NAME, PHONE_MEDIA_QUERY, SDK_Z_INDEX } from '@/sdk/styles';
 import {
-  getStateLayer, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_FONT_FAMILY, SDK_PRESSED_SCALE, SDK_RADIUS, SDK_SHADOW,
-  SDK_THEME,
+  getStateLayer, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_FONT_FAMILY, SDK_HOVER_MEDIA, SDK_PRESSED_SCALE, SDK_RADIUS,
+  SDK_SHADOW, SDK_THEME,
 } from '@/sdk/theme-tokens';
 
 export interface CommentEditorCallbacks {
@@ -78,10 +78,10 @@ const COMMENT_STYLES = `
 .comment-box textarea[aria-invalid="true"] { border-color: ${SDK_THEME.error}; }
 .comment-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .comment-box button { ${SDK_BUTTON_BASE}; background-color: ${SDK_THEME.neutral}; color: ${SDK_THEME.textPrimary}; }
-.comment-box button:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)}; }
+${SDK_HOVER_MEDIA} { .comment-box button:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)}; } }
 .comment-box button:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; transform: ${SDK_PRESSED_SCALE}; }
 .comment-box button[data-action="submit"] { background-color: ${SDK_THEME.accent}; color: ${SDK_THEME.onAccent}; }
-.comment-box button[data-action="submit"]:hover { background-image: ${getStateLayer(SDK_THEME.accentHover)}; }
+${SDK_HOVER_MEDIA} { .comment-box button[data-action="submit"]:hover { background-image: ${getStateLayer(SDK_THEME.accentHover)}; } }
 .comment-box button[data-action="submit"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; }
 .comment-box button[data-action="remove"] { background-color: ${SDK_THEME.errorMuted}; color: ${SDK_THEME.onErrorMuted}; }
 .comment-pin:focus-visible, .comment-box button:focus-visible {

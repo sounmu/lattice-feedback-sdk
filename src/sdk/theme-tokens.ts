@@ -112,6 +112,12 @@ export const SDK_TRANSITION = '125ms cubic-bezier(0.24, 1, 0.4, 1)';
 export const SDK_PRESSED_SCALE = 'scale(0.98)';
 
 /**
+ * Wraps every :hover rule. A finger leaves :hover set on what it tapped until the next tap lands elsewhere,
+ * so hover styles apply only where the pointer can hover.
+ */
+export const SDK_HOVER_MEDIA = '@media (hover: hover)';
+
+/**
  * The box and label every SDK button shares: Astryx's large button, 44px so it is a touch target.
  * The colours are added where the button is used, because they depend on the surface under it.
  */

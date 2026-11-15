@@ -1,5 +1,5 @@
 import {
-  getStateLayer, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_PRESSED_SCALE, SDK_RADIUS, SDK_SHADOW, SDK_THEME,
+  getStateLayer, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_HOVER_MEDIA, SDK_PRESSED_SCALE, SDK_RADIUS, SDK_SHADOW, SDK_THEME,
   SDK_TRANSITION,
 } from '@/sdk/theme-tokens';
 
@@ -74,8 +74,10 @@ export const SDK_STYLES = `
   white-space: nowrap;
 }
 
-.launcher:hover {
-  background-image: ${getStateLayer(SDK_THEME.accentHover)};
+${SDK_HOVER_MEDIA} {
+  .launcher:hover {
+    background-image: ${getStateLayer(SDK_THEME.accentHover)};
+  }
 }
 
 .launcher:active {
