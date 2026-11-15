@@ -48,7 +48,7 @@ describe('automatic text masking', () => {
   it('leaves class names alone so layout survives while masking other identifying attributes', () => {
     const tree: SnapshotNode = { type: 2, id: 1, tagName: 'div', attributes: { class: 'btn btn-primary', id: 'row-4821' } };
     new SnapshotMasker(new AutomaticMasker(new Set())).node(tree);
-    expect(tree.attributes).toEqual({ class: 'btn btn-primary', id: '●●●●●●●●' });
+    expect(tree.attributes).toEqual({ class: 'btn btn-primary', id: 'lattice-ref-1' });
   });
 
   it('exempts only direct text of the commented element while masking descendant and attribute values', () => {

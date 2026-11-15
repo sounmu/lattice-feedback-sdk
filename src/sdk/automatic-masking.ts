@@ -40,18 +40,25 @@ export class AutomaticMasker {
     readonly options: AutomaticMaskingOptions = {},
   ) {}
 
-  text(value: string, context: TextMaskingContext = {}): string {
+  isStatic(value: string, context: TextMaskingContext = {}): boolean {
     const decision = {
       ...context,
       safe: context.safe || this.options.enabled === false,
       commented: context.commented && this.options.keepCommentedText === true,
     };
-    if (classifyText(value, this.known, decision) === 'static') return value;
+    return classifyText(value, this.known, decision) === 'static';
+  }
+
+  /** For a value the caller replaces with something other than the circles (an opaque name). */
+  countMasked(value: string): void {
+    this.maskedValues += 1;
+    this.maskedCharacters += value.replace(/\s/g, '').length;
+  }
+
+  text(value: string, context: TextMaskingContext = {}): string {
+    if (this.isStatic(value, context)) return value;
     const masked = maskText(value);
-    if (masked !== value) {
-      this.maskedValues += 1;
-      this.maskedCharacters += value.replace(/\s/g, '').length;
-    }
+    if (masked !== value) this.countMasked(value);
     return masked;
   }
 }
