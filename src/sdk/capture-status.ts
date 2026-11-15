@@ -68,7 +68,7 @@ const STATUS_STYLES = `
 .capture-status button:active { background-image: ${getStateLayer(DARK.overlayPressed)}; transform: ${SDK_PRESSED_SCALE}; }
 .capture-status button:focus-visible { outline: ${SDK_FOCUS_OUTLINE.line} ${DARK.accent}; outline-offset: ${SDK_FOCUS_OUTLINE.offset}; }
 .capture-status button[data-action="stop"] { background-color: ${DARK.accent}; color: ${DARK.onAccent}; }
-.capture-status button[data-action="stop"]:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)}; }
+.capture-status button[data-action="stop"]:hover { background-image: ${getStateLayer(DARK.accentHover)}; }
 .capture-status button[data-action="stop"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; }
 .capture-status button[hidden] { display: none; }
 .capture-recording-frame {

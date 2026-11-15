@@ -41,8 +41,8 @@ interface OpenEditor {
   callbacks: CommentEditorCallbacks;
 }
 
-// Pins are drawn on the customer's page in the theme's info colour, which stands apart from page content
-// better than the near-black accent. The editor and remark are light popovers with Astryx's buttons. The
+// Pins keep the theme's info colour to distinguish page annotations from primary actions.
+// The editor and remark are light popovers with Astryx's buttons. The
 // textarea keeps 16px text: a smaller size makes iOS zoom the customer's page when it takes focus.
 const COMMENT_STYLES = `
 .comment-layer { display: contents; }
@@ -81,6 +81,8 @@ const COMMENT_STYLES = `
 .comment-box button:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)}; }
 .comment-box button:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; transform: ${SDK_PRESSED_SCALE}; }
 .comment-box button[data-action="submit"] { background-color: ${SDK_THEME.accent}; color: ${SDK_THEME.onAccent}; }
+.comment-box button[data-action="submit"]:hover { background-image: ${getStateLayer(SDK_THEME.accentHover)}; }
+.comment-box button[data-action="submit"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; }
 .comment-box button[data-action="remove"] { background-color: ${SDK_THEME.errorMuted}; color: ${SDK_THEME.onErrorMuted}; }
 .comment-pin:focus-visible, .comment-box button:focus-visible {
   outline: ${SDK_FOCUS_OUTLINE.line} ${SDK_THEME.accent}; outline-offset: ${SDK_FOCUS_OUTLINE.offset};

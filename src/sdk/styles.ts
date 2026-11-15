@@ -1,5 +1,5 @@
 import {
-  getStateLayer, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_PRESSED_SCALE, SDK_RADIUS, SDK_SHADOW, SDK_THEME, SDK_THEME_DARK,
+  getStateLayer, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_PRESSED_SCALE, SDK_RADIUS, SDK_SHADOW, SDK_THEME,
   SDK_TRANSITION,
 } from '@/sdk/theme-tokens';
 
@@ -12,8 +12,8 @@ export const HOST_ELEMENT_STYLE = 'all: initial;';
 /** Screens narrow enough that the open panel takes the whole screen above the launcher. */
 export const PHONE_MEDIA_QUERY = '(max-width: 480px)';
 
-// The launcher is a dark pill, so its hover and pressed layers are the dark-surface ones. Its focus ring
-// keeps a light halo inside the dark outline, so it shows on light and dark customer pages alike.
+// The launcher uses the brand primary states. Its focus ring keeps a light halo inside the blue
+// outline, so it shows on light and dark customer pages alike.
 export const SDK_STYLES = `
 :host {
   all: initial;
@@ -38,11 +38,11 @@ export const SDK_STYLES = `
 }
 
 .launcher:hover {
-  background-image: ${getStateLayer(SDK_THEME_DARK.overlayHover)};
+  background-image: ${getStateLayer(SDK_THEME.accentHover)};
 }
 
 .launcher:active {
-  background-image: ${getStateLayer(SDK_THEME_DARK.overlayPressed)};
+  background-image: ${getStateLayer(SDK_THEME.overlayPressed)};
   transform: ${SDK_PRESSED_SCALE};
 }
 

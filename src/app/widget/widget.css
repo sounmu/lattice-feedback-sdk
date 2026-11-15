@@ -8,12 +8,30 @@
 /* Theme adjustments for the widget. They sit on the theme root, so anything Astryx renders outside
    the widget root, such as a tooltip, gets them too. */
 [data-astryx-theme='neutral'] {
+  --color-accent: #3b5bfd;
+  --color-accent-muted: #eef1ff;
+  --color-on-accent: #ffffff;
+  --color-text-accent: var(--color-accent);
+  --color-icon-accent: var(--color-accent);
+  --focus-outline-color: var(--color-accent);
   /* Korean text is set in Pretendard when the device has it, else the platform's Korean face. */
   --font-family-body: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
     'Segoe UI', 'Malgun Gothic', Roboto, 'Noto Sans KR', Helvetica, Arial, sans-serif;
   --font-family-heading: var(--font-family-body);
   /* Large controls are the widget's touch targets: 44px instead of the theme's 36px. */
   --size-element-lg: 2.75rem;
+}
+
+/* Astryx paints hover/press with shared overlays, rather than accent-state tokens.
+   Scope the opaque brand hover to primary actions so neutral controls stay neutral. */
+[data-astryx-theme='neutral'] .astryx-button[data-variant='primary'] {
+  --color-overlay-hover: #2f4ae0;
+}
+
+/* The selected segment uses surface/text tokens instead of accent tokens. */
+[data-astryx-theme='neutral'] .astryx-segmented-control-item[data-selected='selected'] {
+  --color-background-surface: var(--color-accent-muted);
+  --color-text-primary: var(--color-accent);
 }
 
 .widget-root {

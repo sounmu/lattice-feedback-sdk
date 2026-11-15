@@ -1,11 +1,12 @@
-// Astryx neutral theme values for the SDK UI drawn on the customer's page: the launcher and panel
+// Astryx neutral theme values with our brand accent for the SDK UI: the launcher and panel
 // frame, the mode bar, the comment pins and editor, and the selection and edit overlays. That UI lives
 // in a closed shadow root or in inline-styled overlays, where the widget's stylesheet and its CSS
 // variables are not loaded, so the values are copied here as plain values. light-dark(), oklch() and
 // color-mix() are avoided because the customer's browser may be older than the widget needs.
 //
 // Sources: @astryxdesign/theme-neutral/dist/theme.css (the light and dark value of each token) and
-// @astryxdesign/core/dist/astryx.css (focus outline, control box, motion). Each value names its token.
+// @astryxdesign/core/dist/astryx.css (focus outline, control box, motion). Brand overrides match
+// src/app/widget/widget.css; Astryx uses a scoped hover overlay rather than an accent-hover token.
 
 /** The stack the widget sets on --font-family-body (src/app/widget/widget.css). No web font is loaded. */
 export const SDK_FONT_FAMILY = [
@@ -24,7 +25,9 @@ export const SDK_FONT = {
 /** Light values: the panel frame, the comment editor, and the marks drawn straight on the page. */
 export const SDK_THEME = {
   /** --color-accent */
-  accent: '#1b1b1b',
+  accent: '#3b5bfd',
+  /** Primary action's --color-overlay-hover override */
+  accentHover: '#2f4ae0',
   /** --color-on-accent */
   onAccent: '#ffffff',
   /** --color-background-popover */
@@ -62,9 +65,11 @@ export const SDK_THEME_DARK = {
   /** --color-background-card */
   surface: '#1b1b1b',
   /** --color-accent */
-  accent: '#f1f1f1',
+  accent: '#3b5bfd',
+  /** Primary action's --color-overlay-hover override */
+  accentHover: '#2f4ae0',
   /** --color-on-accent */
-  onAccent: '#111111',
+  onAccent: '#ffffff',
   /** --color-text-primary */
   textPrimary: '#ffffff',
   /** --color-text-secondary */
