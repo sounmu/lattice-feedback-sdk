@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES } from '@/lib/feedback-limits';
-import { InvalidGzipError } from '@/lib/gzip';
+import { InvalidGzipError, isGzipBody } from '@/lib/gzip';
 import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { createApiErrorResponse } from '@/lib/http/api-error';
-import { BodyTooLargeError, isDeclaredBodyTooLarge, readEncodedBodyTextWithLimit } from '@/lib/http/read-body';
+import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyBytesWithLimit } from '@/lib/http/read-body';
 import { consumeRateLimit, getClientAddress, RATE_LIMIT_RETRY_AFTER_SECONDS } from '@/lib/http/rate-limit';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
@@ -34,7 +34,48 @@ export async function POST(request: Request) {
 
   let rawBody: string;
   try {
-    rawBody = await readEncodedBodyTextWithLimit(request, MAX_SCREEN_SNAPSHOT_BYTES, MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES);
+    const bytes = await readBodyBytesWithLimit(request, MAX_SCREEN_SNAPSHOT_BYTES);
+    if (isGzipBody(request.headers)) {
+      const source = new ReadableStream<Uint8Array<ArrayBuffer>>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      });
+      const reader = source.pipeThrough(new DecompressionStream('gzip')).getReader();
+      const decoder = new TextDecoder();
+      rawBody = '';
+      let unpackedBytes = 0;
+      while (true) {
+        let result: ReadableStreamReadResult<Uint8Array>;
+        try {
+          result = await reader.read();
+        } catch (error) {
+          if (error instanceof Error) {
+            throw new InvalidGzipError();
+          }
+          throw error;
+        }
+        if (result.done) {
+          break;
+        }
+        unpackedBytes += result.value.byteLength;
+        if (unpackedBytes > MAX_SCREEN_SNAPSHOT_UNPACKED_BYTES) {
+          await reader.cancel().catch((error: unknown) => {
+            // A corrupt gzip stream can already be errored when the size limit cancels it.
+            if (!(error instanceof TypeError)) {
+              throw error;
+            }
+          });
+          throw new BodyTooLargeError();
+        }
+        // Decode each chunk once instead of retaining and joining the entire inflated byte buffer.
+        rawBody += decoder.decode(result.value, { stream: true });
+      }
+      rawBody += decoder.decode();
+    } else {
+      rawBody = new TextDecoder().decode(bytes);
+    }
   } catch (error) {
     if (error instanceof BodyTooLargeError) {
       return createPayloadTooLargeResponse();
