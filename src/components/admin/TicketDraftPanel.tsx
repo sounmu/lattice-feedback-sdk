@@ -3,13 +3,17 @@
 import { useState } from 'react';
 
 import { AdminSection } from '@/components/admin/AdminSection';
+import { useAdminToken } from '@/hooks/useAdminToken';
+import { useCreateTicket } from '@/hooks/useCreateTicket';
 import { createTicketDraft } from '@/lib/ticket-draft';
 import type { FeedbackDetailResponse } from '@/types/feedback';
 
 type CopyStatus = 'idle' | 'copied' | 'failed';
 
 /** A ticket draft made from the feedback. The admin edits it here and copies it into an issue tracker. */
-export function TicketDraftPanel({ detail }: { detail: FeedbackDetailResponse }) {
+export function TicketDraftPanel({ detail, projectKey }: { detail: FeedbackDetailResponse; projectKey: string }) {
+  const token = useAdminToken();
+  const notion = useCreateTicket({ projectKey, token, id: detail.feedback.id });
   // Made once per feedback, in the browser: its links start with this admin app's own address.
   const [draft, setDraft] = useState(() => createTicketDraft(detail, window.location.origin));
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
@@ -32,7 +36,7 @@ export function TicketDraftPanel({ detail }: { detail: FeedbackDetailResponse })
   return (
     <AdminSection sectionKey="ticket-draft" title="티켓 초안">
       <p className="text-sm text-(--admin-text-sub)">
-        피드백 내용과 SDK 기록으로 만든 초안이에요. 고친 뒤 복사해서 이슈 트래커에 붙여 넣으세요. 여기서 고친 내용은 저장되지 않아요.
+        피드백 내용과 SDK 기록으로 만든 초안이에요. 고친 뒤 노션 보드에 올리거나 복사해서 이슈 트래커에 붙여 넣으세요. 여기서 고친 내용은 저장되지 않아요.
       </p>
 
       <label htmlFor="ticket-title" className="text-sm font-semibold">
@@ -65,9 +69,32 @@ export function TicketDraftPanel({ detail }: { detail: FeedbackDetailResponse })
         >
           마크다운 복사
         </button>
+        {notion.status === 'created' ? null : (
+          <button
+            type="button"
+            onClick={() => notion.create(draft)}
+            disabled={notion.status === 'creating'}
+            className="min-h-11 rounded-[10px] border border-(--admin-primary) px-5 font-semibold text-(--admin-primary) hover:bg-(--admin-primary-weak) disabled:opacity-50"
+          >
+            {notion.status === 'creating' ? '올리는 중…' : '노션에 올리기'}
+          </button>
+        )}
         <p role="status" className="text-sm text-(--admin-text-sub)">
           {copyStatus === 'copied' ? '복사했어요.' : ''}
         </p>
+        {notion.status === 'created' ? (
+          <p role="status" className="text-sm text-(--admin-success)">
+            노션에 올렸어요.{' '}
+            <a href={notion.url} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
+              노션에서 열기
+            </a>
+          </p>
+        ) : null}
+        {notion.status === 'failed' ? (
+          <p role="alert" className="text-sm text-(--admin-danger)">
+            {notion.errorMessage}
+          </p>
+        ) : null}
         {copyStatus === 'failed' ? (
           <p role="alert" className="text-sm text-(--admin-danger)">
             복사하지 못했어요. 본문을 직접 선택해 복사해 주세요.
