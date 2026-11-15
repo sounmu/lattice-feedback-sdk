@@ -2,7 +2,7 @@
 // the events, which the recorder has already cleaned, and sessionStorage holds how far the last document got.
 // Both are written only while a Flow records and removed when its replay is taken or cancelled; what a
 // closed tab leaves behind is removed once no Flow could still be running.
-import { mergeStashedChunks, parseStashedChunks } from '@/sdk/flow-replay-segment';
+import { findUnsavedChunks, getChunkKey, mergeStashedChunks, parseStashedChunks } from '@/sdk/flow-replay-segment';
 import { clearFlowSession, findSessionStorage, FLOW_MAX_DURATION_MS } from '@/sdk/flow-session';
 import type { ScreenSnapshotEvent, ScreenSnapshotPage } from '@/types/screen-snapshot';
 
@@ -35,6 +35,8 @@ export interface ReplayChunk {
 export interface ReplayProgress {
   segment: number;
   eventCount: number;
+  /** Events of the whole Flow the document knew of when it was left, earlier documents included. */
+  totalEventCount: number;
 }
 
 export interface ReplayStore {
@@ -69,6 +71,7 @@ export function openReplayStore(projectKey: string, sessionId: string): ReplaySt
   // Chunks handed to IndexedDB whose transaction has not completed.
   const pending = new Map<string, ReplayChunk>();
   let isWritable = true;
+  let isCleared = false;
 
   // IndexedDB runs transactions on one store in the order they were created, so a clear always lands after
   // the writes issued before it.
@@ -95,6 +98,30 @@ export function openReplayStore(projectKey: string, sessionId: string): ReplaySt
     return IDBKeyRange.bound([projectKey, sessionId], [projectKey, sessionId, []]);
   }
 
+  // Nothing is pending, so the stash holds nothing that IndexedDB does not.
+  function removeStash(): void {
+    const storage = findSessionStorage();
+    if (storage) clearFlowSession(storage, stashKey);
+  }
+
+  // A chunk stays pending until IndexedDB confirms it, and is stashed on pagehide while it is.
+  function persist(chunk: ReplayChunk): void {
+    if (isCleared) {
+      return;
+    }
+    const key = getChunkKey(chunk);
+    pending.set(key, chunk);
+    if (!isWritable) {
+      return;
+    }
+    void transact('readwrite', (store) => store.put({ ...chunk, [SAVED_AT]: Date.now() }, [projectKey, sessionId, chunk.segment, chunk.index]))
+      .then((written) => {
+        if (written === null) return;
+        pending.delete(key);
+        if (pending.size === 0) removeStash();
+      });
+  }
+
   void transact('readwrite', (store) => {
     const expired = store.index(SAVED_AT).openKeyCursor(IDBKeyRange.upperBound(Date.now() - FLOW_MAX_DURATION_MS));
     expired.onsuccess = () => {
@@ -107,7 +134,8 @@ export function openReplayStore(projectKey: string, sessionId: string): ReplaySt
   });
 
   return {
-    // The stash left by the document before is read once, merged in, and removed.
+    // The stash left by the document before is merged in. What IndexedDB lacks of it is saved again first,
+    // and the stash is removed only once nothing is pending: until then it is the only copy.
     load: () => transact('readonly', (store) => store.getAll(getSessionRange()) as IDBRequest<ReplayChunk[]>).then((chunks) => {
       const storage = findSessionStorage();
       let stashed: ReplayChunk[] = [];
@@ -116,19 +144,15 @@ export function openReplayStore(projectKey: string, sessionId: string): ReplaySt
       } catch (error) {
         if (!(error instanceof DOMException)) throw error;
       }
-      if (storage) clearFlowSession(storage, stashKey);
+      const unsaved = findUnsavedChunks(chunks ?? [], stashed);
+      unsaved.forEach(persist);
+      if (storage && pending.size === 0) clearFlowSession(storage, stashKey);
       return mergeStashedChunks(chunks ?? [], stashed);
     }),
     append(chunk) {
-      if (!isWritable) {
-        return;
+      if (isWritable) {
+        persist(chunk);
       }
-      const key = `${chunk.segment}:${chunk.index}`;
-      pending.set(key, chunk);
-      void transact('readwrite', (store) => store.put({ ...chunk, [SAVED_AT]: Date.now() }, [projectKey, sessionId, chunk.segment, chunk.index]))
-        .then((written) => {
-          if (written !== null) pending.delete(key);
-        });
     },
     stashPending() {
       const storage = findSessionStorage();
@@ -148,12 +172,14 @@ export function openReplayStore(projectKey: string, sessionId: string): ReplaySt
     },
     // A note that is malformed or from another Flow matches nothing, which the recorder reads as a gap.
     findProgress() {
-      const [savedSessionId, segment, eventCount] = (findSessionStorage()?.getItem(progressKey) ?? '').split(':');
-      return savedSessionId === sessionId ? { segment: Number(segment), eventCount: Number(eventCount) } : null;
+      const [savedSessionId, segment, eventCount, totalEventCount] = (findSessionStorage()?.getItem(progressKey) ?? '').split(':');
+      return savedSessionId === sessionId
+        ? { segment: Number(segment), eventCount: Number(eventCount), totalEventCount: Number(totalEventCount) }
+        : null;
     },
-    saveProgress({ segment, eventCount }) {
+    saveProgress({ segment, eventCount, totalEventCount }) {
       try {
-        findSessionStorage()?.setItem(progressKey, `${sessionId}:${segment}:${eventCount}`);
+        findSessionStorage()?.setItem(progressKey, `${sessionId}:${segment}:${eventCount}:${totalEventCount}`);
       } catch (error) {
         // Without the note the next document cannot tell that nothing was lost, and marks a gap.
         if (!(error instanceof DOMException)) throw error;
@@ -161,6 +187,7 @@ export function openReplayStore(projectKey: string, sessionId: string): ReplaySt
     },
     clear() {
       isWritable = false;
+      isCleared = true;
       pending.clear();
       const storage = findSessionStorage();
       if (storage) {

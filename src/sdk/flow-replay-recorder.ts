@@ -103,6 +103,8 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
   // Events and bytes of the whole Flow so far, earlier documents included.
   let totalCount = 0;
   let totalBytes = 0;
+  // Events the earlier documents saved, which the next document is told about with this one's own.
+  let recordedBefore = 0;
   let truncated = !session.recordPage;
   let isRemoved = false;
   // Events wait here until the saved part is read, because the limits count it too. Null from then on.
@@ -251,6 +253,7 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
     earlier = saved.segments;
     segment = saved.lastSegment + 1;
     gapBefore = findGapBefore(saved, progress);
+    recordedBefore = saved.recordedCount;
     totalCount = saved.eventCount + (gapBefore ? 1 : 0);
     totalBytes = saved.bytes;
     startedAtMs = earlier[0]?.events[0].timestamp ?? startedAtMs;
@@ -269,7 +272,7 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
       sampleAssetUsage(Date.now());
     }
     save();
-    store.saveProgress({ segment, eventCount: events.length });
+    store.saveProgress({ segment, eventCount: events.length, totalEventCount: recordedBefore + events.length });
     // IndexedDB may not finish writing before this document goes; the next one merges the stash in.
     store.stashPending();
   }
