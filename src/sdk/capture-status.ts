@@ -3,6 +3,10 @@
 import { MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS } from '@/lib/feedback-limits';
 import { getStatusActions, getStatusPhase, type StatusPhase } from '@/sdk/capture-status-model';
 import { SDK_Z_INDEX } from '@/sdk/styles';
+import {
+  getStateLayer, getTranslucentColor, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_PRESSED_SCALE, SDK_RADIUS,
+  SDK_SHADOW, SDK_THEME, SDK_THEME_DARK,
+} from '@/sdk/theme-tokens';
 import type { CaptureState } from '@/types/sdk-message';
 
 export interface CaptureStatusOptions {
@@ -17,7 +21,9 @@ export interface CaptureStatus {
   destroy(): void;
 }
 
-const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+// The bar is a dark card on the customer's page, so it takes the theme's dark values. Red marks only that
+// a recording is running (the dot and the frame); the button that ends it is the bar's primary action.
+const DARK = SDK_THEME_DARK;
 const STATUS_STYLES = `
 .capture-status {
   position: fixed;
@@ -28,54 +34,49 @@ const STATUS_STYLES = `
   width: min(400px, calc(100vw - 40px));
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: #111827;
-  color: #ffffff;
-  font: 400 14px/1.45 ${FONT};
-  box-shadow: 0 8px 28px rgba(17, 24, 39, 0.35);
+  gap: 4px;
+  padding: 12px 16px;
+  border-radius: ${SDK_RADIUS.container};
+  background: ${DARK.surface};
+  color: ${DARK.textPrimary};
+  font: ${SDK_FONT.body};
+  word-break: keep-all;
+  box-shadow: ${SDK_SHADOW.high};
   outline: none;
 }
 .capture-status[hidden] { display: none; }
-.capture-status:focus-visible { box-shadow: 0 0 0 3px #93c5fd, 0 8px 28px rgba(17, 24, 39, 0.35); }
-.capture-status-head { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
-.capture-status-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #60a5fa; }
+.capture-status:focus-visible {
+  outline: ${SDK_FOCUS_OUTLINE.line} ${SDK_THEME.accent};
+  outline-offset: ${SDK_FOCUS_OUTLINE.offset};
+  box-shadow: 0 0 0 ${SDK_FOCUS_OUTLINE.offset} ${SDK_THEME.surface}, ${SDK_SHADOW.high};
+}
+.capture-status-head { display: flex; align-items: center; gap: 8px; font: ${SDK_FONT.heading}; }
+.capture-status-dot { flex: none; width: 10px; height: 10px; border-radius: ${SDK_RADIUS.full}; background: ${DARK.info}; }
 .capture-status-dot.is-recording {
-  background: #e5484d;
-  box-shadow: 0 0 0 4px rgba(229, 72, 77, 0.3);
+  background: ${DARK.error};
+  box-shadow: 0 0 0 4px ${getTranslucentColor(DARK.error, 0.3)};
   animation: capture-status-pulse 1.1s ease-in-out infinite;
 }
-.capture-status-count { margin-left: auto; font-size: 13px; font-weight: 500; color: #d1d5db; font-variant-numeric: tabular-nums; }
-.capture-status-label { margin: 0; overflow-wrap: anywhere; }
-.capture-status-collects { margin: 0; font-size: 12px; color: #d1d5db; overflow-wrap: anywhere; }
-.capture-status-error { margin: 0; font-size: 13px; color: #fca5a5; overflow-wrap: anywhere; }
+.capture-status-count { margin-left: auto; font: ${SDK_FONT.supporting}; color: ${DARK.textSecondary}; font-variant-numeric: tabular-nums; }
+.capture-status-label { margin: 0; overflow-wrap: anywhere; text-wrap: pretty; }
+.capture-status-collects { margin: 0; font: ${SDK_FONT.supporting}; color: ${DARK.textSecondary}; overflow-wrap: anywhere; text-wrap: pretty; }
+.capture-status-error { margin: 0; color: ${DARK.textError}; overflow-wrap: anywhere; }
 .capture-status-error[hidden] { display: none; }
-.capture-status-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
-.capture-status button {
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 10px;
-  background: #374151;
-  color: #ffffff;
-  font: 600 14px/1 ${FONT};
-  cursor: pointer;
-}
-.capture-status button:hover { background: #4b5563; }
-.capture-status button:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
-.capture-status button[data-action="stop"] { background: #e5e7eb; color: #111827; }
-.capture-status button[data-action="stop"]:hover { background: #f3f4f6; }
-.capture-status button[data-action="stop"].is-recording { background: #e5484d; color: #ffffff; }
-.capture-status button[data-action="stop"].is-recording:hover { background: #d1343a; }
+.capture-status-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.capture-status button { ${SDK_BUTTON_BASE}; background-color: ${DARK.neutral}; color: ${DARK.textPrimary}; }
+.capture-status button:hover { background-image: ${getStateLayer(DARK.overlayHover)}; }
+.capture-status button:active { background-image: ${getStateLayer(DARK.overlayPressed)}; transform: ${SDK_PRESSED_SCALE}; }
+.capture-status button:focus-visible { outline: ${SDK_FOCUS_OUTLINE.line} ${DARK.accent}; outline-offset: ${SDK_FOCUS_OUTLINE.offset}; }
+.capture-status button[data-action="stop"] { background-color: ${DARK.accent}; color: ${DARK.onAccent}; }
+.capture-status button[data-action="stop"]:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)}; }
+.capture-status button[data-action="stop"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; }
 .capture-status button[hidden] { display: none; }
 .capture-recording-frame {
   position: fixed;
   inset: 0;
   z-index: ${SDK_Z_INDEX - 2};
   box-sizing: border-box;
-  border: 3px solid rgba(229, 72, 77, 0.85);
+  border: 3px solid ${getTranslucentColor(SDK_THEME.error, 0.85)};
   pointer-events: none;
 }
 .capture-recording-frame[hidden] { display: none; }
@@ -85,6 +86,8 @@ const STATUS_STYLES = `
 }
 @media (prefers-reduced-motion: reduce) {
   .capture-status-dot.is-recording { animation: none; }
+  .capture-status button { transition: none; }
+  .capture-status button:active { transform: none; }
 }
 `;
 
@@ -259,7 +262,6 @@ export function createCaptureStatus(options: CaptureStatusOptions): CaptureStatu
     error.hidden = !state.errorMessage;
     stopButton.hidden = finish === 'hidden';
     stopButton.textContent = finish === 'recording' ? FINISH_LABELS.recording : FINISH_LABELS.neutral;
-    stopButton.classList.toggle('is-recording', isRecording);
     cancelButton.textContent = isRecording ? CANCEL_LABELS.recording : CANCEL_LABELS.transient;
     frame.hidden = phase !== 'flow-recording';
     container.hidden = false;
