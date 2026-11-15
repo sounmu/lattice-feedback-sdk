@@ -89,6 +89,8 @@ export class FeedbackSdk {
     this.launcherButton.setAttribute('aria-expanded', 'true');
     this.isPanelOpen = true;
     this.postToWidget(createHostToWidgetMessage('visibility:update', { isOpen: true }));
+    // Keyboard focus follows the panel in, so the next Tab lands inside it instead of back on the page.
+    this.iframeElement?.focus({ preventScroll: true });
     // The viewport may have changed since the iframe was created, so refresh on every open.
     this.updatePageContext();
     this.captureController?.setPanelVisible(true);

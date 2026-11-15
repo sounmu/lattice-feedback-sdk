@@ -1,0 +1,78 @@
+import type { ElementTarget } from '@/types/feedback';
+
+export const MAX_TARGET_LABEL_LENGTH = 60;
+
+const TAG_LABELS: Record<string, string> = {
+  a: '링크',
+  button: '버튼',
+  input: '입력창',
+  textarea: '글 상자',
+  select: '선택 상자',
+  option: '선택 항목',
+  label: '이름표',
+  form: '입력 양식',
+  fieldset: '입력 묶음',
+  legend: '입력 묶음 제목',
+  img: '이미지',
+  picture: '이미지',
+  figure: '그림',
+  figcaption: '그림 설명',
+  svg: '아이콘',
+  canvas: '그림판',
+  video: '동영상',
+  audio: '오디오',
+  table: '표',
+  caption: '표 제목',
+  thead: '표 머리글',
+  tbody: '표 본문',
+  tfoot: '표 바닥글',
+  tr: '표 행',
+  td: '표 칸',
+  th: '표 제목 칸',
+  ul: '목록',
+  ol: '목록',
+  li: '목록 항목',
+  dl: '설명 목록',
+  dt: '설명 제목',
+  dd: '설명 내용',
+  nav: '메뉴',
+  header: '머리글 영역',
+  footer: '바닥글 영역',
+  main: '본문 영역',
+  section: '영역',
+  article: '영역',
+  aside: '옆 영역',
+  div: '영역',
+  span: '글자',
+  p: '문단',
+  h1: '제목',
+  h2: '제목',
+  h3: '제목',
+  h4: '제목',
+  h5: '제목',
+  h6: '제목',
+  strong: '강조 글자',
+  em: '강조 글자',
+  b: '강조 글자',
+  i: '기울임 글자',
+  mark: '형광펜 글자',
+  small: '작은 글자',
+  code: '코드 글자',
+  pre: '코드 상자',
+  blockquote: '인용문',
+  hr: '구분선',
+  time: '시각',
+  dialog: '대화 상자',
+  details: '펼침 영역',
+  summary: '펼침 제목',
+  progress: '진행 표시',
+  meter: '측정 표시',
+};
+
+export function describeTarget(target: Pick<ElementTarget, 'feedbackId' | 'tagName'>): string {
+  const label = target.feedbackId ?? TAG_LABELS[target.tagName.toLowerCase()] ?? target.tagName.toLowerCase();
+  if (label.length <= MAX_TARGET_LABEL_LENGTH) {
+    return label;
+  }
+  return `${label.slice(0, MAX_TARGET_LABEL_LENGTH)}…`;
+}

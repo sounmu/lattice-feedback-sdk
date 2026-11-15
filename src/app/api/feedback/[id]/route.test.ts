@@ -150,6 +150,24 @@ describe('PATCH /api/feedback/[id]', () => {
     expect(await repository.find('demo', id)).toMatchObject({ status: 'open', duplicateOfId: null });
   });
 
+  it('moves the duplicates of a feedback to its new original when that feedback becomes a duplicate', async () => {
+    const firstId = await createStoredFeedbackId();
+    const secondId = await createStoredFeedbackId();
+    const thirdId = await createStoredFeedbackId();
+    const markDuplicate = (id: string, duplicateOfId: string) =>
+      PATCH(
+        createJsonRequest(createDetailUrl(id), 'PATCH', { status: 'duplicate', duplicateOfId }, { authorization: ADMIN_AUTHORIZATION }),
+        createContext(id),
+      );
+
+    await markDuplicate(firstId, secondId);
+    const response = await markDuplicate(secondId, thirdId);
+
+    expect(response.status).toBe(200);
+    expect((await getFeedbackRepository().find('demo', firstId))?.duplicateOfId).toBe(thirdId);
+    expect((await getFeedbackRepository().find('demo', secondId))?.duplicateOfId).toBe(thirdId);
+  });
+
   it('lets only one of two simultaneous requests that would make two feedbacks duplicates of each other succeed', async () => {
     const firstId = await createStoredFeedbackId();
     const secondId = await createStoredFeedbackId();
