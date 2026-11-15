@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 
-import { extractScriptLiterals } from '@/sdk/automatic-masking';
+import { createScriptLiteralReader } from '@/sdk/automatic-masking';
 import { readTextWithinBudget } from '@/sdk/bounded-source';
 
 function createReader(chunks: (string | Error)[]) {
@@ -26,7 +26,7 @@ it('keeps the labels read before the budget ran out instead of dropping the whol
 
   expect(source.isComplete).toBe(false);
   expect(source.byteLength).toBe(30);
-  expect(extractScriptLiterals(source.text)).toEqual(['Orders']);
+  expect(createScriptLiteralReader(source.text)(Infinity)).toEqual(['Orders']);
 });
 
 it('does not turn a character cut at the budget into a different one', async () => {
@@ -40,7 +40,7 @@ it('keeps what arrived when the download stops', async () => {
   const source = await readTextWithinBudget(createReader(['const a = "Orders";', new Error('aborted')]), 1024);
 
   expect(source.isComplete).toBe(false);
-  expect(extractScriptLiterals(source.text)).toEqual(['Orders']);
+  expect(createScriptLiteralReader(source.text)(Infinity)).toEqual(['Orders']);
 });
 
 it('reads nothing once the budget is used up', async () => {

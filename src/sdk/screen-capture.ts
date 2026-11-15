@@ -21,6 +21,7 @@ import {
 } from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
 import { serializeAfterWait } from '@/sdk/capture-guard';
+import { findUsedCssImageUrls } from '@/sdk/css-image-usage';
 import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError } from '@/sdk/snapshot-assets';
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
@@ -46,9 +47,6 @@ export const MASKED_SELECTOR = '[data-lattice-mask]';
 const ASSET_FETCH_TIMEOUT_MS = 10_000;
 // The widget waits 30 s for the capture; this leaves time to serialize and answer.
 const ASSET_COLLECTION_DURATION_MS = 15_000;
-const CSS_IMAGE_PROPERTIES = ['background-image', 'border-image-source', 'list-style-image', 'mask-image'] as const;
-const PSEUDO_ELEMENTS = [null, '::before', '::after'] as const;
-const CSS_IMAGE_URL_PATTERN = /url\(\s*"([^"]*)"\s*\)/g;
 
 export function isMaskedInput(element: HTMLElement): boolean {
   if (element.closest(MASKED_SELECTOR)) {
@@ -90,26 +88,6 @@ async function fetchSameOriginAsset(url: string, maxBytes: number, timeoutMs: nu
   } finally {
     window.clearTimeout(timer);
   }
-}
-
-// CSS images that captured elements actually show. Elements in a blocked region are skipped, so a
-// stylesheet shared with them cannot carry their images into the saved screen.
-export function findUsedCssImageUrls(excludedSelector: string): Set<string> {
-  const urls = new Set<string>();
-  for (const element of document.querySelectorAll('*')) {
-    if (element.closest(excludedSelector)) {
-      continue;
-    }
-    for (const pseudoElement of PSEUDO_ELEMENTS) {
-      const style = getComputedStyle(element, pseudoElement);
-      for (const property of CSS_IMAGE_PROPERTIES) {
-        for (const match of style.getPropertyValue(property).matchAll(CSS_IMAGE_URL_PATTERN)) {
-          urls.add(match[1]);
-        }
-      }
-    }
-  }
-  return urls;
 }
 
 function serializeScreen(sdkSelector: string, marks: ScreenMarkSources) {
