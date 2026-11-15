@@ -162,8 +162,64 @@
   border-radius: calc(var(--radius-container) - var(--spacing-0-5));
 }
 
-/* A segment is 8px shorter than its 44px track. Under a finger the track itself takes the tap for the
-   segment below it. Under a mouse this extends the segment's press area to the track's full height. */
+/* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would
+   truncate. Its usage count sits beside the icon, and a name too long for a narrow panel wraps. */
+.widget-root .widget-tool {
+  block-size: auto;
+  min-block-size: calc(var(--size-element-lg) + var(--spacing-3));
+  padding: var(--spacing-2) var(--spacing-1);
+}
+
+.widget-tool-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-0-5);
+}
+
+.widget-tool-glyph {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.widget-tool-usage,
+.widget-tool-label {
+  font-size: var(--text-supporting-size);
+  line-height: var(--text-supporting-leading);
+}
+
+.widget-tool-usage {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.widget-tool-label {
+  text-align: center;
+  white-space: normal;
+}
+
+/* The feedback type reads as quick replies under the greeting: separate outlined chips, the chosen one a
+   wash, in place of one filled track. The track keeps its block padding, so a chip is still 8px shorter
+   than the 44px the track gives a finger. */
+.widget-root .astryx-segmented-control {
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  padding-inline: 0;
+  background-color: transparent;
+}
+
+.widget-root .astryx-segmented-control-item {
+  border: var(--border-width) solid var(--color-border-emphasized);
+  border-radius: var(--radius-element);
+}
+
+.widget-root .astryx-segmented-control-item[data-selected='selected'] {
+  border-color: transparent;
+}
+
+/* Under a finger the track itself takes the tap for the chip below it. Under a mouse this extends the
+   chip's press area to the track's full height. */
 @media (pointer: fine) {
   .widget-root .astryx-segmented-control-item {
     position: relative;

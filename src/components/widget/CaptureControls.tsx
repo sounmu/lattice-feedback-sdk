@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, type ComponentType } from 'react';
-import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
 import { Card } from '@astryxdesign/core/Card';
 import { HStack } from '@astryxdesign/core/HStack';
@@ -121,18 +120,28 @@ interface ToolButtonProps {
   onClick: () => void;
 }
 
+// An icon over the tool's name, so the four fit side by side. The usage count sits beside the icon and is
+// read out with the name.
 function ToolButton({ icon, label, usage, tooltip, disabled, onClick }: ToolButtonProps) {
   return (
     <Button
-      label={label}
-      icon={<Icon icon={icon} />}
-      endContent={usage ? <Badge label={usage} /> : undefined}
+      label={usage ? `${label} ${usage}` : label}
       tooltip={tooltip ?? undefined}
+      variant="ghost"
       size="lg"
       width="100%"
       isDisabled={disabled}
       onClick={onClick}
-    />
+      className="widget-tool"
+    >
+      <span className="widget-tool-content">
+        <span className="widget-tool-glyph">
+          <Icon icon={icon} />
+          {usage ? <span className="widget-tool-usage">{usage}</span> : null}
+        </span>
+        <span className="widget-tool-label">{label}</span>
+      </span>
+    </Button>
   );
 }
 
@@ -168,7 +177,7 @@ export function CaptureToolBar({
         <Text as="p" type="supporting">
           화면으로 보여주기 (선택)
         </Text>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-4 gap-1">
           {MODES.map((mode) => {
             const blocker = attachments ? findStartBlocker(mode, attachments, { screenCount, isSavingScreen }) : null;
             return (
