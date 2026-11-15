@@ -258,6 +258,7 @@ export class FeedbackSdk {
 
   private readonly handleNavigation = (): void => {
     if (this.isDestroyed) return;
+    this.pendingStarts.pageChanged();
     this.captureController?.pageChanged();
     this.updatePageContext();
   };
@@ -320,7 +321,7 @@ export class FeedbackSdk {
     const message: unknown = event.data;
     if (isCaptureCommand(message)) {
       if (message.type === 'capture:start') {
-        const isCurrent = this.pendingStarts.begin();
+        const isCurrent = this.pendingStarts.begin(message.payload.mode !== 'flow');
         void prepareStaticTextIndex().then(() => {
           if (isCurrent() && !this.isDestroyed) this.captureController?.handleCommand(message);
         });

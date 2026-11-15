@@ -22,3 +22,14 @@ it('lets only the newest of several waiting starts run, and later starts again a
   gate.invalidate();
   expect(gate.begin()()).toBe(true);
 });
+
+it('drops a Comment or Edit start waiting for the index when the page changes, and keeps a Flow start', () => {
+  const gate = createPendingStartGate();
+  const selection = gate.begin(true);
+  gate.pageChanged();
+  expect(selection()).toBe(false);
+
+  const flow = gate.begin(false);
+  gate.pageChanged();
+  expect(flow()).toBe(true);
+});
