@@ -18,6 +18,7 @@ const CLOSE_LABEL = '미리보기 닫기';
 const WAITING_TITLE = '저장한 화면 미리보기';
 const WAITING_MESSAGE = '미리보기를 불러오는 중이에요…';
 const FAILED_MESSAGE = '화면을 불러오지 못했어요';
+const FRAME_LABEL = '저장한 화면 스크롤 영역';
 
 function getSubtitle(state: PreviewState): string {
   switch (state.status) {
@@ -50,6 +51,7 @@ function PreviewScreen({ content }: { content: PreviewContent }) {
         parts={PREVIEW_REPLAY_PARTS}
         className="widget-replay"
         frameClassName="widget-replay-frame"
+        frameLabel={FRAME_LABEL}
       />
       <VStack gap={1}>
         <Text as="p" type="supporting">

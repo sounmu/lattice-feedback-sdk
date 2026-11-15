@@ -219,10 +219,10 @@
   gap: var(--spacing-3);
 }
 
-/* A saved screen shown at its captured size is wider than the preview, so its frame scrolls and the
-   keyboard can focus it to scroll. The frame is the one thing in the preview that takes focus without
-   being a control of the widget. It shows the widget's focus ring just inside its edge, where the
-   scrolling body cannot clip it. */
+/* A saved screen shown at its captured size can be wider than the preview. Its frame then scrolls, and
+   ScreenReplay makes it a keyboard stop so the arrow keys can scroll it. It is the one thing in the
+   preview that takes focus without being a control of the widget. It shows the widget's focus ring just
+   inside its edge, where the scrolling body cannot clip it. */
 .widget-replay-frame {
   inline-size: 100%;
   overflow: auto;

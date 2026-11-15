@@ -483,6 +483,11 @@ interface ScreenReplayProps {
   /** Class names of the replay and of the frame around the rebuilt page, for a host with its own look. */
   className?: string;
   frameClassName?: string;
+  /**
+   * Names the frame and makes it a keyboard stop while the screen is drawn wider than the frame, so the
+   * arrow keys can scroll it. Without a label the frame is never a stop.
+   */
+  frameLabel?: string;
 }
 
 interface ZoomModeButtonProps {
@@ -602,6 +607,7 @@ export function ScreenReplay({
   parts,
   className = 'flex flex-col gap-2',
   frameClassName = 'w-full overflow-auto rounded-xl border bg-white',
+  frameLabel,
 }: ScreenReplayProps) {
   const Parts = { ...DEFAULT_PARTS, ...parts };
   const frameRef = useRef<HTMLDivElement>(null);
@@ -829,6 +835,8 @@ export function ScreenReplay({
   if (zoomMode === 'fit' && availableWidth !== null) {
     scale = Math.min(1, availableWidth / viewportWidth);
   }
+  // Drawn a px or more wider than the room it has, the screen makes its frame scroll sideways.
+  const isFrameStop = frameLabel !== undefined && availableWidth !== null && viewportWidth * scale - availableWidth >= 1;
 
   return (
     <div className={className}>
@@ -846,7 +854,13 @@ export function ScreenReplay({
       )}
       {isTruncated && <Parts.TruncatedNotice />}
       <Parts.ZoomBar zoomMode={zoomMode} scale={scale} unloadedAssetCount={unloadedAssetCount} onZoomModeChange={setZoomMode} />
-      <div ref={frameRef} className={frameClassName}>
+      <div
+        ref={frameRef}
+        className={frameClassName}
+        tabIndex={isFrameStop ? 0 : undefined}
+        role={isFrameStop ? 'group' : undefined}
+        aria-label={isFrameStop ? frameLabel : undefined}
+      >
         <div className="overflow-hidden" style={{ width: viewportWidth * scale, height: viewportHeight * scale }}>
           <div
             className="relative"
