@@ -101,8 +101,9 @@ ${SDK_HOVER_MEDIA} { .comment-box button[data-action="submit"]:hover { backgroun
   .comment-box button { transition: none; }
   .comment-box button:active { transform: none; }
   .comment-pin { transition: none; }
-  .comment-pin:hover, .comment-pin:active { scale: none; }
+  .comment-pin:active { scale: none; }
 }
+${SDK_HOVER_MEDIA} and (prefers-reduced-motion: reduce) { .comment-pin:hover { scale: none; } }
 /* A box shares the panel's z-index and comes later, so it would paint over the panel. On a phone the open
    panel covers the page and has its own comment field, so the box stays out of the way until it closes. */
 @media ${PHONE_MEDIA_QUERY} {
