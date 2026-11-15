@@ -9,7 +9,7 @@ import { trackHistory } from '@/sdk/history-tracking';
 import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
 import { captureRecording, captureScreen } from '@/sdk/screen-capture';
-import { configureAutomaticMasking, prepareStaticTextIndex, warmStaticTextIndex } from '@/sdk/static-text-index';
+import { configureAutomaticMasking, onStaticIndexSettled, prepareStaticTextIndex, warmStaticTextIndex } from '@/sdk/static-text-index';
 import { HOST_ELEMENT_STYLE, PANEL_OPEN_CLASS_NAME, SDK_STYLES } from '@/sdk/styles';
 import type { FeedbackSdkInitOptions } from '@/sdk/types';
 import type { FeedbackReporter } from '@/types/feedback';
@@ -39,6 +39,8 @@ export class FeedbackSdk {
   private activeScreenCaptures = 0;
   // Starts waiting for the static text index; close, cancel, reset and submit make them stale.
   private readonly pendingStarts = createPendingStartGate();
+  // The page title is classified against the index, so it is sent again once the index has finished.
+  private stopWatchingIndex: (() => void) | null = null;
 
   constructor(appOrigin: string) {
     this.appOrigin = appOrigin;
@@ -63,6 +65,7 @@ export class FeedbackSdk {
       ? null
       : findCapturePolicy(options.capturePolicy) ?? { allowedPaths: [], targets: [] };
     configureAutomaticMasking(this.capturePolicy?.automaticMasking);
+    this.stopWatchingIndex = onStaticIndexSettled(() => this.updatePageContext());
     window.addEventListener('message', this.handleMessage);
     this.stopHistoryTracking = trackHistory(this.handleNavigation);
     if (document.body) {
@@ -125,6 +128,8 @@ export class FeedbackSdk {
 
   destroy(): void {
     this.pendingStarts.invalidate();
+    this.stopWatchingIndex?.();
+    this.stopWatchingIndex = null;
     window.removeEventListener('message', this.handleMessage);
     document.removeEventListener('DOMContentLoaded', this.handleDomContentLoaded);
     this.stopResizeTracking();

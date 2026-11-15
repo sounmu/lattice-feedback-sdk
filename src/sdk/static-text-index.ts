@@ -6,6 +6,7 @@ import {
   type AutomaticMaskingOptions,
 } from '@/sdk/automatic-masking';
 import { readTextWithinBudget } from '@/sdk/bounded-source';
+import { createListenerSet } from '@/sdk/listener-set';
 
 // Sized for real application bundles: one unsplit bundle of several megabytes is common, and a page whose
 // bundle does not fit has every label masked.
@@ -22,6 +23,13 @@ let options: AutomaticMaskingOptions = {};
 let preparation: Promise<void> | undefined;
 let incomplete = true;
 let ready = false;
+
+const settledListeners = createListenerSet();
+
+/** Told whenever a run of the index finishes, whoever started it. What was classified before it is worth classifying again. */
+export function onStaticIndexSettled(listener: () => void): () => void {
+  return settledListeners.add(listener);
+}
 
 export function configureAutomaticMasking(value: AutomaticMaskingOptions = {}): void {
   options = value;
@@ -165,5 +173,6 @@ async function buildIndex(): Promise<void> {
     window.clearTimeout(timer);
     ready = true;
     if (!documentRead) preparation = undefined;
+    settledListeners.notify();
   }
 }
