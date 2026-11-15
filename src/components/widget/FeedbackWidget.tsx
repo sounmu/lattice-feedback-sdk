@@ -9,7 +9,6 @@ import { HStack } from '@astryxdesign/core/HStack';
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import { Kbd } from '@astryxdesign/core/Kbd';
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
 import { Skeleton } from '@astryxdesign/core/Skeleton';
 import { Text } from '@astryxdesign/core/Text';
 import { TextArea } from '@astryxdesign/core/TextArea';
@@ -27,6 +26,7 @@ import {
   CaptureToolBar,
   countAttachments,
 } from '@/components/widget/CaptureControls';
+import { ChoiceChips } from '@/components/widget/ChoiceChips';
 import { ScreenSnapshotControls } from '@/components/widget/ScreenSnapshotControls';
 import { SendIcon } from '@/components/widget/WidgetIcons';
 import {
@@ -310,13 +310,6 @@ export function FeedbackWidget() {
     }
   }
 
-  function handleTypeChange(value: string) {
-    const option = FEEDBACK_TYPE_OPTIONS.find((candidate) => candidate.value === value);
-    if (option) {
-      setType(option.value);
-    }
-  }
-
   function handleWriteAnother() {
     isResettingDraft.current = true;
     showAttachmentNotice(null);
@@ -468,11 +461,7 @@ export function FeedbackWidget() {
             보여주셔도 돼요.
           </Text>
         </ChatMessageBubble>
-        <SegmentedControl label="피드백 유형" value={type} onChange={handleTypeChange} size="lg" isDisabled={isBusy}>
-          {FEEDBACK_TYPE_OPTIONS.map((option) => (
-            <SegmentedControlItem key={option.value} value={option.value} label={option.label} />
-          ))}
-        </SegmentedControl>
+        <ChoiceChips label="피드백 유형" options={FEEDBACK_TYPE_OPTIONS} value={type} onChange={setType} isDisabled={isBusy} />
       </ChatMessage>
     );
   }

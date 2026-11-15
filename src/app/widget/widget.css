@@ -43,12 +43,6 @@
   --color-overlay-pressed: #2740c8;
 }
 
-/* The selected segment uses surface/text tokens instead of accent tokens. */
-[data-astryx-theme='neutral'] .astryx-segmented-control-item[data-selected='selected'] {
-  --color-background-surface: var(--color-accent-muted);
-  --color-text-primary: var(--color-text-accent);
-}
-
 .widget-root {
   color: var(--color-text-primary);
   background: var(--color-background-surface);
@@ -278,35 +272,69 @@
   white-space: normal;
 }
 
-/* The feedback type reads as quick replies under the greeting: separate outlined chips, the chosen one a
-   wash, in place of one filled track. The track keeps its block padding, so a chip is still 8px shorter
-   than the 44px the track gives a finger. */
-.widget-root .astryx-segmented-control {
+/* The feedback type reads as quick replies under the greeting: separate outlined chips that wrap onto a
+   second row on a narrow panel, the chosen one a wash with accent ink. A chip is drawn 8px shorter than
+   the 44px that take its press: 4px above and below it, which the row's padding and the gap between rows
+   leave free. */
+.widget-chips {
+  display: flex;
   flex-wrap: wrap;
   gap: var(--spacing-2);
-  padding-inline: 0;
-  background-color: transparent;
+  padding-block: var(--spacing-1);
 }
 
-.widget-root .astryx-segmented-control-item {
+.widget-chip {
+  position: relative;
+  min-block-size: var(--widget-pill-size);
+  padding-inline: var(--spacing-3);
   border: var(--border-width) solid var(--color-border-emphasized);
   border-radius: var(--radius-element);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-label-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-label-leading);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
-.widget-root .astryx-segmented-control-item[data-selected='selected'] {
+/* The press area is measured from inside the chip's border, so it reaches past the border as well. */
+.widget-chip::after {
+  content: '';
+  position: absolute;
+  inset: calc((var(--spacing-1) + var(--border-width)) * -1) 0;
+}
+
+.widget-chip[aria-checked='true'] {
   border-color: transparent;
+  background-color: var(--color-accent-muted);
+  color: var(--color-text-accent);
+  font-weight: var(--font-weight-semibold);
 }
 
-/* Under a finger the track itself takes the tap for the chip below it. Under a mouse this extends the
-   chip's press area to the track's full height. */
-@media (pointer: fine) {
-  .widget-root .astryx-segmented-control-item {
-    position: relative;
-  }
+.widget-chip:focus-visible {
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset);
+}
 
-  .widget-root .astryx-segmented-control-item::after {
-    content: '';
-    position: absolute;
-    inset: calc(var(--spacing-1) * -1) 0;
+/* Only a chip that would change the choice answers the pointer: the chosen one is already in effect. */
+@media (hover: hover) {
+  .widget-chip[aria-checked='false']:not([aria-disabled='true']):hover {
+    background-color: var(--color-overlay-hover);
   }
+}
+
+.widget-chip[aria-checked='false']:not([aria-disabled='true']):active {
+  background-color: var(--color-overlay-pressed);
+}
+
+/* While the feedback is being sent the choice is fixed. The chips dim through their ink, which leaves a
+   focus ring at full strength. */
+.widget-chip[aria-disabled='true'] {
+  color: var(--color-text-disabled);
+  cursor: default;
 }
