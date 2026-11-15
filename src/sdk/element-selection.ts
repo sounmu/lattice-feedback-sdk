@@ -1,5 +1,6 @@
 import type { CaptureTarget } from '@/sdk/capture-policy';
 import { SDK_Z_INDEX } from '@/sdk/styles';
+import { getTranslucentColor, SDK_RADIUS, SDK_THEME } from '@/sdk/theme-tokens';
 
 export interface ElementSelectionOptions {
   readonly findTarget: (target: EventTarget | null) => CaptureTarget | null;
@@ -69,9 +70,9 @@ const OVERLAY_STYLE = [
   'box-sizing: border-box',
   'pointer-events: none',
   `z-index: ${SDK_Z_INDEX - 1}`,
-  'border: 2px solid #2563eb',
-  'border-radius: 4px',
-  'background: rgba(37, 99, 235, 0.12)',
+  `border: 2px solid ${SDK_THEME.info}`,
+  `border-radius: ${SDK_RADIUS.inner}`,
+  `background: ${getTranslucentColor(SDK_THEME.info, 0.12)}`,
 ].join('; ');
 
 function isSdkTarget(target: EventTarget | null): boolean {
