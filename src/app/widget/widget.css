@@ -20,8 +20,11 @@
   --font-family-body: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
     'Segoe UI', 'Malgun Gothic', Roboto, 'Noto Sans KR', Helvetica, Arial, sans-serif;
   --font-family-heading: var(--font-family-body);
-  /* Large controls are the widget's touch targets: 44px instead of the theme's 36px. */
-  --size-element-lg: 2.75rem;
+  /* Large controls are the widget's touch targets: 44px instead of the theme's 36px. A pill, such as a tab
+     or a feedback type, is drawn 8px shorter and keeps the full 44px as its press area. */
+  --widget-target-size: 2.75rem;
+  --widget-pill-size: calc(var(--widget-target-size) - var(--spacing-2));
+  --size-element-lg: var(--widget-target-size);
   /* Shape, after the messenger the widget is modelled on: rounder controls and cards than the theme's,
      and 16px chat bubbles whose grouped corner tightens to the inner radius. src/sdk/theme-tokens.ts
      carries the same values for the SDK's own UI on the host page. */
@@ -89,28 +92,27 @@
 }
 
 /* The tabs sit under the header as two pills. The chosen one is a wash with accent ink, like the chosen
-   feedback type, in place of the theme's underline. A pill is 8px shorter than its 44px press area. */
+   feedback type, in place of the theme's underline. Astryx sizes a tab and the hover layer inside it from
+   the large-control size, so inside the bar that size is the pill's. The bar itself stays 44px tall: its
+   padding and its divider make up the difference. */
 .widget-root .astryx-tab-list {
+  --size-element-lg: var(--widget-pill-size);
   gap: var(--spacing-1);
-  padding: var(--spacing-1) var(--spacing-3) var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-3) calc(var(--spacing-1) - var(--border-width));
 }
 
-.widget-root .astryx-tab-strip {
-  padding-block-end: 0;
-}
-
-.widget-root .astryx-tab {
-  min-block-size: calc(var(--size-element-lg) - var(--spacing-2));
-}
-
+/* A tab takes a press anywhere in the bar's height, 4px above and below its pill. */
 .widget-root .astryx-tab::after {
   content: '';
   position: absolute;
   inset: calc(var(--spacing-1) * -1) 0;
 }
 
+/* The chosen tab is already open: pointing at it or pressing it does nothing, so it shows no state change. */
 .widget-root .astryx-tab[data-selected='selected'] {
   --color-text-primary: var(--color-text-accent);
+  --color-overlay-hover: transparent;
+  --color-overlay-pressed: transparent;
   background-color: var(--color-accent-muted);
 }
 

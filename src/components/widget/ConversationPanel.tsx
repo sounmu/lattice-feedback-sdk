@@ -169,11 +169,14 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
   return (
     <WidgetHeaderSlotProvider value={headerSlot}>
       <div ref={setHeaderSlot} className="shrink-0" />
+      {/* The two tabs always fit, so the strip never scrolls. A scrolling strip clips at its edge, which cut
+          off a tab's focus ring and the lower part of its press area. */}
       <TabList
         value={showHistory ? HISTORY_TAB : NEW_FEEDBACK_TAB}
         onChange={(value) => setShowHistory(value === HISTORY_TAB)}
         size="lg"
         layout="fill"
+        overflow="visible"
         hasDivider
         aria-label="피드백 메뉴"
         className="shrink-0"
