@@ -165,18 +165,32 @@ describe('Supabase saved screen repository', () => {
     const repository = createSupabaseScreenSnapshotRepository();
     const stored = 'a'.repeat(64);
     const missing = 'b'.repeat(64);
-    responseBodies = [[{ hash: stored }], [], [{ contentType: 'font/woff2', data: '\\x010203' }]];
+    responseBodies = [[{ hash: stored }], [], [], [{ contentType: 'font/woff2', data: '\\x010203' }]];
 
     expect(await repository.findMissingAssetHashes('demo', [stored, missing, stored])).toEqual([missing]);
-    await repository.saveAsset({ projectKey: 'demo', hash: missing, contentType: 'font/woff2', data: new Uint8Array([1, 2, 3]) });
+    await repository.saveAsset({ projectKey: 'demo', hash: missing, contentType: 'font/woff2', data: new Uint8Array([9, 1, 2, 3, 9]).subarray(1, 4) });
     const asset = await repository.findAsset('demo', stored);
 
     expect(getSearch(received[0])).toMatchObject({ project_key: 'eq.demo', hash: `in.(${stored},${missing})` });
-    expect(received[1].headers.prefer).toContain('resolution=ignore-duplicates');
-    expect(getSearch(received[1]).on_conflict).toBe('project_key,hash');
-    expect(JSON.parse(received[1].body)).toMatchObject({ project_key: 'demo', hash: missing, byte_size: 3, data: '\\x010203' });
-    expect(getSearch(received[2])).toMatchObject({ project_key: 'eq.demo', hash: `eq.${stored}` });
-    expect(asset).toEqual({ contentType: 'font/woff2', data: new Uint8Array([1, 2, 3]) });
+    expect(received[2].headers.prefer).toContain('resolution=ignore-duplicates');
+    expect(getSearch(received[2]).on_conflict).toBe('project_key,hash');
+    expect(JSON.parse(received[2].body)).toMatchObject({ project_key: 'demo', hash: missing, byte_size: 3, data: '\\x010203' });
+    expect(getSearch(received[3])).toMatchObject({ project_key: 'eq.demo', hash: `eq.${stored}` });
+    expect(asset?.contentType).toBe('font/woff2');
+    expect(Array.from(asset?.data ?? [])).toEqual([1, 2, 3]);
+  });
+
+  it('#78 checks the project hash without retransmitting an existing asset', async () => {
+    const hash = 'a'.repeat(64);
+    responseBodies = [[{ hash }]];
+
+    await createSupabaseScreenSnapshotRepository().saveAsset({
+      projectKey: 'demo', hash, contentType: 'font/woff2', data: new Uint8Array(1024 * 1024),
+    });
+
+    expect(received).toHaveLength(1);
+    expect(getSearch(received[0])).toMatchObject({ select: 'hash', project_key: 'eq.demo', hash: `in.(${hash})` });
+    expect(received[0].body).toBe('');
   });
 
   it('reports a failed request, an unexpected row, or a missing key as unavailable storage', async () => {

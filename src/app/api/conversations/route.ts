@@ -4,12 +4,14 @@ import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { createApiErrorResponse } from '@/lib/http/api-error';
 import { consumeRateLimit, getClientAddress } from '@/lib/http/rate-limit';
-import { BodyTooLargeError, readBodyTextWithLimit } from '@/lib/http/read-body';
+import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyTextWithLimit } from '@/lib/http/read-body';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
 import { findVerifiedReporterIdentity, hashConversationSecret } from '@/lib/reporter-identity';
 import { conversationPostSchema, conversationRequestSchema } from '@/lib/validation/conversation-schema';
 import type { Feedback } from '@/types/feedback';
+
+const MAX_BODY_BYTES = 32768;
 
 // Reporter responses deliberately exclude saved screens, page metadata and private access fields.
 function getThread(feedback: Feedback) {
@@ -24,8 +26,11 @@ async function handleRequest(request: Request, write: boolean) {
     response.headers.set('Retry-After', '60');
     return response;
   }
+  if (isDeclaredBodyTooLarge(request, MAX_BODY_BYTES)) {
+    return createApiErrorResponse(413, 'payload_too_large', 'Request too large.');
+  }
   try {
-    const raw = await readBodyTextWithLimit(request, 32768);
+    const raw = await readBodyTextWithLimit(request, MAX_BODY_BYTES);
     let json: unknown;
     try {
       json = JSON.parse(raw);

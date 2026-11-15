@@ -205,12 +205,230 @@
   color: color-mix(in srgb, var(--color-on-accent) 50%, var(--color-background-muted));
 }
 
-/* A saved screen shown at its captured size is wider than the preview, so its frame scrolls and the
-   keyboard can focus it to scroll. The frame is the one thing in the preview that takes focus without
-   being a control of the widget, and it shows the widget's focus ring. */
-.widget-screen-preview :focus-visible:not(button, input) {
+/* A dialog's title takes focus when the dialog opens, so a screen reader starts with its name. It is not
+   a control and shows no ring; the next Tab lands on the first control, which does. */
+.widget-dialog-title:focus {
+  outline: none;
+}
+
+/* The large preview is its own document in a second panel the SDK opens. It draws the saved screen with
+   the widget's controls, in one column: playback, zoom, the screen, then what was marked on it. */
+.widget-replay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+/* A saved screen shown at its captured size can be wider than the preview. Its frame then scrolls, and
+   ScreenReplay makes it a keyboard stop so the arrow keys can scroll it. It is the one thing in the
+   preview that takes focus without being a control of the widget. It shows the widget's focus ring just
+   inside its edge, where the scrolling body cannot clip it. */
+.widget-replay-frame {
+  inline-size: 100%;
+  overflow: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-container);
+  background-color: var(--color-background-muted);
+}
+
+.widget-replay-frame:focus-visible {
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: calc(var(--focus-outline-width) * -1);
+}
+
+/* A screen narrower than its frame sits in the middle of it. */
+.widget-replay-frame > div {
+  margin-inline: auto;
+}
+
+/* Playback sits on one row where there is room: play and restart, the step pager, then the position.
+   On a phone the position wraps onto its own row, and the pager takes what the first row has left. */
+.widget-replay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2) var(--spacing-3);
+}
+
+.widget-replay-pager {
+  display: flex;
+  flex: 1 1 12.5rem;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-inline-size: 0;
+  max-inline-size: 16rem;
+}
+
+.widget-replay-position {
+  display: flex;
+  flex: 1 1 14rem;
+  align-items: center;
+  gap: var(--spacing-3);
+  min-inline-size: 0;
+  padding-inline: var(--spacing-2);
+}
+
+/* A step's name changes length as the replay moves. It fills the room between the two step buttons, so
+   they stay where they are. */
+.widget-replay-step {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  text-align: center;
+}
+
+/* The saved screen answers a mouse wheel only, so the hint is for pointers that have one. */
+@media not ((hover: hover) and (pointer: fine)) {
+  .widget-wheel-hint {
+    display: none;
+  }
+}
+
+/* Marks over a saved screen look like the ones the SDK draws on the live page: the theme's info colour,
+   which keeps page annotations apart from the widget's primary actions. src/sdk/comment-overlay.ts and
+   src/sdk/element-selection.ts carry the same shapes for the host page. */
+.widget-mark-target {
+  border: 2px solid color-mix(in srgb, var(--color-info) 70%, transparent);
+  border-radius: var(--radius-inner);
+}
+
+.widget-mark-target-selected {
+  border-color: var(--color-info);
+  background-color: color-mix(in srgb, var(--color-info) 12%, transparent);
+}
+
+/* A pin is drawn 28px wide and takes a press 44px wide, like a pin on the live page. */
+.widget-pin {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  border: 2px solid var(--color-background-surface);
+  border-radius: var(--radius-full);
+  background-color: var(--color-info);
+  color: var(--color-on-info);
+  font-size: var(--text-supporting-size);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  box-shadow: var(--shadow-med);
+  cursor: pointer;
+  transition: scale var(--duration-fast) var(--ease-standard);
+}
+
+.widget-pin::after {
+  content: '';
+  position: absolute;
+  inset: calc(var(--spacing-2) * -1 - 2px);
+}
+
+@media (hover: hover) {
+  .widget-pin:hover {
+    background-image: linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover));
+    scale: 1.1;
+  }
+}
+
+.widget-pin:active {
+  background-image: linear-gradient(var(--color-overlay-pressed), var(--color-overlay-pressed));
+  scale: 0.94;
+}
+
+.widget-pin:focus-visible {
   outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
   outline-offset: var(--focus-outline-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-pin {
+    transition: none;
+  }
+
+  .widget-pin:hover,
+  .widget-pin:active {
+    scale: none;
+  }
+}
+
+/* The comment of a chosen pin opens beside it as a popover. Its width is the one the overlay places it by. */
+.widget-pin-note {
+  inline-size: 16rem;
+  margin-block-start: var(--spacing-1);
+  padding: var(--spacing-3);
+  border-radius: var(--radius-container);
+  background-color: var(--color-background-popover);
+  color: var(--color-text-primary);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+  box-shadow: 0 0 0 var(--border-width) var(--color-border), var(--shadow-high);
+}
+
+.widget-pin-note-label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-supporting-size);
+  line-height: var(--text-supporting-leading);
+}
+
+.widget-pin-note-comment {
+  margin-block-start: var(--spacing-0-5);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* An edit keeps both positions outlined: dashed where the element was, solid where it is proposed. The
+   position the element is drawn at carries the wash; a vacated original goes neutral. */
+.widget-move-outline {
+  border: 2px solid var(--color-info);
+  border-radius: var(--radius-inner);
+}
+
+.widget-move-original {
+  border-style: dashed;
+  background-color: color-mix(in srgb, var(--color-info) 12%, transparent);
+}
+
+.widget-move-vacated {
+  border-style: dashed;
+  border-color: var(--color-text-secondary);
+}
+
+.widget-move-proposed {
+  border-color: color-mix(in srgb, var(--color-info) 70%, transparent);
+}
+
+.widget-move-shown {
+  border-color: var(--color-info);
+  background-color: color-mix(in srgb, var(--color-info) 12%, transparent);
+}
+
+.widget-move-label {
+  padding: var(--spacing-0-5) var(--spacing-1-5);
+  border-radius: var(--radius-inner);
+  background-color: var(--color-info);
+  color: var(--color-on-info);
+  font-size: var(--text-supporting-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-supporting-leading);
+  white-space: nowrap;
+  box-shadow: var(--shadow-med);
+}
+
+/* The number a comment or edit has on the screen, repeated in front of its row in the lists below it. */
+.widget-mark-number {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-info);
+  color: var(--color-on-info);
+  font-size: var(--text-supporting-size);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 /* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would

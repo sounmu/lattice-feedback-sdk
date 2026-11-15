@@ -65,6 +65,20 @@ export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotReposito
     });
   }
 
+  async function findMissingAssetHashes(projectKey: string, hashes: readonly string[]): Promise<string[]> {
+    const uniqueHashes = [...new Set(hashes)];
+    if (uniqueHashes.length === 0) {
+      return [];
+    }
+    const rows = await requestSupabaseRows(configuration, ASSET_TABLE, {
+      select: 'hash',
+      project_key: `eq.${projectKey}`,
+      hash: `in.(${uniqueHashes.join(',')})`,
+    });
+    const stored = new Set(parseRows(hashRowsSchema, rows).map((row) => row.hash));
+    return uniqueHashes.filter((hash) => !stored.has(hash));
+  }
+
   return {
     async create(input) {
       const rows = await requestSupabaseRows(configuration, TABLE, { select: SUMMARY_SELECT }, {
@@ -148,21 +162,14 @@ export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotReposito
 
     releaseFromFeedback,
 
-    async findMissingAssetHashes(projectKey, hashes) {
-      const uniqueHashes = [...new Set(hashes)];
-      if (uniqueHashes.length === 0) {
-        return [];
-      }
-      const rows = await requestSupabaseRows(configuration, ASSET_TABLE, {
-        select: 'hash',
-        project_key: `eq.${projectKey}`,
-        hash: `in.(${uniqueHashes.join(',')})`,
-      });
-      const stored = new Set(parseRows(hashRowsSchema, rows).map((row) => row.hash));
-      return uniqueHashes.filter((hash) => !stored.has(hash));
-    },
+    findMissingAssetHashes,
 
     async saveAsset({ projectKey, hash, contentType, data }) {
+      // A retry must not hex-encode and transmit an already stored file. The conflict rule below
+      // still handles concurrent first uploads; a prior absence check alone cannot guarantee uniqueness.
+      if ((await findMissingAssetHashes(projectKey, [hash])).length === 0) {
+        return;
+      }
       await requestSupabaseRows(configuration, ASSET_TABLE, { select: 'hash', on_conflict: 'project_key,hash' }, {
         method: 'POST',
         body: JSON.stringify({
@@ -170,7 +177,7 @@ export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotReposito
           hash,
           content_type: contentType,
           byte_size: data.byteLength,
-          data: `${BYTEA_HEX_PREFIX}${Buffer.from(data).toString('hex')}`,
+          data: `${BYTEA_HEX_PREFIX}${Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('hex')}`,
         }),
       }, ['resolution=ignore-duplicates']);
     },
@@ -187,7 +194,7 @@ export function createSupabaseScreenSnapshotRepository(): ScreenSnapshotReposito
       }
       return {
         contentType: asset.contentType,
-        data: new Uint8Array(Buffer.from(asset.data.slice(BYTEA_HEX_PREFIX.length), 'hex')),
+        data: Buffer.from(asset.data.slice(BYTEA_HEX_PREFIX.length), 'hex'),
       };
     },
   };

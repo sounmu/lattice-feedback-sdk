@@ -48,6 +48,8 @@ export const SDK_THEME = {
   overlayHover: 'rgba(0, 0, 0, 0.05)',
   /** --color-overlay-pressed (#0000001a) */
   overlayPressed: 'rgba(0, 0, 0, 0.1)',
+  /** --color-overlay (#00000080): the dimmer between a modal layer and the page under it */
+  overlay: 'rgba(0, 0, 0, 0.5)',
   /** --color-info */
   info: '#0074e2',
   /** --color-on-info */

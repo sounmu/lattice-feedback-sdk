@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { ConversationLimitError } from '@/lib/conversation';
 import { consumeRateLimit, getClientAddress } from '@/lib/http/rate-limit';
-import { BodyTooLargeError, readBodyTextWithLimit } from '@/lib/http/read-body';
+import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyTextWithLimit } from '@/lib/http/read-body';
 import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
+import { createPrivateJsonResponse } from '@/lib/http/private-json-response';
 import { findProject } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
@@ -15,6 +16,8 @@ import type { Feedback, FeedbackDetailResponse, UpdateFeedbackInput } from '@/ty
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
+
+const MAX_BODY_BYTES = 32768;
 
 async function createDetailBody(feedback: Feedback): Promise<FeedbackDetailResponse> {
   const screenSnapshots = await getScreenSnapshotRepository().findManyByFeedback(feedback.projectKey, feedback.id);
@@ -41,7 +44,7 @@ export async function GET(request: Request, context: RouteContext) {
     if (!feedback) {
       return createFeedbackNotFoundResponse();
     }
-    return NextResponse.json(await createDetailBody(feedback));
+    return createPrivateJsonResponse(request, await createDetailBody(feedback));
   } catch (error) {
     if (error instanceof FeedbackStorageUnavailableError) {
       return createApiErrorResponse(503, 'storage_unavailable', error.message);
@@ -63,10 +66,13 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!consumeRateLimit(`admin-reply:${projectKey}:${getClientAddress(request)}`, Date.now(), 30)) {
     return createApiErrorResponse(429, 'rate_limited', 'Try again later.');
   }
+  if (isDeclaredBodyTooLarge(request, MAX_BODY_BYTES)) {
+    return createApiErrorResponse(413, 'payload_too_large', 'Request too large.');
+  }
 
   let json: unknown;
   try {
-    json = JSON.parse(await readBodyTextWithLimit(request, 32768));
+    json = JSON.parse(await readBodyTextWithLimit(request, MAX_BODY_BYTES));
   } catch (error) {
     if (error instanceof BodyTooLargeError) return createApiErrorResponse(413, 'payload_too_large', 'Request too large.');
     return createApiErrorResponse(400, 'invalid_json', 'Request body must be valid JSON.');
@@ -87,7 +93,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (!feedback) {
       return createFeedbackNotFoundResponse();
     }
-    return NextResponse.json(await createDetailBody(feedback));
+    return NextResponse.json(await createDetailBody(feedback), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof ConversationLimitError) {
       return createApiErrorResponse(409, 'conversation_full', error.message);

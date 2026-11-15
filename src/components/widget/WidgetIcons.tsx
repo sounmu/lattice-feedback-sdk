@@ -62,3 +62,27 @@ export function SendIcon(props: IconProps) {
     </Glyph>
   );
 }
+
+export function PlayIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <path d="M7 4.5v15l12-7.5Z" />
+    </Glyph>
+  );
+}
+
+export function PauseIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <path d="M8 5v14M16 5v14" />
+    </Glyph>
+  );
+}
+
+export function RestartIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <path d="M19 5v14L9 12ZM5 5v14" />
+    </Glyph>
+  );
+}

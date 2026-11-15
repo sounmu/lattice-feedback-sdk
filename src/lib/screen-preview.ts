@@ -161,3 +161,24 @@ export function keepListedCaptures<TCapture>(
   const listed = new Set(snapshots.map((snapshot) => snapshot.id));
   return new Map([...captures].filter(([id]) => listed.has(id)));
 }
+
+interface BubbleFit {
+  /** Where the pin is across the screen and how wide the screen is, in px of the saved page. */
+  pinX: number;
+  viewWidth: number;
+  /** On-screen size of one px of the saved page. */
+  scale: number;
+  /** On-screen width of the comment, and the gap it keeps to the edge of the screen. */
+  bubbleWidth: number;
+  edgeGap: number;
+}
+
+/**
+ * How far left of its pin an open comment starts so that it ends inside the screen, in on-screen px.
+ * A screen narrower than the comment leaves it starting at the left edge and running over the right one.
+ */
+export function getBubbleShift({ pinX, viewWidth, scale, bubbleWidth, edgeGap }: BubbleFit): number {
+  const roomRight = (viewWidth - pinX) * scale - edgeGap;
+  const roomLeft = pinX * scale - edgeGap;
+  return Math.max(0, Math.min(bubbleWidth - roomRight, roomLeft));
+}

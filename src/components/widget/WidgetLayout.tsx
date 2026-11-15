@@ -29,24 +29,41 @@ export const WidgetHeaderSlotProvider = WidgetHeaderSlotContext.Provider;
 interface WidgetHeaderProps {
   title: string;
   subtitle: string;
+  /** Set when the panel is a dialog named by its title. The title can then take focus, which is where a dialog's focus starts. */
+  titleId?: string;
   onClose?: () => void;
+  /** What the close button closes, when "close" alone would not say. */
+  closeLabel?: string;
   /** Replaces the avatar with a back button. */
   onBack?: () => void;
   /** Where the back button leads, when "back" alone would not say. */
   backLabel?: string;
+  /** The team's avatar leads the header. A panel that is not a conversation with the team leaves it out. */
+  hasAvatar?: boolean;
 }
 
-export function WidgetHeader({ title, subtitle, onClose, onBack, backLabel = BACK_LABEL }: WidgetHeaderProps) {
+export function WidgetHeader({
+  title, subtitle, titleId, onClose, closeLabel = CLOSE_LABEL, onBack, backLabel = BACK_LABEL, hasAvatar = true,
+}: WidgetHeaderProps) {
   const slot = useContext(WidgetHeaderSlotContext);
+  let leading: ReactNode = null;
+  if (onBack) {
+    leading = <IconButton label={backLabel} tooltip={backLabel} icon={<Icon icon="chevronLeft" />} variant="ghost" size="lg" onClick={onBack} />;
+  } else if (hasAvatar) {
+    leading = <Avatar name={WIDGET_TEAM_NAME} size={32} shape="rounded" tooltip={false} />;
+  }
   const header = (
     <HStack as="header" gap={3} align="center" paddingInlineStart={onBack ? 3 : 4} paddingInlineEnd={3} paddingBlock={1.5} className="shrink-0">
-      {onBack ? (
-        <IconButton label={backLabel} tooltip={backLabel} icon={<Icon icon="chevronLeft" />} variant="ghost" size="lg" onClick={onBack} />
-      ) : (
-        <Avatar name={WIDGET_TEAM_NAME} size={32} shape="rounded" tooltip={false} />
-      )}
+      {leading}
       <VStack gap={0} className="min-w-0 flex-1">
-        <Heading level={3} accessibilityLevel={1} maxLines={1}>
+        <Heading
+          id={titleId}
+          tabIndex={titleId ? -1 : undefined}
+          className={titleId ? 'widget-dialog-title' : undefined}
+          level={3}
+          accessibilityLevel={1}
+          maxLines={1}
+        >
           {title}
         </Heading>
         <Text as="p" type="supporting" maxLines={2}>
@@ -54,7 +71,7 @@ export function WidgetHeader({ title, subtitle, onClose, onBack, backLabel = BAC
         </Text>
       </VStack>
       {onClose ? (
-        <IconButton label={CLOSE_LABEL} tooltip={CLOSE_LABEL} icon={<Icon icon="close" />} variant="ghost" size="lg" onClick={onClose} />
+        <IconButton label={closeLabel} tooltip={closeLabel} icon={<Icon icon="close" />} variant="ghost" size="lg" onClick={onClose} />
       ) : null}
     </HStack>
   );
