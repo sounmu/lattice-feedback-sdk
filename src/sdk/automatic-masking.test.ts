@@ -88,3 +88,18 @@ describe('automatic text masking', () => {
     expect(masker.text(2, 'Total')).toBe('●●●●●');
   });
 });
+
+describe('literals a script concatenates', () => {
+  it('adds each run once as a whole, so a long chain does not grow with every piece', () => {
+    const pieces = Array.from({ length: 300 }, (_, index) => `p${index} `);
+    const literals = extractScriptLiterals(`const label = ${pieces.map((piece) => `'${piece}'`).join(' + ')};`);
+
+    expect(literals).toHaveLength(301);
+    expect(literals.at(-1)).toBe(pieces.join(''));
+  });
+
+  it('ends a run at anything that is not a literal', () => {
+    expect(extractScriptLiterals(`a = 'Order ' + 'total' + suffix + 'Saved ' + "now"; b = 'x' + \`\${y}\` + 'z'`))
+      .toEqual(['Order ', 'total', 'Order total', 'Saved ', 'now', 'Saved now', 'x', 'z']);
+  });
+});
