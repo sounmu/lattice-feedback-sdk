@@ -1,6 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
+import { Button } from '@astryxdesign/core/Button';
+import { Card } from '@astryxdesign/core/Card';
+import { Heading } from '@astryxdesign/core/Heading';
+import { HStack } from '@astryxdesign/core/HStack';
+import { Text } from '@astryxdesign/core/Text';
+import { VStack } from '@astryxdesign/core/VStack';
 
 import { ScreenReplay } from '@/components/admin/ScreenSnapshotViewer';
 import type { ScreenCapture } from '@/types/screen-snapshot';
@@ -25,22 +31,26 @@ export function ScreenSnapshotPreview({ capture, title, onClose }: ScreenSnapsho
   }, []);
 
   return (
-    <section ref={sectionRef} aria-label={`${title} 미리보기`} className="flex w-full min-w-0 flex-col gap-2 rounded-xl border border-fw-border bg-fw-surface-sub p-2">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="min-w-0 break-words text-xs font-semibold">{title} 미리보기</h2>
-        <button type="button" className="min-h-11 shrink-0 rounded-[10px] border border-fw-border bg-fw-surface px-3 text-xs" onClick={onClose}>
-          미리보기 닫기
-        </button>
-      </div>
-      <p className="break-words text-xs text-fw-sub">
-        담당자에게 전달될 화면이에요. 이 브라우저에 남아 있는 자료로 보여 드려요.
-      </p>
-      <ScreenReplay screen={screen} loadAssetUrls={loadAssetUrls} />
-      {screen.missingAssets.some((item) => item.reason === 'text_masked' || item.reason === 'text_index_incomplete') && (
-        <p className="break-words text-xs text-gray-600">
-          데이터로 추정하거나 정적 출처를 확인하지 못한 텍스트는 전송 전에 ●로 가렸습니다.
-        </p>
-      )}
+    <section ref={sectionRef} aria-label={`${title} 미리보기`} className="w-full min-w-0">
+      <Card padding={2} variant="muted">
+        <VStack gap={2}>
+          <HStack gap={2} align="center" justify="between">
+            <Heading level={4} accessibilityLevel={2} className="min-w-0">
+              {title} 미리보기
+            </Heading>
+            <Button label="미리보기 닫기" size="lg" onClick={onClose} />
+          </HStack>
+          <Text as="p" type="supporting">
+            담당자에게 전달될 화면이에요. 이 브라우저에 남아 있는 자료로 보여 드려요.
+          </Text>
+          <ScreenReplay screen={screen} loadAssetUrls={loadAssetUrls} />
+          {screen.missingAssets.some((item) => item.reason === 'text_masked' || item.reason === 'text_index_incomplete') && (
+            <Text as="p" type="supporting">
+              데이터로 추정하거나 정적 출처를 확인하지 못한 텍스트는 전송 전에 ●로 가렸습니다.
+            </Text>
+          )}
+        </VStack>
+      </Card>
     </section>
   );
 }
