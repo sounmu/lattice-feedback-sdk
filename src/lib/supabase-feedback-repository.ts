@@ -6,7 +6,7 @@ import { getSupabaseConfiguration } from '@/lib/supabase-rest';
 import { createFeedbackInputSchema, updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import type { Feedback } from '@/types/feedback';
 import type { ConversationCredentials } from '@/types/conversation';
-import { conversationMessagesSchema } from '@/lib/validation/conversation-schema';
+import { conversationMessagesSchema, reporterOrganizationSchema } from '@/lib/validation/conversation-schema';
 import { ConversationLimitError } from '@/lib/conversation';
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -31,6 +31,7 @@ async function isDuplicateTargetRefusal(response: Response): Promise<boolean> {
 const feedbackRowsSchema = z.array(
   createFeedbackInputSchema.omit({ hostOrigin: true }).extend({
     id: z.uuid(),
+    reporter: createFeedbackInputSchema.shape.reporter.extend({ verifiedOrganization: reporterOrganizationSchema.optional() }),
     status: updateFeedbackInputSchema.shape.status.unwrap(),
     duplicateOfId: z.uuid().nullable(),
     adminReply: updateFeedbackInputSchema.shape.adminReply.unwrap(),
@@ -111,6 +112,7 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
           reporter: {
             id: input.reporter.id, name: input.reporter.name,
             ...(input.reporter.email === undefined ? {} : { email: input.reporter.email }),
+            ...(input.reporter.verifiedOrganization === undefined ? {} : { verifiedOrganization: input.reporter.verifiedOrganization }),
           },
           page: input.page,
           attachments: {

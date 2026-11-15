@@ -55,7 +55,7 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
   function getRequest() {
     return {
       ...config,
-      reporter: reporter ? { id: reporter.id, name: reporter.name, identity: reporter.identity } : null,
+      reporter: reporter ? { id: reporter.id, name: reporter.name, organization: reporter.organization, identity: reporter.identity } : null,
       secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin, reporter?.id ?? null),
     };
   }
@@ -77,7 +77,7 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...config,
-            reporter: reporter ? { id: reporter.id, name: reporter.name, identity: reporter.identity } : null,
+            reporter: reporter ? { id: reporter.id, name: reporter.name, organization: reporter.organization, identity: reporter.identity } : null,
             secrets: getBrowserConversationSecrets(config.projectKey, config.hostOrigin, reporter?.id ?? null),
           }),
           signal,

@@ -77,7 +77,7 @@ export class FeedbackSdk {
 
   setUser(reporter: FeedbackReporter | null): void {
     if (reporter !== null && !isFeedbackReporter(reporter)) {
-      console.warn(`${LOG_PREFIX} setUser() expects { id: string, name: string, email?: string } or null; ignoring.`);
+      console.warn(`${LOG_PREFIX} setUser() expects { id: string, name: string, email?: string, organization?: { id: string, name?: string } } or null; ignoring.`);
       return;
     }
     this.reporter = reporter === null ? null : copyReporter(reporter);

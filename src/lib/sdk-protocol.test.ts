@@ -35,6 +35,11 @@ const SCREEN: CapturedScreen = {
 };
 
 describe('isHostToWidgetMessage', () => {
+  it('rejects a malformed reporter organization', () => {
+    const reporter = { id: 'alice', name: 'Alice', organization: { id: 5 } };
+    expect(isHostToWidgetMessage(createHostToWidgetMessage('reporter:update', { reporter } as never))).toBe(false);
+  });
+
   it('accepts boolean visibility only and rejects malformed identity proofs', () => {
     const visible = createHostToWidgetMessage('visibility:update', { isOpen: true });
     expect(isHostToWidgetMessage(visible)).toBe(true);
