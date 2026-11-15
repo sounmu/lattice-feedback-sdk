@@ -12,6 +12,11 @@ export const HOST_ELEMENT_STYLE = 'all: initial;';
 /** Screens narrow enough that the open panel takes the whole screen above the launcher. */
 export const PHONE_MEDIA_QUERY = '(max-width: 480px)';
 
+/** How far the panel and the launcher stay from the viewport edge, and the panel's width and bottom edge. */
+export const PANEL_EDGE = '20px';
+export const PANEL_WIDTH = 'min(380px, calc(100vw - 40px))';
+export const PANEL_BOTTOM = '88px';
+
 export const LAUNCHER_ICON_CLASS_NAME = 'launcher-icon';
 export const LAUNCHER_CLOSE_ICON_CLASS_NAME = 'launcher-icon-close';
 export const LAUNCHER_LABEL_CLASS_NAME = 'launcher-label';
@@ -94,10 +99,10 @@ ${SDK_HOVER_MEDIA} {
 
 .panel {
   position: fixed;
-  right: 20px;
-  bottom: 88px;
+  right: ${PANEL_EDGE};
+  bottom: ${PANEL_BOTTOM};
   z-index: ${SDK_Z_INDEX};
-  width: min(380px, calc(100vw - 40px));
+  width: ${PANEL_WIDTH};
   height: min(640px, calc(100vh - 108px));
   display: none;
   overflow: hidden;

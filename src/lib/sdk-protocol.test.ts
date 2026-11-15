@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   createHostToWidgetMessage,
+  createPreviewMessage,
   createWidgetToHostMessage,
   isHostToWidgetMessage,
+  isPreviewConnectMessage,
+  isPreviewContentMessage,
+  isPreviewToHostMessage,
   isWidgetToHostMessage,
 } from '@/lib/sdk-protocol';
 import { MESSAGE_SOURCE, PROTOCOL_VERSION } from '@/types/sdk-message';
@@ -56,6 +60,13 @@ describe('isHostToWidgetMessage', () => {
     ).toBe(true);
     expect(isHostToWidgetMessage(createHostToWidgetMessage('reporter:update', { reporter: null }))).toBe(true);
     expect(isHostToWidgetMessage(createHostToWidgetMessage('page:update', { page: PAGE }))).toBe(true);
+    expect(isHostToWidgetMessage(createHostToWidgetMessage('preview:closed', { previewId: 'preview-1' }))).toBe(true);
+  });
+
+  it('rejects a closed preview without a usable id', () => {
+    const closed = createHostToWidgetMessage('preview:closed', { previewId: 'preview-1' });
+    expect(isHostToWidgetMessage({ ...closed, payload: {} })).toBe(false);
+    expect(isHostToWidgetMessage({ ...closed, payload: { previewId: 'p'.repeat(65) } })).toBe(false);
   });
 
   it('rejects a wrong source', () => {
@@ -115,7 +126,16 @@ describe('isWidgetToHostMessage', () => {
     expect(isWidgetToHostMessage(createWidgetToHostMessage('close', {}))).toBe(true);
     expect(isWidgetToHostMessage(createWidgetToHostMessage('screen:capture', { requestId: 'request-1' }))).toBe(true);
     expect(isWidgetToHostMessage(createWidgetToHostMessage('flow:capture', { requestId: 'request-2' }))).toBe(true);
+    expect(isWidgetToHostMessage(createWidgetToHostMessage('preview:open', { previewId: 'preview-1' }))).toBe(true);
+    expect(isWidgetToHostMessage(createWidgetToHostMessage('preview:close', {}))).toBe(true);
     expect(isWidgetToHostMessage(SUBMITTED_MESSAGE)).toBe(true);
+  });
+
+  it('rejects a preview request without a usable id', () => {
+    const open = createWidgetToHostMessage('preview:open', { previewId: 'preview-1' });
+    expect(isWidgetToHostMessage({ ...open, payload: {} })).toBe(false);
+    expect(isWidgetToHostMessage({ ...open, payload: { previewId: '' } })).toBe(false);
+    expect(isWidgetToHostMessage({ ...open, payload: { previewId: 7 } })).toBe(false);
   });
 
   it('rejects a wrong source', () => {
@@ -138,5 +158,47 @@ describe('isWidgetToHostMessage', () => {
     expect(isWidgetToHostMessage({ ...SUBMITTED_MESSAGE, payload: { feedbackId: 1 } })).toBe(false);
     expect(isWidgetToHostMessage({ ...SUBMITTED_MESSAGE, payload: {} })).toBe(false);
     expect(isWidgetToHostMessage({ ...SUBMITTED_MESSAGE, payload: 'fb_1' })).toBe(false);
+  });
+});
+
+describe('preview iframe messages', () => {
+  const CONTENT = createPreviewMessage('preview:content', {
+    title: '저장한 화면 1 미리보기',
+    subtitle: '1280×720',
+    capture: { screen: SCREEN, assetFiles: [new Blob(['font-bytes'])] },
+  });
+  const withPayload = (payload: object) => ({ ...CONTENT, payload: { ...CONTENT.payload, ...payload } });
+
+  it('keeps the preview iframe to its own two requests', () => {
+    expect(isPreviewToHostMessage(createPreviewMessage('preview:ready', {}))).toBe(true);
+    expect(isPreviewToHostMessage(createPreviewMessage('preview:close', {}))).toBe(true);
+    expect(isPreviewToHostMessage(createWidgetToHostMessage('ready', {}))).toBe(false);
+    expect(isPreviewToHostMessage(createWidgetToHostMessage('screen:capture', { requestId: 'request-1' }))).toBe(false);
+    expect(isPreviewToHostMessage(createPreviewMessage('preview:connect', {}))).toBe(false);
+  });
+
+  it('accepts only the connect message from the SDK', () => {
+    const connect = createPreviewMessage('preview:connect', {});
+    expect(isPreviewConnectMessage(connect)).toBe(true);
+    expect(isPreviewConnectMessage({ ...connect, source: 'other-sdk' })).toBe(false);
+    expect(isPreviewConnectMessage(INIT_MESSAGE)).toBe(false);
+  });
+
+  it('accepts a screen with its files as preview content', () => {
+    expect(isPreviewContentMessage(CONTENT)).toBe(true);
+    expect(isPreviewContentMessage(withPayload({ subtitle: '' }))).toBe(true);
+  });
+
+  it('rejects preview content that is unnamed, oversized or not a saved screen', () => {
+    expect(isPreviewContentMessage(withPayload({ title: '' }))).toBe(false);
+    expect(isPreviewContentMessage(withPayload({ title: '가'.repeat(201) }))).toBe(false);
+    expect(isPreviewContentMessage(withPayload({ subtitle: 7 }))).toBe(false);
+    expect(isPreviewContentMessage(withPayload({ capture: null }))).toBe(false);
+    expect(isPreviewContentMessage(withPayload({ capture: { screen: SCREEN, assetFiles: ['font-bytes'] } }))).toBe(false);
+    expect(isPreviewContentMessage(withPayload({ capture: { screen: SCREEN, assetFiles: Array.from({ length: 41 }, () => new Blob()) } }))).toBe(false);
+    expect(isPreviewContentMessage(withPayload({
+      capture: { screen: { ...SCREEN, events: [...SCREEN.events].reverse() }, assetFiles: [] },
+    }))).toBe(false);
+    expect(isPreviewContentMessage({ ...CONTENT, type: 'preview:connect' })).toBe(false);
   });
 });
