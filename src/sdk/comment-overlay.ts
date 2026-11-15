@@ -7,8 +7,8 @@ import type { SelectionPoint } from '@/sdk/element-selection';
 import type { CommentPinSource } from '@/sdk/screen-marks';
 import { PANEL_OPEN_CLASS_NAME, PHONE_MEDIA_QUERY, SDK_Z_INDEX } from '@/sdk/styles';
 import {
-  getStateLayer, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_FONT_FAMILY, SDK_HOVER_MEDIA, SDK_PRESSED_SCALE, SDK_RADIUS,
-  SDK_SHADOW, SDK_THEME, SDK_TRANSITION,
+  getStateLayer, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_FONT_FAMILY, SDK_HOVER_MEDIA, SDK_NO_TAP_HIGHLIGHT, SDK_PRESSED_SCALE,
+  SDK_RADIUS, SDK_SHADOW, SDK_THEME, SDK_TRANSITION,
 } from '@/sdk/theme-tokens';
 
 export interface CommentEditorCallbacks {
@@ -57,7 +57,7 @@ const COMMENT_STYLES = `
   z-index: ${SDK_Z_INDEX - 1}; width: 28px; height: 28px; margin: -14px 0 0 -14px; padding: 0;
   border: 2px solid ${SDK_THEME.surface}; border-radius: ${SDK_RADIUS.full}; background: ${SDK_THEME.info}; color: ${SDK_THEME.onInfo};
   font: 700 12px/24px ${SDK_FONT_FAMILY}; text-align: center; cursor: pointer; box-shadow: ${SDK_SHADOW.medium};
-  transition: scale ${SDK_TRANSITION};
+  transition: scale ${SDK_TRANSITION}; ${SDK_NO_TAP_HIGHLIGHT};
 }
 .comment-pin::after { content: ""; position: absolute; inset: -10px; }
 ${SDK_HOVER_MEDIA} { .comment-pin:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)}; scale: ${PIN_HOVER_SCALE}; } }

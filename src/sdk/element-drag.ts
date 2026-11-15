@@ -14,8 +14,8 @@ import { describeTarget } from '@/lib/target-labels';
 import type { CaptureTarget } from '@/sdk/capture-policy';
 import { SDK_Z_INDEX } from '@/sdk/styles';
 import {
-  getStateLayer, getTranslucentColor, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT_FAMILY, SDK_HOVER_MEDIA, SDK_PRESSED_SCALE,
-  SDK_RADIUS, SDK_SHADOW, SDK_THEME, SDK_THEME_DARK,
+  getStateLayer, getTranslucentColor, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT_FAMILY, SDK_HOVER_MEDIA, SDK_NO_TAP_HIGHLIGHT,
+  SDK_PRESSED_SCALE, SDK_RADIUS, SDK_SHADOW, SDK_THEME, SDK_THEME_DARK,
 } from '@/sdk/theme-tokens';
 import type { EditAttachment, ElementRect } from '@/types/feedback';
 
@@ -57,6 +57,7 @@ const GHOST_STYLE = [
   'touch-action: none',
   'pointer-events: auto',
   'outline: none',
+  SDK_NO_TAP_HIGHLIGHT,
 ].join('; ');
 const TOOLBAR_STYLE = [
   'position: fixed',

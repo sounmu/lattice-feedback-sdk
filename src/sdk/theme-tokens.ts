@@ -116,6 +116,12 @@ export const SDK_TRANSITION = '125ms cubic-bezier(0.24, 1, 0.4, 1)';
 export const SDK_PRESSED_SCALE = 'scale(0.98)';
 
 /**
+ * Turns off the rectangle a mobile browser flashes over whatever a finger taps. It ignores the control's
+ * rounded shape, and every SDK control already shows its own pressed state.
+ */
+export const SDK_NO_TAP_HIGHLIGHT = '-webkit-tap-highlight-color: transparent';
+
+/**
  * Wraps every :hover rule. A finger leaves :hover set on what it tapped until the next tap lands elsewhere,
  * so hover styles apply only where the pointer can hover.
  */
@@ -135,6 +141,7 @@ export const SDK_BUTTON_BASE = [
   `font: ${SDK_FONT.label}`,
   'white-space: nowrap',
   'cursor: pointer',
+  SDK_NO_TAP_HIGHLIGHT,
   `transition: background-color ${SDK_TRANSITION}, transform ${SDK_TRANSITION}`,
 ].join('; ');
 
