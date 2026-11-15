@@ -224,7 +224,7 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
                 ))}
               </ol>
             ) : (
-              <List hasDividers density="spacious">
+              <List density="spacious">
                 {threads.map((thread) => (
                   <ListItem
                     key={thread.id}

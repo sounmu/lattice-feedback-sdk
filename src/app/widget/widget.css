@@ -120,6 +120,12 @@
   display: none;
 }
 
+/* A conversation in the list is a row to press. The list clips what is drawn outside it, which cut the
+   sides off a row's focus ring, so the ring is drawn just inside the row. */
+.widget-root .astryx-list-item {
+  outline-offset: calc(var(--focus-outline-width) * -1);
+}
+
 /* The reporter's own messages are accent bubbles. The theme paints both sides neutral. */
 .widget-root .astryx-chat-message-bubble[data-sender='user'][data-variant='filled'] {
   background-color: var(--color-accent);
