@@ -13,6 +13,10 @@
 import { describeTarget } from '@/lib/target-labels';
 import type { CaptureTarget } from '@/sdk/capture-policy';
 import { SDK_Z_INDEX } from '@/sdk/styles';
+import {
+  getStateLayer, getTranslucentColor, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT_FAMILY, SDK_PRESSED_SCALE, SDK_RADIUS,
+  SDK_SHADOW, SDK_THEME, SDK_THEME_DARK,
+} from '@/sdk/theme-tokens';
 import type { EditAttachment, ElementRect } from '@/types/feedback';
 
 export interface ElementDragOptions {
@@ -36,18 +40,17 @@ const KEYBOARD_STEP = 8;
 const GUARDED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'beforeinput', 'keydown', 'keyup'] as const;
 const INTERACTION_CAPTURE: AddEventListenerOptions = { capture: true, passive: false };
 
-const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const OVERLAY_ROOT_STYLE = `position: fixed; inset: 0; z-index: ${SDK_Z_INDEX}; pointer-events: none; margin: 0; padding: 0;`;
 const GHOST_STYLE = [
   'position: fixed',
   'box-sizing: border-box',
   'margin: 0',
   'padding: 4px',
-  'border: 2px dashed #2563eb',
-  'border-radius: 4px',
-  'background: rgba(37, 99, 235, 0.18)',
-  'color: #1e3a8a',
-  `font: 600 12px/1.2 ${FONT}`,
+  `border: 2px dashed ${SDK_THEME.info}`,
+  `border-radius: ${SDK_RADIUS.inner}`,
+  `background: ${getTranslucentColor(SDK_THEME.info, 0.18)}`,
+  `color: ${SDK_THEME.onInfoMuted}`,
+  `font: 500 12px/1.2 ${SDK_FONT_FAMILY}`,
   'overflow: hidden',
   'cursor: grab',
   'user-select: none',
@@ -60,33 +63,42 @@ const TOOLBAR_STYLE = [
   'left: 0',
   'top: 0',
   'display: flex',
-  'gap: 6px',
-  'padding: 6px',
-  'border-radius: 12px',
-  'background: #111827',
-  'box-shadow: 0 6px 20px rgba(17, 24, 39, 0.3)',
+  'gap: 8px',
+  'padding: 8px',
+  `border-radius: ${SDK_RADIUS.container}`,
+  `background: ${SDK_THEME_DARK.surface}`,
+  `box-shadow: ${SDK_SHADOW.high}`,
   'pointer-events: auto',
 ].join('; ');
-const BUTTON_STYLE = [
-  'all: initial',
-  'box-sizing: border-box',
-  'display: inline-flex',
-  'align-items: center',
-  'justify-content: center',
-  'min-width: 44px',
-  'min-height: 44px',
-  'padding: 0 16px',
-  'border-radius: 10px',
-  `font: 600 14px/1 ${FONT}`,
-  'white-space: nowrap',
-  'cursor: pointer',
-].join('; ');
-const CONFIRM_BUTTON_STYLE = `${BUTTON_STYLE}; background: #2563eb; color: #ffffff;`;
-const CANCEL_BUTTON_STYLE = `${BUTTON_STYLE}; background: #374151; color: #f9fafb;`;
-// Inline styles cannot express focus states, so the overlay carries one attribute-scoped rule set.
-const FOCUS_STYLES = `
-[${EDIT_OVERLAY_ATTRIBUTE}="${EDIT_OVERLAY_VALUE}"] [role="button"]:focus-visible { outline: 3px solid #1d4ed8 !important; outline-offset: 2px !important; }
-[${EDIT_OVERLAY_ATTRIBUTE}="${EDIT_OVERLAY_VALUE}"] button:focus-visible { outline: 3px solid #93c5fd !important; outline-offset: 2px !important; }
+// The toolbar is a dark bar like the mode bar, so its buttons take the theme's dark values.
+const BUTTON_STYLE = `all: initial; display: inline-flex; align-items: center; justify-content: center; ${SDK_BUTTON_BASE}`;
+const CONFIRM_BUTTON_STYLE = `${BUTTON_STYLE}; background-color: ${SDK_THEME_DARK.accent}; color: ${SDK_THEME_DARK.onAccent};`;
+const CANCEL_BUTTON_STYLE = `${BUTTON_STYLE}; background-color: ${SDK_THEME_DARK.neutral}; color: ${SDK_THEME_DARK.textPrimary};`;
+// Inline styles cannot express focus, hover or pressed states, so the overlay carries one attribute-scoped
+// rule set. The ghost sits on the customer's page: a light halo inside its outline keeps the ring visible
+// on dark pages too.
+const OVERLAY_SELECTOR = `[${EDIT_OVERLAY_ATTRIBUTE}="${EDIT_OVERLAY_VALUE}"]`;
+const STATE_STYLES = `
+${OVERLAY_SELECTOR} [role="button"]:focus-visible {
+  outline: ${SDK_FOCUS_OUTLINE.line} ${SDK_THEME.accent} !important;
+  outline-offset: ${SDK_FOCUS_OUTLINE.offset} !important;
+  box-shadow: 0 0 0 ${SDK_FOCUS_OUTLINE.offset} ${SDK_THEME.surface} !important;
+}
+${OVERLAY_SELECTOR} button:focus-visible {
+  outline: ${SDK_FOCUS_OUTLINE.line} ${SDK_THEME_DARK.accent} !important;
+  outline-offset: ${SDK_FOCUS_OUTLINE.offset} !important;
+}
+${OVERLAY_SELECTOR} button:hover { background-image: ${getStateLayer(SDK_THEME_DARK.overlayHover)} !important; }
+${OVERLAY_SELECTOR} button:active {
+  background-image: ${getStateLayer(SDK_THEME_DARK.overlayPressed)} !important;
+  transform: ${SDK_PRESSED_SCALE} !important;
+}
+${OVERLAY_SELECTOR} button[data-action="confirm"]:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)} !important; }
+${OVERLAY_SELECTOR} button[data-action="confirm"]:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)} !important; }
+@media (prefers-reduced-motion: reduce) {
+  ${OVERLAY_SELECTOR} button { transition: none !important; }
+  ${OVERLAY_SELECTOR} button:active { transform: none !important; }
+}
 `;
 
 let activeHandle: ElementDragHandle | null = null;
@@ -141,6 +153,7 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   toolbar.setAttribute('aria-label', TOOLBAR_LABEL);
   const confirmButton = document.createElement('button');
   confirmButton.setAttribute('type', 'button');
+  confirmButton.setAttribute('data-action', 'confirm');
   confirmButton.setAttribute('style', CONFIRM_BUTTON_STYLE);
   confirmButton.textContent = CONFIRM_LABEL;
   const cancelButton = document.createElement('button');
@@ -150,12 +163,12 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   toolbar.appendChild(confirmButton);
   toolbar.appendChild(cancelButton);
 
-  const focusStyle = document.createElement('style');
-  focusStyle.textContent = FOCUS_STYLES;
+  const stateStyle = document.createElement('style');
+  stateStyle.textContent = STATE_STYLES;
 
   root.appendChild(ghost);
   root.appendChild(toolbar);
-  root.appendChild(focusStyle);
+  root.appendChild(stateStyle);
 
   // The toolbar sits under the ghost and follows it, above it when there is no room below.
   function placeToolbar(): void {

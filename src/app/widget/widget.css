@@ -1,0 +1,78 @@
+/* Astryx base, components and the neutral theme, loaded for the widget route only. globals.css
+   declares the cascade-layer order these files fill, so admin pages never receive them. The theme's
+   fonts.css is left out on purpose: it loads Figtree from a font CDN, which closed networks block. */
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+
+/* Theme adjustments for the widget. They sit on the theme root, so anything Astryx renders outside
+   the widget root, such as a tooltip, gets them too. */
+[data-astryx-theme='neutral'] {
+  /* Korean text is set in Pretendard when the device has it, else the platform's Korean face. */
+  --font-family-body: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
+    'Segoe UI', 'Malgun Gothic', Roboto, 'Noto Sans KR', Helvetica, Arial, sans-serif;
+  --font-family-heading: var(--font-family-body);
+  /* Large controls are the widget's touch targets: 44px instead of the theme's 36px. */
+  --size-element-lg: 2.75rem;
+}
+
+.widget-root {
+  color: var(--color-text-primary);
+  background: var(--color-background-surface);
+  font-family: var(--font-family-body);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+  /* Korean words stay whole; only a token longer than the line breaks. The last line is not left with
+     one short word where the browser can avoid it. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  caret-color: var(--color-accent);
+  scrollbar-color: var(--color-border-emphasized) transparent;
+  scrollbar-width: thin;
+}
+
+.widget-root ::selection {
+  background: var(--color-accent-muted);
+  color: var(--color-text-primary);
+}
+
+/* Astryx's text, chat bubble and tooltip set their own word-break, which lets Korean split inside a word.
+   They keep words whole like the rest of the widget. The tooltip is rendered outside the widget root. */
+.widget-root .astryx-text,
+.widget-root .astryx-chat-message-bubble,
+[data-astryx-theme='neutral'] :is(.astryx-tooltip, .astryx-tooltip *) {
+  word-break: keep-all;
+}
+
+[data-astryx-theme='neutral'] .astryx-tooltip {
+  overflow-wrap: anywhere;
+}
+
+/* Typed text wraps plainly, so earlier lines do not move while the user is writing. */
+.widget-root textarea {
+  resize: none;
+  text-wrap: wrap;
+}
+
+/* The message field grows with its text, from two lines up to four. The block padding matches the
+   field's own. */
+.widget-composer-field textarea {
+  field-sizing: content;
+  min-block-size: calc(2lh + var(--spacing-2));
+  max-block-size: calc(4lh + var(--spacing-2));
+}
+
+/* A segment is 8px shorter than its 44px track. Under a finger the track itself takes the tap for the
+   segment below it. Under a mouse this extends the segment's press area to the track's full height. */
+@media (pointer: fine) {
+  .widget-root .astryx-segmented-control-item {
+    position: relative;
+  }
+
+  .widget-root .astryx-segmented-control-item::after {
+    content: '';
+    position: absolute;
+    inset: calc(var(--spacing-1) * -1) 0;
+  }
+}

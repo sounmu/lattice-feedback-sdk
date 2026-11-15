@@ -1,6 +1,19 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { Avatar } from '@astryxdesign/core/Avatar';
+import { Button } from '@astryxdesign/core/Button';
+import { Card } from '@astryxdesign/core/Card';
+import { ChatMessage, ChatMessageBubble } from '@astryxdesign/core/Chat';
+import { HStack } from '@astryxdesign/core/HStack';
+import { Icon } from '@astryxdesign/core/Icon';
+import { IconButton } from '@astryxdesign/core/IconButton';
+import { Kbd } from '@astryxdesign/core/Kbd';
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
+import { Skeleton } from '@astryxdesign/core/Skeleton';
+import { Text } from '@astryxdesign/core/Text';
+import { TextArea } from '@astryxdesign/core/TextArea';
+import { VStack } from '@astryxdesign/core/VStack';
 
 import { useHostBridge } from '@/hooks/useHostBridge';
 import { ConversationPanel } from '@/components/widget/ConversationPanel';
@@ -15,10 +28,9 @@ import {
   countAttachments,
 } from '@/components/widget/CaptureControls';
 import { ScreenSnapshotControls } from '@/components/widget/ScreenSnapshotControls';
-import { CheckIcon, SendIcon } from '@/components/widget/WidgetIcons';
+import { SendIcon } from '@/components/widget/WidgetIcons';
 import {
-  PRIMARY_BUTTON_CLASS,
-  SECONDARY_BUTTON_CLASS,
+  WIDGET_TEAM_NAME,
   WidgetBanner,
   WidgetBody,
   WidgetFooter,
@@ -43,10 +55,13 @@ const FEEDBACK_TYPE_OPTIONS: { value: FeedbackType; label: string }[] = [
 
 const WIDGET_TITLE = '피드백 보내기';
 const REPLY_NOTICE = '보통 1영업일 안에 답변드려요';
+const MESSAGE_LABEL = '피드백 내용';
+const SEND_LABEL = '보내기';
 const SCREEN_TOOL_TITLE = '지금 보고 있는 화면을 그대로 저장해 함께 보내요. 비밀번호 입력값은 저장하지 않아요.';
 const FLOW_TRUNCATED_MESSAGE = '기록이 너무 길었거나 저장할 수 없는 페이지로 이동해서, 뒷부분은 재생에서 빠졌어요.';
 const SUBMIT_RETRY_MESSAGE = '잠시 후 다시 시도해 주세요. 작성한 내용은 그대로 남아 있어요.';
 const SUBMIT_RETRY_HINT = '작성한 내용은 그대로 남아 있어요. 보내기를 다시 눌러 주세요.';
+const LOADING_LINE_WIDTHS = ['80%', '60%', '66%'];
 
 const SCREEN_PROGRESS_MESSAGES: Record<Exclude<ScreenSaveStatus, 'idle'>, string> = {
   capturing: '화면을 저장하는 중이에요…',
@@ -153,6 +168,7 @@ export function FeedbackWidget() {
   const [submittedSummary, setSubmittedSummary] = useState<SubmittedSummary | null>(null);
   const [attachmentNotice, setAttachmentNotice] = useState<AttachmentChange | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const sendButtonRef = useRef<HTMLButtonElement>(null);
   const attachmentListRef = useRef<HTMLUListElement>(null);
   const previousCounts = useRef<AttachmentCounts | null>(null);
@@ -248,7 +264,9 @@ export function FeedbackWidget() {
       sendButtonRef.current?.focus({ preventScroll: true });
       return;
     }
-    const target = rootRef.current?.querySelector<HTMLElement>('[data-autofocus]');
+    // A view marks the control to land on with data-autofocus. The compose view has no such mark:
+    // its message field takes the focus.
+    const target = rootRef.current?.querySelector<HTMLElement>('[data-autofocus]') ?? composerRef.current;
     if (!target || (target instanceof HTMLTextAreaElement && !shouldAutoFocusComposer())) {
       return;
     }
@@ -291,6 +309,13 @@ export function FeedbackWidget() {
     }
   }
 
+  function handleTypeChange(value: string) {
+    const option = FEEDBACK_TYPE_OPTIONS.find((candidate) => candidate.value === value);
+    if (option) {
+      setType(option.value);
+    }
+  }
+
   function handleWriteAnother() {
     isResettingDraft.current = true;
     showAttachmentNotice(null);
@@ -310,12 +335,17 @@ export function FeedbackWidget() {
           <WidgetBanner tone="danger" title="피드백 창을 열 수 없어요" isAlert>
             페이지를 새로고침해 주세요. 계속 이러면 래티스 담당자에게 알려 주세요.
           </WidgetBanner>
-          <p className="rounded-xl border border-fw-border bg-fw-surface p-3 font-mono text-xs text-fw-sub">원인(개발자용): {reason}</p>
+          <Card padding={3}>
+            <Text as="p" type="supporting">
+              원인(개발자용):{' '}
+              <Text type="code" size="sm" color="secondary">
+                {reason}
+              </Text>
+            </Text>
+          </Card>
         </WidgetBody>
         <WidgetFooter>
-          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={notifyClose} data-autofocus>
-            닫기
-          </button>
+          <Button label="닫기" size="lg" width="100%" onClick={notifyClose} data-autofocus="" />
         </WidgetFooter>
       </>
     );
@@ -326,33 +356,49 @@ export function FeedbackWidget() {
       <>
         <WidgetHeader title={WIDGET_TITLE} subtitle={getSubtitle(reporter)} onClose={notifyClose} />
         <WidgetBody>
-          <div role="status" className="flex flex-col items-center gap-2 py-6 text-center">
-            <span className="flex size-14 items-center justify-center rounded-full bg-fw-success-weak text-fw-success">
-              <CheckIcon className="size-7" />
-            </span>
-            <p className="text-base font-bold">피드백이 전달됐어요</p>
-            <p className="text-fw-sub">담당자가 확인한 뒤 답변드릴게요.</p>
+          <div role="status">
+            <VStack gap={2} align="center" paddingBlock={6}>
+              <span className="flex size-14 items-center justify-center rounded-full bg-(--color-success-muted) text-(--color-on-success-muted)">
+                <Icon icon="check" size="lg" />
+              </span>
+              <Text as="p" type="large">
+                피드백이 전달됐어요
+              </Text>
+              <Text as="p" color="secondary">
+                담당자가 확인한 뒤 답변드릴게요.
+              </Text>
+            </VStack>
           </div>
           {submittedSummary ? (
-            <dl className="grid grid-cols-[56px_minmax(0,1fr)] gap-x-2 gap-y-1 rounded-xl border border-fw-border bg-fw-surface p-3">
-              <dt className="text-fw-muted">유형</dt>
-              <dd>{submittedSummary.typeLabel}</dd>
-              <dt className="text-fw-muted">페이지</dt>
-              <dd className="truncate">{submittedSummary.pageTitle}</dd>
-              <dt className="text-fw-muted">첨부</dt>
-              <dd>{submittedSummary.attachments}</dd>
-            </dl>
+            <Card padding={3}>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+                <dt>
+                  <Text color="secondary">유형</Text>
+                </dt>
+                <dd>
+                  <Text>{submittedSummary.typeLabel}</Text>
+                </dd>
+                <dt>
+                  <Text color="secondary">페이지</Text>
+                </dt>
+                <dd>
+                  <Text maxLines={1}>{submittedSummary.pageTitle}</Text>
+                </dd>
+                <dt>
+                  <Text color="secondary">첨부</Text>
+                </dt>
+                <dd>
+                  <Text>{submittedSummary.attachments}</Text>
+                </dd>
+              </dl>
+            </Card>
           ) : null}
         </WidgetBody>
         <WidgetFooter>
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={notifyClose}>
-              닫기
-            </button>
-            <button type="button" className={PRIMARY_BUTTON_CLASS} onClick={handleWriteAnother} data-autofocus>
-              다른 피드백 작성
-            </button>
-          </div>
+          <HStack gap={2}>
+            <Button label="닫기" size="lg" width="100%" onClick={notifyClose} />
+            <Button label="다른 피드백 작성" variant="primary" size="lg" width="100%" onClick={handleWriteAnother} data-autofocus="" />
+          </HStack>
         </WidgetFooter>
       </>
     );
@@ -375,8 +421,8 @@ export function FeedbackWidget() {
     const detail = errorMessage || SUBMIT_RETRY_MESSAGE;
     return (
       <WidgetBanner tone="danger" title="전송하지 못했어요" isAlert>
-        <p>{detail}</p>
-        {detail !== SUBMIT_RETRY_MESSAGE ? <p className="mt-1">{SUBMIT_RETRY_HINT}</p> : null}
+        <span className="block">{detail}</span>
+        {detail !== SUBMIT_RETRY_MESSAGE ? <span className="block">{SUBMIT_RETRY_HINT}</span> : null}
       </WidgetBanner>
     );
   }
@@ -385,25 +431,55 @@ export function FeedbackWidget() {
     if (!attachmentNotice) {
       return null;
     }
-    return (
-      <WidgetBanner tone="success" icon={<CheckIcon className="size-4 text-fw-success" />}>
-        {ATTACHMENT_NOTICES[attachmentNotice.kind][attachmentNotice.direction]}
-      </WidgetBanner>
-    );
+    return <WidgetBanner tone="success">{ATTACHMENT_NOTICES[attachmentNotice.kind][attachmentNotice.direction]}</WidgetBanner>;
   }
 
   function renderHint(attachmentCount: number) {
     if (attachmentCount > 0 && message.trim().length === 0) {
-      return <span className="text-fw-primary">한 줄이라도 내용을 적으면 보낼 수 있어요</span>;
+      return (
+        <Text type="supporting" color="accent">
+          한 줄이라도 내용을 적으면 보낼 수 있어요
+        </Text>
+      );
     }
-    return <span>Enter 줄바꿈 · ⌘+Enter 보내기</span>;
+    return (
+      <Text type="supporting">
+        Enter 줄바꿈 · <Kbd keys="mod+enter" /> 보내기
+      </Text>
+    );
+  }
+
+  function renderGreeting(isBusy: boolean) {
+    const greetingName = reporter ? `, ${reporter.name} 님` : '';
+    return (
+      <ChatMessage sender="assistant" avatar={<Avatar name={WIDGET_TEAM_NAME} size="sm" tooltip={false} />} name={null}>
+        <ChatMessageBubble width="100%">
+          <VStack gap={1}>
+            <Text as="p" weight="semibold">
+              안녕하세요{greetingName}
+            </Text>
+            <Text as="p" color="secondary">
+              불편한 점을 편하게 적어 주세요. 글로 설명하기 어려우면 아래 도구로{' '}
+              <Text weight="semibold" color="primary">
+                화면에서 직접
+              </Text>{' '}
+              보여주셔도 돼요.
+            </Text>
+          </VStack>
+        </ChatMessageBubble>
+        <SegmentedControl label="피드백 유형" value={type} onChange={handleTypeChange} size="lg" isDisabled={isBusy}>
+          {FEEDBACK_TYPE_OPTIONS.map((option) => (
+            <SegmentedControlItem key={option.value} value={option.value} label={option.label} />
+          ))}
+        </SegmentedControl>
+      </ChatMessage>
+    );
   }
 
   function renderCompose() {
     const isBusy = status === 'submitting';
     const attachmentCount = (attachments ? countAttachments(attachments) : 0) + screens.snapshots.length;
     const isReady = isInitialized && captureState !== null;
-    const greetingName = reporter ? `, ${reporter.name} 님` : '';
 
     return (
       <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
@@ -413,70 +489,47 @@ export function FeedbackWidget() {
           onClose={notifyClose}
         />
         <WidgetBody>
-          {isInitialized ? (
-            <div className="flex gap-2">
-              <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-full bg-fw-primary text-xs font-bold text-white">
-                L
-              </span>
-              <div className="flex min-w-0 flex-col gap-2 rounded-2xl rounded-tl-sm border border-fw-border bg-fw-surface p-3">
-                <p className="font-semibold">안녕하세요{greetingName} 👋</p>
-                <p className="text-fw-sub">
-                  불편한 점을 편하게 적어 주세요. 글로 설명하기 어려우면 아래 도구로 <strong className="text-fw-text">화면에서 직접</strong> 보여주셔도 돼요.
-                </p>
-                <div role="radiogroup" aria-label="피드백 유형" className="flex flex-wrap gap-1.5">
-                  {FEEDBACK_TYPE_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={type === option.value}
-                      disabled={isBusy}
-                      className="min-h-9 rounded-full border border-fw-border px-3.5 text-fw-sub aria-checked:border-fw-primary aria-checked:bg-fw-primary aria-checked:font-semibold aria-checked:text-white disabled:opacity-50"
-                      onClick={() => setType(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div role="status" aria-label="준비하는 중이에요" className="flex flex-col gap-2 rounded-2xl border border-fw-border bg-fw-surface p-3">
-              <span className="widget-skeleton block h-3 w-4/5 rounded bg-fw-border" />
-              <span className="widget-skeleton block h-3 w-3/5 rounded bg-fw-border" />
-              <span className="widget-skeleton block h-3 w-2/3 rounded bg-fw-border" />
+          {isInitialized ? renderGreeting(isBusy) : (
+            <div role="status" aria-label="준비하는 중이에요">
+              <Card padding={3}>
+                <VStack gap={2}>
+                  {LOADING_LINE_WIDTHS.map((width, index) => <Skeleton key={width} height={12} width={width} index={index} />)}
+                </VStack>
+              </Card>
             </div>
           )}
           {screens.truncatedFlowScreenIds.size > 0 ? <WidgetBanner tone="warning">{FLOW_TRUNCATED_MESSAGE}</WidgetBanner> : null}
           {attachmentCount > 0 ? (
-            <section aria-label="첨부한 화면 정보" className="flex flex-col gap-2">
-              <p className="flex items-baseline justify-between gap-2 text-xs">
-                <span className="font-semibold text-fw-text">첨부한 화면 정보 {attachmentCount}개</span>
-                <span className="text-fw-muted">보낼 때 함께 전달돼요</span>
-              </p>
-              <ul ref={attachmentListRef} className="flex flex-col gap-2">
-                {attachments ? (
-                  <CaptureAttachmentCards
-                    attachments={attachments}
+            <section aria-label="첨부한 화면 정보">
+              <VStack gap={2}>
+                <HStack gap={2} justify="between" align="center">
+                  <Text type="label">첨부한 화면 정보 {attachmentCount}개</Text>
+                  <Text type="supporting">보낼 때 함께 전달돼요</Text>
+                </HStack>
+                <ul ref={attachmentListRef} className="flex flex-col gap-2">
+                  {attachments ? (
+                    <CaptureAttachmentCards
+                      attachments={attachments}
+                      disabled={isBusy}
+                      onRemove={(kind, index) => {
+                        sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }));
+                        if (kind === 'flow') {
+                          screens.removeFlowScreens();
+                        }
+                      }}
+                    />
+                  ) : null}
+                  <ScreenSnapshotControls
+                    snapshots={screens.snapshots}
+                    captures={screens.captures}
+                    markedScreenIds={screens.markedScreenIds}
+                    flowScreenIds={screens.flowScreenIds}
+                    truncatedFlowScreenIds={screens.truncatedFlowScreenIds}
                     disabled={isBusy}
-                    onRemove={(kind, index) => {
-                      sendCaptureCommand(createCaptureCommand({ type: 'attachment:remove', payload: { kind, index } }));
-                      if (kind === 'flow') {
-                        screens.removeFlowScreens();
-                      }
-                    }}
+                    onRemove={screens.remove}
                   />
-                ) : null}
-                <ScreenSnapshotControls
-                  snapshots={screens.snapshots}
-                  captures={screens.captures}
-                  markedScreenIds={screens.markedScreenIds}
-                  flowScreenIds={screens.flowScreenIds}
-                  truncatedFlowScreenIds={screens.truncatedFlowScreenIds}
-                  disabled={isBusy}
-                  onRemove={screens.remove}
-                />
-              </ul>
+                </ul>
+              </VStack>
             </section>
           ) : null}
         </WidgetBody>
@@ -500,36 +553,39 @@ export function FeedbackWidget() {
             onStart={(mode) => sendCaptureCommand(createCaptureCommand({ type: 'capture:start', payload: { mode } }))}
             onCaptureScreen={screens.capture}
           />
-          <div className="flex items-end gap-2 rounded-xl border border-fw-border p-1.5 focus-within:border-fw-primary">
-            <textarea
-              aria-label="피드백 내용"
+          <HStack gap={2} align="end">
+            <TextArea
+              ref={composerRef}
+              label={MESSAGE_LABEL}
+              aria-label={MESSAGE_LABEL}
+              isLabelHidden
+              isRequired
               placeholder="어떤 점이 불편하셨나요?"
               rows={2}
-              className="max-h-[6.2em] min-h-[3.1em] flex-1 resize-none px-1.5 py-1 outline-none [field-sizing:content] focus-visible:outline-none disabled:opacity-50"
               value={message}
-              maxLength={MAX_MESSAGE_LENGTH}
-              required
-              disabled={!isInitialized || isBusy}
-              data-autofocus=""
-              onChange={(event) => setMessage(event.target.value)}
+              htmlMaxLength={MAX_MESSAGE_LENGTH}
+              isDisabled={!isInitialized || isBusy}
+              containerClassName="widget-composer-field min-w-0 flex-1"
+              onChange={setMessage}
               onKeyDown={handleMessageKeyDown}
             />
-            <button
+            <IconButton
               ref={sendButtonRef}
               type="submit"
-              aria-label="보내기"
-              className="flex size-11 shrink-0 items-center justify-center rounded-[10px] bg-fw-primary text-white hover:bg-fw-primary-hover disabled:opacity-40"
-              disabled={!canSubmit}
-            >
-              <SendIcon />
-            </button>
-          </div>
-          <p className="flex justify-between gap-2 text-xs text-fw-muted">
+              label={SEND_LABEL}
+              tooltip={SEND_LABEL}
+              icon={<Icon icon={SendIcon} />}
+              variant="primary"
+              size="lg"
+              isDisabled={!canSubmit}
+            />
+          </HStack>
+          <HStack gap={2} justify="between" align="center">
             {renderHint(attachmentCount)}
-            <span>
+            <Text type="supporting" hasTabularNumbers>
               {message.length}/{MAX_MESSAGE_LENGTH}
-            </span>
-          </p>
+            </Text>
+          </HStack>
         </WidgetFooter>
       </form>
     );
@@ -560,7 +616,7 @@ export function FeedbackWidget() {
     return renderCompose();
   }
 
-  return <div ref={rootRef} className="widget-root flex h-dvh flex-col overflow-hidden">
+  return <div ref={rootRef} lang="ko" className="widget-root flex h-dvh flex-col overflow-hidden">
     {config && isInitialized ? (
       <ConversationPanel key={JSON.stringify([config, reporter])} config={config} reporter={reporter} isOpen={isOpen} onClose={notifyClose}>
         {renderContent()}

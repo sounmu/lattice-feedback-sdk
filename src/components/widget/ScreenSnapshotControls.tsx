@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ToggleButton } from '@astryxdesign/core/ToggleButton';
 
 import { ScreenSnapshotPreview } from '@/components/widget/ScreenSnapshotPreview';
 import { CameraIcon } from '@/components/widget/WidgetIcons';
@@ -78,7 +79,7 @@ export function ScreenSnapshotControls({
           <AttachmentCard
             key={id}
             kind="screen"
-            icon={<CameraIcon className="size-4" />}
+            icon={CameraIcon}
             title={title}
             description={getScreenDescription(snapshot, origin)}
             removeLabel={`저장한 화면 ${index + 1} 삭제`}
@@ -86,15 +87,14 @@ export function ScreenSnapshotControls({
             onRemove={() => onRemove(id)}
             actions={
               captures.has(id) ? (
-                <button
-                  type="button"
-                  aria-label={`저장한 화면 ${index + 1} 미리보기`}
-                  aria-pressed={id === previewId}
-                  className="min-h-9 shrink-0 rounded-[10px] border border-fw-border px-2 text-xs text-fw-sub aria-pressed:border-fw-primary aria-pressed:bg-fw-primary-weak aria-pressed:text-fw-primary"
-                  onClick={() => setPreviewId(id === previewId ? null : id)}
+                <ToggleButton
+                  label={`저장한 화면 ${index + 1} 미리보기`}
+                  size="lg"
+                  isPressed={id === previewId}
+                  onPressedChange={(isPressed) => setPreviewId(isPressed ? id : null)}
                 >
                   미리보기
-                </button>
+                </ToggleButton>
               ) : null
             }
           />

@@ -68,7 +68,6 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let controllerErrorMessage: string | null = null;
   let isPanelVisible = false;
   let isDestroyed = false;
-  const commentOverlay = createCommentOverlay(options.root);
   const status = createCaptureStatus({
     root: options.root,
     onStop: () => {
@@ -85,6 +84,9 @@ export function createCaptureController(options: CaptureControllerOptions) {
     },
     onShow: showWidget,
   });
+  // Added after the mode bar on purpose. The comment editor and the bar share one z-index, so the later
+  // element paints on top: where they overlap on a narrow screen the editor's buttons stay reachable.
+  const commentOverlay = createCommentOverlay(options.root);
 
   function getState(): CaptureState {
     return {
