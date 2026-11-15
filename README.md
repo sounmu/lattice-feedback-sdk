@@ -273,3 +273,9 @@ origin은 포트까지 정확히 일치해야 하며 끝에 `/`를 붙이지 않
 
 운영 배포 시에는 SDK 앱과 호스트 데모를 서로 다른 주소에 배포하고,
 스크립트의 `src`, `FEEDBACK_APP_ORIGINS`, `FEEDBACK_ALLOWED_ORIGINS`를 실제 주소로 변경합니다.
+
+Vercel에서 빌드한 `sdk.js`는 캡처 도구 파일을 요청할 때 자신을 빌드한 배포를 `dpl` 쿼리로 지정합니다.
+재배포 전에 열린 고객사 페이지가 이전 배포의 파일을 계속 받으려면, Vercel 프로젝트 설정(Advanced)에서
+Skew Protection을 켜고 **Allowed Domains for Cross-Site Fetch**에 고객사 페이지의 도메인을 추가합니다(Pro·Enterprise 요금제).
+둘 중 하나라도 없거나 배포가 Maximum Age를 넘기면 이전 파일은 제공되지 않으며,
+그 페이지는 새로고침해야 화면 첨부를 쓸 수 있습니다.

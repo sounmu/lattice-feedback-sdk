@@ -60,12 +60,22 @@ const runtime = await build({
 });
 const [runtimeFile] = Object.keys(runtime.metafile.outputs);
 
+// The next deploy replaces the runtime file, so a page that loaded sdk.js before it asks the app for a file
+// it no longer has. On Vercel, sdk.js therefore names the deployment that built it and asks that one for
+// the runtime (src/sdk/runtime-loader.ts). Vercel follows this only while Skew Protection is on for the
+// project, the deployment is within its maximum age, and the customer's domain is one of the project's
+// Allowed Domains for Cross-Site Fetch. Built anywhere else, sdk.js asks without it.
+const deploymentId = process.env.VERCEL_DEPLOYMENT_ID || null;
+
 const entry = await build({
   ...sharedOptions,
   entryPoints: ['src/sdk/index.ts'],
   outfile: 'public/sdk.js',
   format: 'iife',
-  define: { __LATTICE_CAPTURE_RUNTIME_PATH__: JSON.stringify(`/sdk/${basename(runtimeFile)}`) },
+  define: {
+    __LATTICE_CAPTURE_RUNTIME_PATH__: JSON.stringify(`/sdk/${basename(runtimeFile)}`),
+    __LATTICE_DEPLOYMENT_ID__: JSON.stringify(deploymentId),
+  },
 });
 
 const misplacedModules = RUNTIME_ONLY_MODULES.filter((file) => file in entry.metafile.inputs);
