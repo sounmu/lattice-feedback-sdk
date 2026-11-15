@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 
 import { useHostBridge } from '@/hooks/useHostBridge';
 import { useScreenSnapshots, type ScreenSaveStatus } from '@/hooks/useScreenSnapshots';
@@ -21,11 +21,13 @@ import {
   WidgetFooter,
   WidgetHeader,
 } from '@/components/widget/WidgetLayout';
+import { findAttachmentChange, type AttachmentChange, type AttachmentCounts } from '@/lib/attachment-notice';
 import { createCaptureCommand } from '@/lib/capture-protocol';
 import type { FeedbackReporter, FeedbackType } from '@/types/feedback';
 import type { CaptureState } from '@/types/sdk-message';
 
 const MAX_MESSAGE_LENGTH = 5000;
+const ATTACHMENT_NOTICE_MS = 4000;
 
 const ANONYMOUS_REPORTER: FeedbackReporter = { id: 'anonymous', name: 'Anonymous' };
 
@@ -41,11 +43,21 @@ const REPLY_NOTICE = '보통 1영업일 안에 답변드려요';
 const SCREEN_TOOL_TITLE = '지금 보고 있는 화면을 그대로 저장해 함께 보내요. 비밀번호 입력값은 저장하지 않아요.';
 const FLOW_TRUNCATED_MESSAGE = '기록이 너무 길었거나 저장할 수 없는 페이지로 이동해서, 뒷부분은 재생에서 빠졌어요.';
 const SUBMIT_RETRY_MESSAGE = '잠시 후 다시 시도해 주세요. 작성한 내용은 그대로 남아 있어요.';
+const SUBMIT_RETRY_HINT = '작성한 내용은 그대로 남아 있어요. 보내기를 다시 눌러 주세요.';
 
 const SCREEN_PROGRESS_MESSAGES: Record<Exclude<ScreenSaveStatus, 'idle'>, string> = {
   capturing: '화면을 저장하는 중이에요…',
   uploading: '저장한 화면을 올리는 중이에요…',
 };
+
+const ATTACHMENT_NOTICES: Record<AttachmentChange['kind'], Record<AttachmentChange['direction'], string>> = {
+  comment: { added: '코멘트를 첨부했어요', removed: '코멘트를 지웠어요' },
+  edit: { added: '위치 편집을 첨부했어요', removed: '위치 편집을 지웠어요' },
+  flow: { added: '흐름 기록을 첨부했어요', removed: '흐름 기록을 지웠어요' },
+  screen: { added: '화면을 저장했어요', removed: '저장한 화면을 지웠어요' },
+};
+
+const EMPTY_COUNTS: AttachmentCounts = { comments: 0, edits: 0, flows: 0, screens: 0 };
 
 interface SubmittedSummary {
   typeLabel: string;
@@ -76,6 +88,29 @@ function getAttachmentSummary(attachments: CaptureState['attachments'] | undefin
 
 function getSubtitle(reporter: FeedbackReporter | null): string {
   return reporter ? `${reporter.name} 님 · ${REPLY_NOTICE}` : REPLY_NOTICE;
+}
+
+function getAttachmentCounts(attachments: CaptureState['attachments'] | null, screenCount: number): AttachmentCounts {
+  if (!attachments) {
+    return { ...EMPTY_COUNTS, screens: screenCount };
+  }
+  return {
+    comments: attachments.comments.length,
+    edits: attachments.edits.length,
+    flows: attachments.flow ? 1 : 0,
+    screens: screenCount,
+  };
+}
+
+// Moving focus into the composer pops the keyboard on a phone, so it only happens where a pointer and
+// keyboard are the norm. Keyboard users on such devices land where they can type right away.
+function shouldAutoFocusComposer(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+}
+
+function isNothingFocused(): boolean {
+  const active = document.activeElement;
+  return active === null || active === document.body;
 }
 
 export function FeedbackWidget() {
@@ -113,16 +148,115 @@ export function FeedbackWidget() {
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
   const [submittedSummary, setSubmittedSummary] = useState<SubmittedSummary | null>(null);
+  const [attachmentNotice, setAttachmentNotice] = useState<AttachmentChange | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
+  const attachmentListRef = useRef<HTMLUListElement>(null);
+  const previousCounts = useRef<AttachmentCounts | null>(null);
+  const noticeRef = useRef<AttachmentChange | null>(null);
+  const noticeTimer = useRef<number | null>(null);
+  const isResettingDraft = useRef(false);
+
+  const activeMode = captureState?.activeMode ?? null;
+  const attachments = captureState?.attachments ?? null;
+  const { comments: commentTotal, edits: editTotal, flows: flowTotal, screens: screenTotal } = getAttachmentCounts(attachments, screens.snapshots.length);
+  const counts = useMemo<AttachmentCounts>(
+    () => ({ comments: commentTotal, edits: editTotal, flows: flowTotal, screens: screenTotal }),
+    [commentTotal, editTotal, flowTotal, screenTotal],
+  );
 
   const canSubmit = isInitialized && page !== null && message.trim().length > 0 &&
-    status !== 'submitting' && !captureState?.activeMode && screens.status === 'idle';
+    status !== 'submitting' && !activeMode && screens.status === 'idle';
+
+  const showAttachmentNotice = useCallback((change: AttachmentChange | null) => {
+    if (noticeTimer.current !== null) {
+      window.clearTimeout(noticeTimer.current);
+      noticeTimer.current = null;
+    }
+    noticeRef.current = change;
+    setAttachmentNotice(change);
+    if (change) {
+      noticeTimer.current = window.setTimeout(() => {
+        noticeTimer.current = null;
+        noticeRef.current = null;
+        setAttachmentNotice(null);
+      }, ATTACHMENT_NOTICE_MS);
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (noticeTimer.current !== null) {
+      window.clearTimeout(noticeTimer.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    const previous = previousCounts.current;
+    previousCounts.current = counts;
+    const isQuiet = previous === null || status !== 'idle' || isResettingDraft.current;
+    if (isResettingDraft.current && Object.values(counts).every((count) => count === 0)) {
+      isResettingDraft.current = false;
+    }
+    if (isQuiet || !previous) {
+      return;
+    }
+    const change = findAttachmentChange(previous, counts);
+    if (!change) {
+      return;
+    }
+    // A screen saved for a comment, edit or flow follows the reporter's action by a second or two; it
+    // must not talk over the notice for that action.
+    const current = noticeRef.current;
+    const isSideEffectScreen = change.kind === 'screen' && change.direction === 'added' &&
+      current !== null && current.direction === 'added' && current.kind !== 'screen';
+    showAttachmentNotice(isSideEffectScreen ? current : change);
+    if (change.direction === 'added') {
+      const cards = attachmentListRef.current?.querySelectorAll(`li[data-kind="${change.kind}"]`);
+      cards?.[cards.length - 1]?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [counts, status, showAttachmentNotice]);
+
+  // Escape leaves whatever is open: a comment or edit mode, otherwise the panel. A running Flow is
+  // never ended by a key the reporter may be pressing for the page itself.
+  useEffect(() => {
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) {
+        return;
+      }
+      if (activeMode === 'flow') {
+        return;
+      }
+      event.preventDefault();
+      if (activeMode === 'comment' || activeMode === 'edit') {
+        sendCaptureCommand(createCaptureCommand({ type: 'capture:cancel', payload: {} }));
+        return;
+      }
+      notifyClose();
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeMode, sendCaptureCommand, notifyClose]);
+
+  useEffect(() => {
+    if (!isInitialized || !isNothingFocused()) {
+      return;
+    }
+    if (status === 'error') {
+      sendButtonRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    const target = rootRef.current?.querySelector<HTMLElement>('[data-autofocus]');
+    if (!target || (target instanceof HTMLTextAreaElement && !shouldAutoFocusComposer())) {
+      return;
+    }
+    target.focus({ preventScroll: true });
+  }, [isInitialized, page, activeMode, status]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!config || !page || !canSubmit) {
       return;
     }
-    const attachments = captureState?.attachments;
     const screenSnapshotIds = screens.snapshots.map((snapshot) => snapshot.id);
     const result = await submit({
       projectKey: config.projectKey,
@@ -131,14 +265,14 @@ export function FeedbackWidget() {
       type,
       reporter: reporter ?? ANONYMOUS_REPORTER,
       page,
-      attachments,
+      attachments: attachments ?? undefined,
       screenSnapshotIds,
     });
     if (result) {
       setSubmittedSummary({
         typeLabel: getTypeLabel(type),
         pageTitle: page.title || page.url,
-        attachments: getAttachmentSummary(attachments, screenSnapshotIds.length),
+        attachments: getAttachmentSummary(attachments ?? undefined, screenSnapshotIds.length),
       });
       notifySubmitted(result.feedback.id);
     }
@@ -152,6 +286,8 @@ export function FeedbackWidget() {
   }
 
   function handleWriteAnother() {
+    isResettingDraft.current = true;
+    showAttachmentNotice(null);
     setMessage('');
     setType('bug');
     setSubmittedSummary(null);
@@ -171,7 +307,7 @@ export function FeedbackWidget() {
           <p className="rounded-xl border border-fw-border bg-fw-surface p-3 font-mono text-xs text-fw-sub">원인(개발자용): {reason}</p>
         </WidgetBody>
         <WidgetFooter>
-          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={notifyClose}>
+          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={notifyClose} data-autofocus>
             닫기
           </button>
         </WidgetFooter>
@@ -207,7 +343,7 @@ export function FeedbackWidget() {
             <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={notifyClose}>
               닫기
             </button>
-            <button type="button" className={PRIMARY_BUTTON_CLASS} onClick={handleWriteAnother}>
+            <button type="button" className={PRIMARY_BUTTON_CLASS} onClick={handleWriteAnother} data-autofocus>
               다른 피드백 작성
             </button>
           </div>
@@ -226,6 +362,30 @@ export function FeedbackWidget() {
     return null;
   }
 
+  function renderSubmitError() {
+    if (status !== 'error') {
+      return null;
+    }
+    const detail = errorMessage || SUBMIT_RETRY_MESSAGE;
+    return (
+      <WidgetBanner tone="danger" title="전송하지 못했어요" isAlert>
+        <p>{detail}</p>
+        {detail !== SUBMIT_RETRY_MESSAGE ? <p className="mt-1">{SUBMIT_RETRY_HINT}</p> : null}
+      </WidgetBanner>
+    );
+  }
+
+  function renderAttachmentNotice() {
+    if (!attachmentNotice) {
+      return null;
+    }
+    return (
+      <WidgetBanner tone="success" icon={<CheckIcon className="size-4 text-fw-success" />}>
+        {ATTACHMENT_NOTICES[attachmentNotice.kind][attachmentNotice.direction]}
+      </WidgetBanner>
+    );
+  }
+
   function renderHint(attachmentCount: number) {
     if (attachmentCount > 0 && message.trim().length === 0) {
       return <span className="text-fw-primary">한 줄이라도 내용을 적으면 보낼 수 있어요</span>;
@@ -235,7 +395,6 @@ export function FeedbackWidget() {
 
   function renderCompose() {
     const isBusy = status === 'submitting';
-    const attachments = captureState?.attachments ?? null;
     const attachmentCount = (attachments ? countAttachments(attachments) : 0) + screens.snapshots.length;
     const isReady = isInitialized && captureState !== null;
     const greetingName = reporter ? `, ${reporter.name} 님` : '';
@@ -289,7 +448,7 @@ export function FeedbackWidget() {
                 <span className="font-semibold text-fw-text">첨부한 화면 정보 {attachmentCount}개</span>
                 <span className="text-fw-muted">보낼 때 함께 전달돼요</span>
               </p>
-              <ul className="flex flex-col gap-2">
+              <ul ref={attachmentListRef} className="flex flex-col gap-2">
                 {attachments ? (
                   <CaptureAttachmentCards
                     attachments={attachments}
@@ -321,12 +480,9 @@ export function FeedbackWidget() {
           ) : null}
           {captureState?.errorMessage ? <WidgetBanner tone="danger" isAlert>{captureState.errorMessage}</WidgetBanner> : null}
           {screens.errorMessage ? <WidgetBanner tone="danger" isAlert>{screens.errorMessage}</WidgetBanner> : null}
-          {status === 'error' ? (
-            <WidgetBanner tone="danger" title="전송하지 못했어요" isAlert>
-              {errorMessage || SUBMIT_RETRY_MESSAGE}
-            </WidgetBanner>
-          ) : null}
+          {renderSubmitError()}
           {renderProgress()}
+          {renderAttachmentNotice()}
           <CaptureToolBar
             attachments={attachments}
             enabled={captureState?.enabled ?? false}
@@ -348,10 +504,12 @@ export function FeedbackWidget() {
               maxLength={MAX_MESSAGE_LENGTH}
               required
               disabled={!isInitialized || isBusy}
+              data-autofocus=""
               onChange={(event) => setMessage(event.target.value)}
               onKeyDown={handleMessageKeyDown}
             />
             <button
+              ref={sendButtonRef}
               type="submit"
               aria-label="보내기"
               className="flex size-11 shrink-0 items-center justify-center rounded-[10px] bg-fw-primary text-white hover:bg-fw-primary-hover disabled:opacity-40"
@@ -396,5 +554,5 @@ export function FeedbackWidget() {
     return renderCompose();
   }
 
-  return <div className="widget-root flex h-dvh flex-col overflow-hidden">{renderContent()}</div>;
+  return <div ref={rootRef} className="widget-root flex h-dvh flex-col overflow-hidden">{renderContent()}</div>;
 }
