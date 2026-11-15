@@ -78,6 +78,11 @@ export function WidgetFooter({ children }: { children: ReactNode }) {
   );
 }
 
+/** A message field and its send button on one borderless surface, the way a messenger draws its input. */
+export function WidgetComposer({ children }: { children: ReactNode }) {
+  return <div className="widget-composer">{children}</div>;
+}
+
 export type BannerTone = 'info' | 'warning' | 'danger' | 'success';
 
 const BANNER_STATUSES: Record<BannerTone, 'info' | 'warning' | 'error' | 'success'> = {

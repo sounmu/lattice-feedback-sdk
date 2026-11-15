@@ -122,12 +122,44 @@
   color: var(--color-on-accent);
 }
 
-/* The message field grows with its text, from two lines up to four. The block padding matches the
-   field's own. */
-.widget-composer-field textarea {
+/* A message field and its send button share one borderless surface. The surface shows the field's focus
+   the way the theme's fields do: an accent hairline with a muted ring inside it. */
+.widget-composer {
+  display: flex;
+  align-items: flex-end;
+  padding: calc(var(--spacing-0-5) - var(--border-width));
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-container);
+  background-color: var(--color-background-muted);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.widget-composer:has(textarea:focus-visible) {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 2px var(--color-accent-muted);
+}
+
+.widget-composer .astryx-text-area {
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+/* One line to start, growing with the text up to five. Where field-sizing is not supported the field
+   keeps the two rows set on the element. */
+.widget-composer textarea {
   field-sizing: content;
-  min-block-size: calc(2lh + var(--spacing-2));
-  max-block-size: calc(4lh + var(--spacing-2));
+  min-block-size: calc(1lh + var(--spacing-6));
+  max-block-size: calc(5lh + var(--spacing-6));
+  padding-block: var(--spacing-3);
+  padding-inline: var(--spacing-3) var(--spacing-2);
+}
+
+/* The send button's corner follows the surface it sits in. */
+.widget-composer .astryx-button {
+  border-radius: calc(var(--radius-container) - var(--spacing-0-5));
 }
 
 /* A segment is 8px shorter than its 44px track. Under a finger the track itself takes the tap for the

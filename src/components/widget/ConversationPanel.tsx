@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Avatar } from '@astryxdesign/core/Avatar';
-import { Button } from '@astryxdesign/core/Button';
 import { ChatMessage, ChatMessageBubble, ChatMessageMetadata } from '@astryxdesign/core/Chat';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { Icon } from '@astryxdesign/core/Icon';
+import { IconButton } from '@astryxdesign/core/IconButton';
 import { List, ListItem } from '@astryxdesign/core/List';
 import { Skeleton } from '@astryxdesign/core/Skeleton';
 import { Tab, TabList } from '@astryxdesign/core/TabList';
@@ -17,10 +17,12 @@ import { z } from 'zod';
 import { CONVERSATION_SAVED_EVENT, getBrowserConversationSecrets } from '@/lib/browser-conversations';
 import { shouldLoadConversationsNow, shouldPollConversations, startConversationLoader } from '@/lib/conversation-polling';
 import { conversationMessagesSchema } from '@/lib/validation/conversation-schema';
+import { SendIcon } from '@/components/widget/WidgetIcons';
 import {
   WIDGET_TEAM_NAME,
   WidgetBanner,
   WidgetBody,
+  WidgetComposer,
   WidgetFooter,
   WidgetHeader,
   WidgetHeaderSlotProvider,
@@ -36,6 +38,9 @@ type Thread = z.infer<typeof threadSchema>;
 type MessageRole = Thread['messages'][number]['authorRole'];
 const VERIFICATION_REQUIRED_MESSAGE = '로그인한 사용자만 대화를 볼 수 있어요. 로그인 후 다시 열어 주세요.';
 const LOADING_MESSAGE = '대화를 불러오는 중이에요…';
+const FOLLOW_UP_LABEL = '추가 메시지';
+const FOLLOW_UP_PLACEHOLDER = '추가 메시지를 적어 주세요';
+const SEND_FOLLOW_UP_LABEL = '메시지 보내기';
 const NEW_FEEDBACK_TAB = 'new';
 const HISTORY_TAB = 'history';
 const MAX_FOLLOW_UP_LENGTH = 5000;
@@ -231,24 +236,30 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
           </WidgetBody>
           {selected ? (
             <WidgetFooter>
-              <TextArea
-                id="conversation-followup"
-                label="추가 메시지"
-                value={draft}
-                htmlMaxLength={MAX_FOLLOW_UP_LENGTH}
-                rows={3}
-                isDisabled={sending}
-                onChange={(value) => setDrafts((values) => ({ ...values, [selected.id]: value }))}
-              />
-              <Button
-                label="메시지 보내기"
-                variant="primary"
-                size="lg"
-                width="100%"
-                isLoading={sending}
-                isDisabled={!draft.trim() || selected.messages.length >= MAX_THREAD_MESSAGES}
-                onClick={() => void send()}
-              />
+              <WidgetComposer>
+                <TextArea
+                  id="conversation-followup"
+                  label={FOLLOW_UP_LABEL}
+                  isLabelHidden
+                  placeholder={FOLLOW_UP_PLACEHOLDER}
+                  value={draft}
+                  htmlMaxLength={MAX_FOLLOW_UP_LENGTH}
+                  rows={2}
+                  isDisabled={sending}
+                  containerClassName="min-w-0 flex-1"
+                  onChange={(value) => setDrafts((values) => ({ ...values, [selected.id]: value }))}
+                />
+                <IconButton
+                  label={SEND_FOLLOW_UP_LABEL}
+                  tooltip={SEND_FOLLOW_UP_LABEL}
+                  icon={<Icon icon={SendIcon} />}
+                  variant="primary"
+                  size="lg"
+                  isLoading={sending}
+                  isDisabled={!draft.trim() || selected.messages.length >= MAX_THREAD_MESSAGES}
+                  onClick={() => void send()}
+                />
+              </WidgetComposer>
             </WidgetFooter>
           ) : null}
         </>

@@ -33,6 +33,7 @@ import {
   WIDGET_TEAM_NAME,
   WidgetBanner,
   WidgetBody,
+  WidgetComposer,
   WidgetFooter,
   WidgetHeader,
 } from '@/components/widget/WidgetLayout';
@@ -549,7 +550,7 @@ export function FeedbackWidget() {
             onStart={(mode) => sendCaptureCommand(createCaptureCommand({ type: 'capture:start', payload: { mode } }))}
             onCaptureScreen={screens.capture}
           />
-          <HStack gap={2} align="end">
+          <WidgetComposer>
             <TextArea
               ref={composerRef}
               label={MESSAGE_LABEL}
@@ -561,7 +562,7 @@ export function FeedbackWidget() {
               value={message}
               htmlMaxLength={MAX_MESSAGE_LENGTH}
               isDisabled={!isInitialized || isBusy}
-              containerClassName="widget-composer-field min-w-0 flex-1"
+              containerClassName="min-w-0 flex-1"
               onChange={setMessage}
               onKeyDown={handleMessageKeyDown}
             />
@@ -575,7 +576,7 @@ export function FeedbackWidget() {
               size="lg"
               isDisabled={!canSubmit}
             />
-          </HStack>
+          </WidgetComposer>
           <HStack gap={2} justify="between" align="center">
             {renderHint(attachmentCount)}
             <Text type="supporting" hasTabularNumbers>
