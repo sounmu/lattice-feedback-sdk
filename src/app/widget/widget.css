@@ -116,6 +116,12 @@
   display: none;
 }
 
+/* The reporter's own messages are accent bubbles. The theme paints both sides neutral. */
+.widget-root .astryx-chat-message-bubble[data-sender='user'][data-variant='filled'] {
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
 /* The message field grows with its text, from two lines up to four. The block padding matches the
    field's own. */
 .widget-composer-field textarea {

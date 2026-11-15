@@ -453,19 +453,15 @@ export function FeedbackWidget() {
     const greetingName = reporter ? `, ${reporter.name} 님` : '';
     return (
       <ChatMessage sender="assistant" avatar={<Avatar name={WIDGET_TEAM_NAME} size="sm" shape="rounded" tooltip={false} />} name={null}>
-        <ChatMessageBubble width="100%">
-          <VStack gap={1}>
-            <Text as="p" weight="semibold">
-              안녕하세요{greetingName}
-            </Text>
-            <Text as="p" color="secondary">
-              불편한 점을 편하게 적어 주세요. 글로 설명하기 어려우면 아래 도구로{' '}
-              <Text weight="semibold" color="primary">
-                화면에서 직접
-              </Text>{' '}
-              보여주셔도 돼요.
-            </Text>
-          </VStack>
+        <ChatMessageBubble group="first">
+          <Text as="p" weight="semibold">
+            안녕하세요{greetingName}
+          </Text>
+        </ChatMessageBubble>
+        <ChatMessageBubble group="last">
+          <Text as="p">
+            불편한 점을 편하게 적어 주세요. 글로 설명하기 어려우면 아래 도구로 <Text weight="semibold">화면에서 직접</Text> 보여주셔도 돼요.
+          </Text>
         </ChatMessageBubble>
         <SegmentedControl label="피드백 유형" value={type} onChange={handleTypeChange} size="lg" isDisabled={isBusy}>
           {FEEDBACK_TYPE_OPTIONS.map((option) => (
