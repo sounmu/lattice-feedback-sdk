@@ -134,7 +134,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const items = await getFeedbackRepository().findMany(project.projectKey);
+    // The list uses the latest reply for search and badges; full history belongs to the detail.
+    const items = (await getFeedbackRepository().findMany(project.projectKey))
+      .map((feedback) => ({ ...feedback, messages: undefined }));
     const body: FeedbackListResponse = { items };
     return NextResponse.json(body);
   } catch (error) {
