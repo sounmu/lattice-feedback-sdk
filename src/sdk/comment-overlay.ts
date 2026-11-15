@@ -196,26 +196,32 @@ export function createCommentOverlay(root: ShadowRoot): CommentOverlay {
   let isDestroyed = false;
 
   function refresh(): void {
-    for (const { source, pin, remark } of marks) {
-      const { x, y, visible } = findPoint(source.element, source.offset);
+    // Every position is read before anything is moved. Moving one pin and then reading where the next one
+    // belongs makes the browser recalculate styles once per pin, on every scroll event.
+    const points = marks.map(({ source }) => findPoint(source.element, source.offset));
+    // An element removed while its comment is being written leaves the editor where it was.
+    const editorPoint = editor && editor.target.element.isConnected ? findPoint(editor.target.element, editor.point) : null;
+    marks.forEach(({ source, pin, remark }, index) => {
+      const { x, y, visible } = points[index];
       const isOpen = visible && openKey === source.key;
       pin.hidden = !visible;
       remark.hidden = !isOpen;
       pin.setAttribute('aria-expanded', String(isOpen));
-      if (!visible) continue;
+      if (!visible) return;
       pin.style.transform = `translate(${x}px, ${y}px)`;
       // Hover and press scale the pin, and a scale turns around the transform origin. The origin goes with
       // the pin: left at the corner the pin is moved from, the scale would move the pin as well.
       pin.style.transformOrigin = `calc(50% + ${x}px) calc(50% + ${y}px)`;
-      if (isOpen) placeBeside(remark, x, y);
+    });
+    if (editor && editorPoint) {
+      editor.marker.hidden = !editorPoint.visible;
+      editor.marker.style.transform = `translate(${editorPoint.x}px, ${editorPoint.y}px)`;
     }
-    // An element removed while its comment is being written leaves the editor where it was.
-    if (editor && editor.target.element.isConnected) {
-      const { x, y, visible } = findPoint(editor.target.element, editor.point);
-      editor.marker.hidden = !visible;
-      editor.marker.style.transform = `translate(${x}px, ${y}px)`;
-      placeBeside(editor.box, x, y);
-    }
+    // A box is measured once it is shown, so the open remark and the editor are placed last.
+    marks.forEach(({ remark }, index) => {
+      if (!remark.hidden) placeBeside(remark, points[index].x, points[index].y);
+    });
+    if (editor && editorPoint) placeBeside(editor.box, editorPoint.x, editorPoint.y);
   }
 
   // An outside click never reaches the host. With nothing typed it closes the editor so the next click

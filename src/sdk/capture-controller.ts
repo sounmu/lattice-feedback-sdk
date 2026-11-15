@@ -1,7 +1,7 @@
 import { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, truncateText } from '@/lib/feedback-limits';
 import { isGenericTargetLabel, type CapturePolicy } from '@/lib/capture-policy';
 import type { CommentPinSource, EditMoveSource } from '@/sdk/screen-marks';
-import { findCaptureTarget, findFlowTargetLabel, isCapturePageAllowed, type CaptureTarget } from '@/sdk/capture-policy';
+import { findCaptureTarget, findFlowTarget, isCapturePageAllowed, type CaptureTarget } from '@/sdk/capture-policy';
 import { createCommentOverlay } from '@/sdk/comment-overlay';
 import { createCaptureStatus } from '@/sdk/capture-status';
 import { startElementDrag } from '@/sdk/element-drag';
@@ -413,10 +413,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     isPathAllowed: (path) => !policy || policy.allowedPaths.includes(path),
     isTargetAllowed: (id) => isGenericTargetLabel(id) || (policy?.targets.some((target) => target.id === id) ?? false),
     isPageAllowed: () => isCapturePageAllowed(policy),
-    findTarget: (eventTarget) => {
-      const found = findCaptureTarget(eventTarget, policy)?.target;
-      return found ? { ...found, feedbackId: findFlowTargetLabel(eventTarget, policy) } : null;
-    },
+    findTarget: (eventTarget) => findFlowTarget(eventTarget, policy),
     onComplete: handleFlowComplete,
     onStateChange: handleFlowState,
   });
