@@ -8,7 +8,7 @@ import type { CommentPinSource } from '@/sdk/screen-marks';
 import { PANEL_OPEN_CLASS_NAME, PHONE_MEDIA_QUERY, SDK_Z_INDEX } from '@/sdk/styles';
 import {
   getStateLayer, SDK_BUTTON_BASE, SDK_FOCUS_OUTLINE, SDK_FONT, SDK_FONT_FAMILY, SDK_HOVER_MEDIA, SDK_PRESSED_SCALE, SDK_RADIUS,
-  SDK_SHADOW, SDK_THEME,
+  SDK_SHADOW, SDK_THEME, SDK_TRANSITION,
 } from '@/sdk/theme-tokens';
 
 export interface CommentEditorCallbacks {
@@ -41,6 +41,11 @@ interface OpenEditor {
   callbacks: CommentEditorCallbacks;
 }
 
+// A pin grows a little under the pointer and dips when pressed. It is small, so it changes more than the
+// 2% a button does.
+const PIN_HOVER_SCALE = '1.1';
+const PIN_PRESSED_SCALE = '0.94';
+
 // Pins keep the theme's info colour to distinguish page annotations from primary actions.
 // The editor and remark are light popovers with Astryx's buttons. The
 // textarea keeps 16px text: a smaller size makes iOS zoom the customer's page when it takes focus.
@@ -52,8 +57,11 @@ const COMMENT_STYLES = `
   z-index: ${SDK_Z_INDEX - 1}; width: 28px; height: 28px; margin: -14px 0 0 -14px; padding: 0;
   border: 2px solid ${SDK_THEME.surface}; border-radius: ${SDK_RADIUS.full}; background: ${SDK_THEME.info}; color: ${SDK_THEME.onInfo};
   font: 700 12px/24px ${SDK_FONT_FAMILY}; text-align: center; cursor: pointer; box-shadow: ${SDK_SHADOW.medium};
+  transition: scale ${SDK_TRANSITION};
 }
 .comment-pin::after { content: ""; position: absolute; inset: -10px; }
+${SDK_HOVER_MEDIA} { .comment-pin:hover { background-image: ${getStateLayer(SDK_THEME.overlayHover)}; scale: ${PIN_HOVER_SCALE}; } }
+.comment-pin:active { background-image: ${getStateLayer(SDK_THEME.overlayPressed)}; scale: ${PIN_PRESSED_SCALE}; }
 .comment-pin.is-pending {
   width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 3px solid ${SDK_THEME.info}; background: transparent;
   box-shadow: 0 0 0 2px ${SDK_THEME.surface}, ${SDK_SHADOW.medium}; pointer-events: none;
@@ -92,6 +100,8 @@ ${SDK_HOVER_MEDIA} { .comment-box button[data-action="submit"]:hover { backgroun
 @media (prefers-reduced-motion: reduce) {
   .comment-box button { transition: none; }
   .comment-box button:active { transform: none; }
+  .comment-pin { transition: none; }
+  .comment-pin:hover, .comment-pin:active { scale: none; }
 }
 /* A box shares the panel's z-index and comes later, so it would paint over the panel. On a phone the open
    panel covers the page and has its own comment field, so the box stays out of the way until it closes. */
@@ -193,6 +203,9 @@ export function createCommentOverlay(root: ShadowRoot): CommentOverlay {
       pin.setAttribute('aria-expanded', String(isOpen));
       if (!visible) continue;
       pin.style.transform = `translate(${x}px, ${y}px)`;
+      // Hover and press scale the pin, and a scale turns around the transform origin. The origin goes with
+      // the pin: left at the corner the pin is moved from, the scale would move the pin as well.
+      pin.style.transformOrigin = `calc(50% + ${x}px) calc(50% + ${y}px)`;
       if (isOpen) placeBeside(remark, x, y);
     }
     // An element removed while its comment is being written leaves the editor where it was.
