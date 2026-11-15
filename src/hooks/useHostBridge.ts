@@ -46,6 +46,7 @@ export function useHostBridge() {
   const [reporter, setReporter] = useState<FeedbackReporter | null>(null);
   const [page, setPage] = useState<PageContext | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
   const [captureState, setCaptureState] = useState<CaptureState | null>(null);
   // A saved screen is several megabytes, so it is handed to its listener instead of kept in state.
   const screenCaptureListeners = useRef(new Set<ScreenCaptureListener>());
@@ -92,6 +93,9 @@ export function useHostBridge() {
       }
       const message = event.data;
       switch (message.type) {
+        case 'visibility:update':
+          setIsOpen(message.payload.isOpen);
+          break;
         case 'init':
           setReporter(message.payload.reporter);
           setPage(message.payload.page);
@@ -160,6 +164,7 @@ export function useHostBridge() {
     reporter,
     page,
     isInitialized,
+    isOpen,
     captureState,
     sendCaptureCommand: postToHost,
     subscribeToScreenCapture,

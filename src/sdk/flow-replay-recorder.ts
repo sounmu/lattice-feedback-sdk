@@ -14,7 +14,7 @@ import {
 } from '@/lib/feedback-limits';
 import { isGzipSupported } from '@/lib/gzip';
 import { RRWEB_FULL_SNAPSHOT_EVENT_TYPE, RRWEB_INCREMENTAL_EVENT_TYPE, RRWEB_META_EVENT_TYPE } from '@/lib/screen-snapshot';
-import { mergeReplayChunks, type ReplaySegment } from '@/sdk/flow-replay-segment';
+import { findGapBefore, mergeReplayChunks, type ReplaySegment } from '@/sdk/flow-replay-segment';
 import { openReplayStore, type ReplayChunk } from '@/sdk/flow-replay-session';
 import { getPageUrl } from '@/sdk/page-context';
 import { findLiveImageSource } from '@/sdk/live-image-source';
@@ -106,6 +106,8 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
   // Events and bytes of the whole Flow so far, earlier documents included.
   let totalCount = 0;
   let totalBytes = 0;
+  // Events the earlier documents saved, which the next document is told about with this one's own.
+  let recordedBefore = 0;
   let truncated = !session.recordPage;
   let isRemoved = false;
   // Events wait here until the saved part is read, because the limits count it too. Null from then on.
@@ -257,9 +259,8 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
     const progress = store.findProgress();
     earlier = saved.segments;
     segment = saved.lastSegment + 1;
-    // The document before this one notes how many events it recorded as it is left. Fewer saved than that,
-    // or no note from it, means events were lost on the way here.
-    gapBefore = saved.hasGapAfter || progress?.segment !== saved.lastSegment || progress.eventCount > saved.lastEventCount;
+    gapBefore = findGapBefore(saved, progress);
+    recordedBefore = saved.recordedCount;
     totalCount = saved.eventCount + (gapBefore ? 1 : 0);
     totalBytes = saved.bytes;
     startedAtMs = earlier[0]?.events[0].timestamp ?? startedAtMs;
@@ -278,7 +279,9 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
       sampleAssetUsage(Date.now());
     }
     save();
-    store.saveProgress({ segment, eventCount: events.length });
+    store.saveProgress({ segment, eventCount: events.length, totalEventCount: recordedBefore + events.length });
+    // IndexedDB may not finish writing before this document goes; the next one merges the stash in.
+    store.stashPending();
   }
 
   // A restored document starts a fresh snapshot after the pages recorded while it was suspended.

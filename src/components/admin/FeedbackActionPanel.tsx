@@ -3,6 +3,7 @@
 import { useEffect, useEffectEvent, useState } from 'react';
 
 import { AdminSection } from '@/components/admin/AdminSection';
+import { ConversationThread } from '@/components/admin/ConversationThread';
 import { DuplicateOriginalPicker } from '@/components/admin/DuplicateOriginalPicker';
 import { ShortcutKey } from '@/components/admin/ShortcutKey';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
@@ -32,18 +33,27 @@ const SAVE_STATUS_MESSAGES: Record<SaveStatus, string> = {
 export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, onSave }: FeedbackActionPanelProps) {
   const [status, setStatus] = useState<FeedbackStatus>(feedback.status);
   // A reply typed earlier and not saved comes back, so looking at another feedback does not lose it.
-  const [reply, setReply] = useState(() => findBrowserReplyDraft(feedback) ?? feedback.adminReply ?? '');
+  // Each save sends a new message. Keep the existing draft helpers with an empty composer baseline.
+  const composerFeedback = { ...feedback, adminReply: null };
+  const [reply, setReply] = useState(() => findBrowserReplyDraft(composerFeedback) ?? '');
   const [isDraftKept, setIsDraftKept] = useState(true);
   const [duplicateOfId, setDuplicateOfId] = useState(feedback.duplicateOfId ?? '');
   const isSaving = saveStatus === 'saving';
   const isOriginalMissing = status === 'duplicate' && duplicateOfId === '';
-  const changes = createFeedbackChanges(feedback, { status, reply, duplicateOfId });
+  const changes = createFeedbackChanges(composerFeedback, { status, reply, duplicateOfId });
   const isChanged = Object.keys(changes).length > 0;
   const isReplyUnsaved = changes.adminReply !== undefined;
 
   function handleReplyChange(nextReply: string) {
     setReply(nextReply);
-    setIsDraftKept(saveBrowserReplyDraft(feedback, nextReply));
+    setIsDraftKept(saveBrowserReplyDraft(composerFeedback, nextReply));
+  }
+
+  async function saveChanges(nextChanges: UpdateFeedbackInput) {
+    if (await onSave(nextChanges)) {
+      saveBrowserReplyDraft(composerFeedback, '');
+      setReply('');
+    }
   }
 
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
@@ -61,12 +71,12 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
       return;
     }
     // Saved together with a reply the admin has typed, so the key never drops it.
-    const shortcutChanges = createFeedbackChanges(feedback, { status: nextStatus, reply, duplicateOfId });
+    const shortcutChanges = createFeedbackChanges(composerFeedback, { status: nextStatus, reply, duplicateOfId });
     if (Object.keys(shortcutChanges).length === 0) {
       return;
     }
     event.preventDefault();
-    void onSave(shortcutChanges);
+    void saveChanges(shortcutChanges);
   });
 
   useEffect(() => {
@@ -77,6 +87,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
 
   return (
     <AdminSection sectionKey="actions" title="처리하기">
+      <ConversationThread feedback={feedback} />
       <fieldset disabled={isSaving} className="flex flex-wrap gap-2">
         <legend className="mb-1 text-sm font-semibold">상태</legend>
         {FEEDBACK_STATUSES.map((option) => (
@@ -115,6 +126,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
       <textarea
         id="admin-reply"
         rows={5}
+        maxLength={5000}
         disabled={isSaving}
         value={reply}
         onChange={(event) => handleReplyChange(event.target.value)}
@@ -132,7 +144,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => onSave(changes)}
+          onClick={() => saveChanges(changes)}
           disabled={!isChanged || isSaving || isOriginalMissing}
           className="min-h-11 rounded-[10px] bg-(--admin-primary) px-5 font-semibold text-white hover:bg-(--admin-primary-hover) disabled:opacity-50"
         >

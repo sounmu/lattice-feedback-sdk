@@ -62,6 +62,7 @@ export type ScreenCapturedMessage = ProtocolMessage<'screen:captured', ScreenCap
 export type ScreenCaptureFailedMessage = ProtocolMessage<'screen:capture-failed', ScreenCaptureRequest & { reason: ScreenCaptureFailureReason }>;
 
 export type HostToWidgetMessage =
+  | ProtocolMessage<'visibility:update', { isOpen: boolean }>
   | InitMessage
   | ReporterUpdateMessage
   | PageUpdateMessage

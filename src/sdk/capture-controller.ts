@@ -52,7 +52,6 @@ export function createCaptureController(options: CaptureControllerOptions) {
   // Likewise for the dragged element of each edit.
   let editElements: HTMLElement[] = [];
   let commentPoints: SelectionPoint[] = [];
-  let isDragging = false;
   let transientHandle: { cancel(): void } | null = null;
   // Bumped whenever a transient run ends, so callbacks fired by our own cancel() (drag calls onCancel synchronously) are ignored.
   let transientToken = 0;
@@ -80,7 +79,10 @@ export function createCaptureController(options: CaptureControllerOptions) {
         showWidget();
       }
     },
-    onCancel: cancelActiveMode,
+    onCancel: () => {
+      cancelActiveMode();
+      showWidget();
+    },
     onShow: showWidget,
   });
 
@@ -95,7 +97,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
   }
 
   function renderStatus(): void {
-    status.render(getState(), activeMode !== null && !isPanelVisible && !isDragging);
+    status.render(getState(), activeMode !== null && !isPanelVisible);
   }
 
   function emit(): void {
@@ -127,7 +129,6 @@ export function createCaptureController(options: CaptureControllerOptions) {
     handle?.cancel();
     selection = null;
     selectionElement = null;
-    isDragging = false;
     if (activeMode === 'comment' || activeMode === 'edit') activeMode = null;
   }
 
@@ -159,7 +160,8 @@ export function createCaptureController(options: CaptureControllerOptions) {
       });
       return;
     }
-    isDragging = true;
+    // The dragged element is published as the selection so the mode bar and the widget can name it.
+    selection = target.target;
     emit();
     const handle = startElementDrag(target, {
       onComplete: (edit) => {

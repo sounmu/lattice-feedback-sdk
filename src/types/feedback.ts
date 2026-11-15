@@ -1,8 +1,9 @@
 // Shared feedback domain types. Types only: no runtime code lives here.
-// Data minimization (AGENTS.md section 5): nothing in these shapes may carry
-// input values, query strings, hashes, cookies, tokens, or raw DOM/CSS.
+// Capture context excludes credentials. Reporter identity proofs and conversation
+// capabilities are transient authentication fields, never persisted as feedback metadata.
 
 import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
+import type { ConversationMessage, ReporterSignature } from '@/types/conversation';
 
 export type FeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'rejected' | 'duplicate';
 
@@ -13,6 +14,8 @@ export interface FeedbackReporter {
   id: string;
   name: string;
   email?: string;
+  /** Transient identity proof; stripped before persistence. */
+  identity?: ReporterSignature;
 }
 
 export interface PageContext {
@@ -97,6 +100,7 @@ export interface Feedback {
   page: PageContext;
   attachments: FeedbackAttachments;
   adminReply: string | null;
+  messages?: ConversationMessage[];
   /** ISO timestamp. */
   createdAt: string;
   /** ISO timestamp. */
@@ -114,6 +118,7 @@ export type UpdateFeedbackInput = Partial<Pick<Feedback, 'status' | 'adminReply'
 
 export interface CreateFeedbackResponse {
   feedback: Feedback;
+  conversationSecret?: string;
 }
 
 export interface FeedbackListResponse {

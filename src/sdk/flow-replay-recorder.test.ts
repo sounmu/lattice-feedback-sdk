@@ -61,6 +61,7 @@ vi.mock('@/sdk/flow-replay-session', () => ({
     saveProgress: (progress: ReplayProgress) => {
       saved.progress = progress;
     },
+    stashPending: () => undefined,
     clear: async () => {
       saved.chunks = [];
       saved.progress = null;
