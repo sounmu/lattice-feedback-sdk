@@ -5,12 +5,15 @@ import {
   shouldIndexScriptLiteral,
   type AutomaticMaskingOptions,
 } from '@/sdk/automatic-masking';
+import { readTextWithinBudget } from '@/sdk/bounded-source';
 
-const MAX_SOURCE_BYTES = 4 * 1024 * 1024;
-const MAX_SCRIPTS = 32;
+// Sized for real application bundles: one unsplit bundle of several megabytes is common, and a page whose
+// bundle does not fit has every label masked.
+const MAX_SOURCE_BYTES = 24 * 1024 * 1024;
+const MAX_SCRIPTS = 64;
 const MAX_LITERALS = 100_000;
 const MAX_LITERAL_LENGTH = 4096;
-const INDEX_TIMEOUT_MS = 4000;
+const INDEX_TIMEOUT_MS = 8000;
 const WARM_DELAY_MS = 200;
 // Class names and inline styles are layout vocabulary, not text; masking them would break the replayed layout.
 const UNINDEXED_ATTRIBUTES = new Set(['class', 'style']);
@@ -92,7 +95,9 @@ async function buildIndex(): Promise<void> {
   let omitted = false;
   const add = (text: string): void => {
     const normalized = normalizeStaticText(text);
-    if (normalized.length > MAX_LITERAL_LENGTH || known.size >= MAX_LITERALS) {
+    // A string this long is embedded data such as an image or a stylesheet, not a label. Skipping it leaves no gap.
+    if (normalized.length > MAX_LITERAL_LENGTH) return;
+    if (known.size >= MAX_LITERALS) {
       omitted = true;
       return;
     }
@@ -102,27 +107,24 @@ async function buildIndex(): Promise<void> {
     const response = await fetch(url, { credentials: 'same-origin', cache: 'force-cache', redirect: 'error', signal: controller.signal });
     if (!response.ok || !response.body) throw new Error('Static source unavailable');
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let source = '';
-    try {
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) return source + decoder.decode();
-        remaining -= chunk.value.byteLength;
-        if (remaining < 0) throw new Error('Static source budget exceeded');
-        source += decoder.decode(chunk.value, { stream: true });
-      }
-    } finally {
-      await reader.cancel();
+    const source = await readTextWithinBudget(reader, remaining);
+    remaining -= source.byteLength;
+    if (!source.isComplete) {
+      omitted = true;
+      // The rest is not needed. A stream that already failed has nothing left to cancel.
+      await reader.cancel().catch(() => undefined);
     }
+    return source.text;
   };
   const addScript = (source: string, decoder: HTMLTextAreaElement): void => {
     for (const literal of extractScriptLiterals(source)) {
       if (!shouldIndexScriptLiteral(literal)) continue;
       add(literal);
       // Strings rendered as HTML can spell entities rather than the displayed characters.
-      decoder.innerHTML = literal;
-      add(decoder.value);
+      if (literal.includes('&')) {
+        decoder.innerHTML = literal;
+        add(decoder.value);
+      }
     }
   };
   let documentRead = false;
