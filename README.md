@@ -248,7 +248,8 @@ production 관리자 API는 `FEEDBACK_ADMIN_TOKEN`이 없으면 잠깁니다.
 npm run build:sdk
 ```
 
-그다음 **호스트 페이지를 새로고침**합니다. `public/sdk.js`는 생성 파일이므로 직접 수정하지 않습니다.
+그다음 **호스트 페이지를 새로고침**합니다. `public/sdk.js`와 `public/sdk/`는 생성 파일이므로 직접 수정하지 않습니다.
+`sdk.js`에는 런처와 위젯 연결만 들어 있고, 캡처·Flow·미리보기 코드는 위젯을 열 때 `public/sdk/`의 파일에서 불러옵니다.
 환경변수를 수정했을 때는 Next.js 서버도 다시 시작합니다.
 
 ## 자주 막히는 부분

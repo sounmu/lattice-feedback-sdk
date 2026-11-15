@@ -1,7 +1,15 @@
-// Builds the SDK file that customer pages load with one script tag. Run it with `npm run build:sdk`.
-import { readFile } from 'node:fs/promises';
+// Builds what customer pages load: public/sdk.js, the file of the one script tag, and the capture runtime
+// that sdk.js imports from public/sdk/ once the reporter needs it. Run it with `npm run build:sdk`.
+import { readFile, rm } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { build } from 'esbuild';
 
+const RUNTIME_DIRECTORY = 'public/sdk';
+// sdk.js is loaded by every page view of every customer. It holds the launcher, the bridge to the widget
+// and the loader, about 22 KB. Much more means a capture module is imported from it by mistake.
+const MAX_ENTRY_BYTES = 32 * 1024;
+// These keep state that the entry and the runtime must share, so they may exist in the runtime only.
+const RUNTIME_ONLY_MODULES = ['src/sdk/static-text-index.ts', 'src/sdk/capture-controller.ts'];
 const RRWEB_SNAPSHOT_FILE = /rrweb-snapshot[\\/]dist[\\/]rrweb-snapshot\.js$/;
 
 // rrweb-snapshot ships as one file that also holds its replay half, which needs postcss. Saving a screen
@@ -36,13 +44,35 @@ const dropUnusedPostcss = {
   },
 };
 
-await build({
-  entryPoints: ['src/sdk/index.ts'],
-  outfile: 'public/sdk.js',
-  bundle: true,
-  minify: true,
-  format: 'iife',
-  target: 'es2019',
-  logLevel: 'info',
+const sharedOptions = { bundle: true, minify: true, target: 'es2019', logLevel: 'info', metafile: true };
+
+// A runtime left from an earlier build would be deployed next to the one sdk.js asks for.
+await rm(RUNTIME_DIRECTORY, { recursive: true, force: true });
+// The runtime is a module, because a script can import one from another origin without adding an element
+// to the customer's page. The hash in its name comes from its content, so it can be cached for good.
+const runtime = await build({
+  ...sharedOptions,
+  entryPoints: { 'capture-runtime': 'src/sdk/capture-runtime.ts' },
+  outdir: RUNTIME_DIRECTORY,
+  entryNames: '[name]-[hash]',
+  format: 'esm',
   plugins: [dropUnusedPostcss],
 });
+const [runtimeFile] = Object.keys(runtime.metafile.outputs);
+
+const entry = await build({
+  ...sharedOptions,
+  entryPoints: ['src/sdk/index.ts'],
+  outfile: 'public/sdk.js',
+  format: 'iife',
+  define: { __LATTICE_CAPTURE_RUNTIME_PATH__: JSON.stringify(`/sdk/${basename(runtimeFile)}`) },
+});
+
+const misplacedModules = RUNTIME_ONLY_MODULES.filter((file) => file in entry.metafile.inputs);
+if (misplacedModules.length > 0) {
+  throw new Error(`public/sdk.js bundles ${misplacedModules.join(', ')}. Reach them through src/sdk/capture-runtime.ts.`);
+}
+const entryBytes = entry.metafile.outputs['public/sdk.js'].bytes;
+if (entryBytes > MAX_ENTRY_BYTES) {
+  throw new Error(`public/sdk.js is ${entryBytes} bytes, over the ${MAX_ENTRY_BYTES} it may be. Load capture code through the runtime.`);
+}
