@@ -184,6 +184,8 @@ export class FeedbackSdk {
     const launcherButton = document.createElement('button');
     launcherButton.type = 'button';
     launcherButton.className = 'launcher';
+    // The icons carry no text, so a pointer gets the name as a tooltip.
+    launcherButton.title = LAUNCHER_LABEL;
     const launcherLabel = document.createElement('span');
     launcherLabel.className = LAUNCHER_LABEL_CLASS_NAME;
     launcherLabel.textContent = LAUNCHER_LABEL;
