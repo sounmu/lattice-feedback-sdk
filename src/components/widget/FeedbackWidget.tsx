@@ -452,7 +452,7 @@ export function FeedbackWidget() {
   function renderGreeting(isBusy: boolean) {
     const greetingName = reporter ? `, ${reporter.name} 님` : '';
     return (
-      <ChatMessage sender="assistant" avatar={<Avatar name={WIDGET_TEAM_NAME} size="sm" tooltip={false} />} name={null}>
+      <ChatMessage sender="assistant" avatar={<Avatar name={WIDGET_TEAM_NAME} size="sm" shape="rounded" tooltip={false} />} name={null}>
         <ChatMessageBubble width="100%">
           <VStack gap={1}>
             <Text as="p" weight="semibold">

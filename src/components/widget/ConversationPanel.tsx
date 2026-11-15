@@ -17,7 +17,14 @@ import { z } from 'zod';
 import { CONVERSATION_SAVED_EVENT, getBrowserConversationSecrets } from '@/lib/browser-conversations';
 import { shouldLoadConversationsNow, shouldPollConversations, startConversationLoader } from '@/lib/conversation-polling';
 import { conversationMessagesSchema } from '@/lib/validation/conversation-schema';
-import { WIDGET_TEAM_NAME, WidgetBanner, WidgetBody, WidgetFooter, WidgetHeader } from '@/components/widget/WidgetLayout';
+import {
+  WIDGET_TEAM_NAME,
+  WidgetBanner,
+  WidgetBody,
+  WidgetFooter,
+  WidgetHeader,
+  WidgetHeaderSlotProvider,
+} from '@/components/widget/WidgetLayout';
 import type { FeedbackReporter } from '@/types/feedback';
 
 const threadSchema = z.object({
@@ -63,6 +70,7 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
   const isVisible = useSyncExternalStore(subscribeToVisibility, getIsVisible, getServerIsVisible);
   const polling = shouldPollConversations({ isOpen, showHistory, isVisible });
   const previousLoaderRun = useRef<{ inputs: readonly unknown[]; polling: boolean } | null>(null);
@@ -154,7 +162,8 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
   }
 
   return (
-    <>
+    <WidgetHeaderSlotProvider value={headerSlot}>
+      <div ref={setHeaderSlot} className="shrink-0" />
       <TabList
         value={showHistory ? HISTORY_TAB : NEW_FEEDBACK_TAB}
         onChange={(value) => setShowHistory(value === HISTORY_TAB)}
@@ -197,7 +206,7 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
                     <ChatMessage
                       sender={getChatSender(message.authorRole)}
                       name={ROLE_LABELS[message.authorRole]}
-                      avatar={message.authorRole === 'admin' ? <Avatar name={WIDGET_TEAM_NAME} size="sm" tooltip={false} /> : undefined}
+                      avatar={message.authorRole === 'admin' ? <Avatar name={WIDGET_TEAM_NAME} size="sm" shape="rounded" tooltip={false} /> : undefined}
                     >
                       <ChatMessageBubble metadata={<ChatMessageMetadata timestamp={<Timestamp value={message.createdAt} />} />}>
                         <span className="whitespace-pre-wrap">{message.body}</span>
@@ -244,6 +253,6 @@ export function ConversationPanel({ config, reporter, isOpen, onClose, children 
           ) : null}
         </>
       )}
-    </>
+    </WidgetHeaderSlotProvider>
   );
 }

@@ -80,6 +80,42 @@
   text-wrap: wrap;
 }
 
+/* The team's avatar carries the brand colour. Every avatar in the widget is the team's. */
+.widget-root .astryx-avatar-fallback {
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* The tabs sit under the header as two pills. The chosen one is a wash with accent ink, like the chosen
+   feedback type, in place of the theme's underline. A pill is 8px shorter than its 44px press area. */
+.widget-root .astryx-tab-list {
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-3) var(--spacing-2);
+}
+
+.widget-root .astryx-tab-strip {
+  padding-block-end: 0;
+}
+
+.widget-root .astryx-tab {
+  min-block-size: calc(var(--size-element-lg) - var(--spacing-2));
+}
+
+.widget-root .astryx-tab::after {
+  content: '';
+  position: absolute;
+  inset: calc(var(--spacing-1) * -1) 0;
+}
+
+.widget-root .astryx-tab[data-selected='selected'] {
+  --color-text-primary: var(--color-accent);
+  background-color: var(--color-accent-muted);
+}
+
+.widget-root .astryx-tab-indicator {
+  display: none;
+}
+
 /* The message field grows with its text, from two lines up to four. The block padding matches the
    field's own. */
 .widget-composer-field textarea {
