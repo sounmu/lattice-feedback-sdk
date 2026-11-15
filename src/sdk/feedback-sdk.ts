@@ -218,22 +218,18 @@ export class FeedbackSdk {
     });
     this.previewPanel = createPreviewPanel({
       root: shadowRoot, widgetPanel: panelElement, appOrigin: this.appOrigin, projectKey,
-      onClose: (previewId) => this.handlePreviewClose(previewId),
+      onClose: (previewId) => this.handlePreviewClose(previewId, shadowRoot),
     });
     this.launcherButton = launcherButton;
   }
 
-  private handlePreviewClose(previewId: string): void {
+  private handlePreviewClose(previewId: string, root: ShadowRoot): void {
     this.postToWidget(createHostToWidgetMessage('preview:closed', { previewId }));
     // Keyboard focus returns to the widget, which puts it back on the button that opened the preview.
     // A widget that closed the preview itself still has the focus: focusing its iframe again would take
     // the focus off the control it is on.
     const iframeElement = this.iframeElement;
-    if (!this.isPanelOpen || !iframeElement) {
-      return;
-    }
-    const isWidgetFocused = (iframeElement.getRootNode() as ShadowRoot).activeElement === iframeElement;
-    if (!isWidgetFocused) {
+    if (this.isPanelOpen && iframeElement && root.activeElement !== iframeElement) {
       iframeElement.focus({ preventScroll: true });
     }
   }
