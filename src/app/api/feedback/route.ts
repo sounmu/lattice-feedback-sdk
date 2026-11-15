@@ -68,11 +68,16 @@ export async function POST(request: Request) {
     return createApiErrorResponse(403, 'capture_not_allowed', 'Captured context is not allowed for this project.');
   }
 
+  const verifiedReporterId = findVerifiedReporterId(project, parsed.data.reporter);
+  if (project.requireVerifiedIdentity && verifiedReporterId === null) {
+    return createApiErrorResponse(401, 'verification_required', 'A verified identity is required to send feedback.');
+  }
+
   const { screenSnapshotIds, ...feedbackInput } = parsed.data;
   const conversationSecret = createConversationSecret();
   const access = {
     browserSecretHash: hashConversationSecret(conversationSecret),
-    verifiedReporterId: findVerifiedReporterId(project, feedbackInput.reporter),
+    verifiedReporterId,
   };
   // The identity proof is a bearer credential, never reporter metadata.
   delete feedbackInput.reporter.identity;
@@ -99,7 +104,8 @@ export async function POST(request: Request) {
     } else {
       feedback = await feedbackRepository.create(feedbackInput, feedbackId, access);
     }
-    const body: CreateFeedbackResponse = { feedback, conversationSecret };
+    // A project that requires verified identity never hands out a browser capability.
+    const body: CreateFeedbackResponse = project.requireVerifiedIdentity ? { feedback } : { feedback, conversationSecret };
     return NextResponse.json(body, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof FeedbackStorageFullError) {

@@ -8,6 +8,7 @@ import { MAX_FEEDBACK_BYTES } from '@/lib/feedback-limits';
 export type SubmitStatus = 'idle' | 'submitting' | 'success' | 'error';
 
 const FALLBACK_ERROR_MESSAGE = '잠시 후 다시 시도해 주세요. 작성한 내용은 그대로 남아 있어요.';
+const VERIFICATION_REQUIRED_MESSAGE = '로그인한 사용자만 피드백을 보낼 수 있어요. 로그인 후 다시 시도해 주세요.';
 
 function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
   if (typeof value !== 'object' || value === null || !('error' in value)) {
@@ -37,6 +38,11 @@ export function useSubmitFeedback() {
         body: serialized,
       });
       const body: unknown = await response.json().catch(() => null);
+      if (response.status === 401) {
+        setErrorMessage(VERIFICATION_REQUIRED_MESSAGE);
+        setStatus('error');
+        return null;
+      }
       if (!response.ok) {
         setErrorMessage(isApiErrorResponse(body) ? body.error.message : FALLBACK_ERROR_MESSAGE);
         setStatus('error');

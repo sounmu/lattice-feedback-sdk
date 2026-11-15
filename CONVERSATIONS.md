@@ -42,6 +42,30 @@ A new browser with the same valid proof can see and continue those threads.
 We deliberately do not associate old or unverified threads by their claimed id:
 an attacker could previously have submitted using someone else's id.
 
+## Requiring verified identity
+
+Set `FEEDBACK_REQUIRE_VERIFIED_IDENTITY=true` (the `demo` project's setting, default off)
+for closed deployments where only the customer's signed-in users may talk to you,
+like a messenger's member hash. It needs `FEEDBACK_IDENTITY_SECRET`; values `true` or
+`1` turn it on. When on:
+
+- Listing conversations and sending follow-ups need a valid signed identity. Browser
+  capabilities are ignored, and a request without a valid signature gets `401`
+  `verification_required`. Threads match by verified reporter id only, so threads
+  created earlier with only a browser capability are not reachable by reporters.
+- New feedback without a valid signature is refused with the same `401`. We refuse
+  instead of accepting a thread nobody could read back: the reporter would wait for
+  an answer they can never see, and unsigned submissions are exactly the spoofing
+  surface this option closes. Text-only feedback keeps working when the option is off.
+- No browser capability is issued, so the response has no `conversationSecret` and
+  the widget stores nothing. The widget shows "로그인한 사용자만 대화를 볼 수
+  있어요" in 내 대화 and a Korean error when sending is refused.
+- If the option is on but `FEEDBACK_IDENTITY_SECRET` is missing, no signature can
+  verify, so every feedback and conversation request fails closed with `401`, and a
+  configuration warning is logged once per server process.
+
+Admin APIs and replies are unaffected. No database migration is needed.
+
 ## Unverified browsers
 
 Creation always issues an independent 32-byte random conversation capability.
