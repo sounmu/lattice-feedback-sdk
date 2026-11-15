@@ -7,6 +7,7 @@ import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
+import { createPrivateJsonResponse } from '@/lib/http/private-json-response';
 import { findProject } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
@@ -41,7 +42,7 @@ export async function GET(request: Request, context: RouteContext) {
     if (!feedback) {
       return createFeedbackNotFoundResponse();
     }
-    return NextResponse.json(await createDetailBody(feedback));
+    return createPrivateJsonResponse(request, await createDetailBody(feedback));
   } catch (error) {
     if (error instanceof FeedbackStorageUnavailableError) {
       return createApiErrorResponse(503, 'storage_unavailable', error.message);
@@ -87,7 +88,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (!feedback) {
       return createFeedbackNotFoundResponse();
     }
-    return NextResponse.json(await createDetailBody(feedback));
+    return NextResponse.json(await createDetailBody(feedback), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     if (error instanceof ConversationLimitError) {
       return createApiErrorResponse(409, 'conversation_full', error.message);

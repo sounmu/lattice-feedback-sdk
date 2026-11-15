@@ -5,6 +5,7 @@ import { FeedbackStorageFullError } from '@/lib/feedback-storage-error';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
+import { createPrivateJsonResponse } from '@/lib/http/private-json-response';
 import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyTextWithLimit } from '@/lib/http/read-body';
 import { consumeRateLimit, getClientAddress, RATE_LIMIT_RETRY_AFTER_SECONDS } from '@/lib/http/rate-limit';
 import { isSameOriginRequest } from '@/lib/http/request-origin';
@@ -138,7 +139,7 @@ export async function GET(request: Request) {
     const items = (await getFeedbackRepository().findMany(project.projectKey))
       .map((feedback) => ({ ...feedback, messages: undefined }));
     const body: FeedbackListResponse = { items };
-    return NextResponse.json(body);
+    return createPrivateJsonResponse(request, body);
   } catch (error) {
     if (error instanceof FeedbackStorageUnavailableError) {
       return createApiErrorResponse(503, 'storage_unavailable', error.message);
