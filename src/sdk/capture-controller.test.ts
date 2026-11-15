@@ -14,6 +14,7 @@ const engines = vi.hoisted(() => ({
   select: vi.fn(), drag: vi.fn(), flow: vi.fn(), render: vi.fn(), removeStatus: vi.fn(),
   cancelSelection: vi.fn(), cancelDrag: vi.fn(), destroyFlow: vi.fn(), replay: vi.fn(),
   renderPins: vi.fn(), openEditor: vi.fn(), closeEditor: vi.fn(), destroyComments: vi.fn(),
+  statusOptions: undefined as { onStop(): void } | undefined,
 }));
 vi.mock('@/sdk/element-selection', () => ({ startElementSelection: engines.select }));
 vi.mock('@/sdk/element-drag', () => ({ startElementDrag: engines.drag }));
@@ -30,7 +31,10 @@ vi.mock('@/sdk/comment-overlay', () => ({
   }),
 }));
 vi.mock('@/sdk/capture-status', () => ({
-  createCaptureStatus: () => ({ render: engines.render, destroy: engines.removeStatus }),
+  createCaptureStatus: (statusOptions: { onStop(): void }) => {
+    engines.statusOptions = statusOptions;
+    return { render: engines.render, destroy: engines.removeStatus };
+  },
 }));
 
 const POLICY: CapturePolicy = { allowedPaths: ['/'], targets: [{ id: 'save', selector: 'button' }] };
@@ -298,7 +302,7 @@ it('waits for the static text index before recording a resumed Flow', async () =
   controller.destroy();
 });
 
-it('does not start a deferred recording after its Flow has stopped', async () => {
+it('does not record the new document once its resumed Flow has stopped', async () => {
   let release!: () => void;
   const prepared = new Promise<void>((resolve) => { release = resolve; });
   index.ready.mockReturnValue(false);
@@ -308,7 +312,8 @@ it('does not start a deferred recording after its Flow has stopped', async () =>
   controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
   release();
   await prepared;
-  expect(engines.replay).not.toHaveBeenCalled();
+  expect(engines.replay).toHaveBeenCalledTimes(1);
+  expect(engines.replay).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ recordPage: false }));
   controller.destroy();
 });
 
@@ -378,6 +383,70 @@ it('never starts the replay of a Flow discarded by a reset while the index was s
   const { controller } = createHarness();
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
   controller.reset();
+
+  await finishIndex();
+
+  expect(engines.replay).not.toHaveBeenCalled();
+  controller.destroy();
+});
+
+const EARLIER_REPLAY = {
+  startedAt: '2026-11-13T00:00:00.000Z', page: {}, segments: [{ events: [{}, {}] }, { events: [{}] }], truncated: true,
+};
+
+function createEarlierRecorder() {
+  return { stop: vi.fn(async () => EARLIER_REPLAY), cutOff: vi.fn(), discard: vi.fn() };
+}
+
+type Controller = ReturnType<typeof createHarness>['controller'];
+
+it.each([
+  ['the widget', (controller: Controller) => controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }))],
+  ['the host bar', () => engines.statusOptions?.onStop()],
+])('hands over the earlier documents when a resumed Flow is stopped from %s before the index is ready', async (_name, stop) => {
+  restoredFlow = true;
+  const finishIndex = holdIndex();
+  const earlier = createEarlierRecorder();
+  engines.replay.mockReturnValueOnce(earlier);
+  const { controller } = createHarness();
+
+  stop(controller);
+  await finishIndex();
+
+  expect(engines.replay).toHaveBeenCalledTimes(1);
+  expect(engines.replay).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ resumed: true, recordPage: false }));
+  await expect(controller.takeFlowReplay()).resolves.toBe(EARLIER_REPLAY);
+  expect(earlier.discard).not.toHaveBeenCalled();
+  controller.destroy();
+});
+
+it.each([
+  ['cancelled', (controller: Controller) => controller.handleCommand(createCaptureCommand({ type: 'capture:cancel', payload: {} }))],
+  ['reset', (controller: Controller) => controller.reset()],
+  ['destroyed', (controller: Controller) => controller.destroy()],
+])('removes the earlier documents of a resumed Flow that is %s before the index is ready', async (_name, action) => {
+  restoredFlow = true;
+  const finishIndex = holdIndex();
+  const earlier = createEarlierRecorder();
+  engines.replay.mockReturnValueOnce(earlier);
+  const { controller } = createHarness();
+
+  action(controller);
+  await finishIndex();
+
+  expect(engines.replay).toHaveBeenCalledTimes(1);
+  expect(engines.replay).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ resumed: true, recordPage: false }));
+  expect(earlier.discard).toHaveBeenCalledOnce();
+  expect(earlier.stop).not.toHaveBeenCalled();
+  await expect(controller.takeFlowReplay()).resolves.toBeNull();
+  controller.destroy();
+});
+
+it('has nothing to hand over when a Flow that began on this page is stopped before the index is ready', async () => {
+  const finishIndex = holdIndex();
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
+  controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
 
   await finishIndex();
 

@@ -326,7 +326,11 @@ export function createCaptureController(options: CaptureControllerOptions) {
       if (replayRecorder) {
         stoppedReplay = replayRecorder.stop();
         replayRecorder = null;
+      } else if (pendingReplayStart?.resumed) {
+        // Stopped before the index finished: the earlier documents are handed over, this one is not recorded.
+        stoppedReplay = openEarlierReplay(pendingReplayStart.sessionId).stop();
       }
+      pendingReplayStart = null;
       queueMicrotask(emit);
       return;
     }
@@ -337,7 +341,18 @@ export function createCaptureController(options: CaptureControllerOptions) {
   let replayStartToken = 0;
   // The page was left for one the policy excludes while the replay waited for the index; it is not recorded after returning.
   let isReplayStartCutOff = false;
-  let isReplayStartPending = false;
+  // The replay that waits for the index, until it launches or ends. Its earlier documents are already in storage.
+  let pendingReplayStart: { sessionId: string; resumed: boolean } | null = null;
+
+  // Opens the replay of the earlier documents without recording this one, to hand it over or to remove it.
+  function openEarlierReplay(sessionId: string): ReplayRecorder {
+    return startReplayRecording(options.sdkSelector, {
+      projectKey: options.projectKey,
+      sessionId,
+      resumed: true,
+      recordPage: false,
+    });
+  }
 
   function startReplay(sessionId: string, resumed: boolean): void {
     discardReplay();
@@ -347,7 +362,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
     const token = replayStartToken;
     const launch = (): void => {
       if (isDestroyed || token !== replayStartToken) return;
-      isReplayStartPending = false;
+      pendingReplayStart = null;
       // On an excluded page, recover earlier segments without recording this document.
       replayRecorder = startReplayRecording(options.sdkSelector, {
         projectKey: options.projectKey,
@@ -360,7 +375,7 @@ export function createCaptureController(options: CaptureControllerOptions) {
       launch();
       return;
     }
-    isReplayStartPending = true;
+    pendingReplayStart = { sessionId, resumed };
     void prepareStaticTextIndex().then(launch);
   }
 
@@ -368,12 +383,14 @@ export function createCaptureController(options: CaptureControllerOptions) {
   function cutOffReplayOnDisallowedPage(): void {
     if (isCapturePageAllowed(policy)) return;
     if (replayRecorder) replayRecorder.cutOff();
-    else if (isReplayStartPending) isReplayStartCutOff = true;
+    else if (pendingReplayStart) isReplayStartCutOff = true;
   }
 
   function discardReplay(): void {
     replayStartToken += 1;
-    isReplayStartPending = false;
+    // A launch that never happened still leaves the earlier documents in storage; they go with the discard.
+    if (pendingReplayStart?.resumed) openEarlierReplay(pendingReplayStart.sessionId).discard();
+    pendingReplayStart = null;
     replayRecorder?.discard();
     replayRecorder = null;
   }
