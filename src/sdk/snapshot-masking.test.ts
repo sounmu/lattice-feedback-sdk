@@ -3,6 +3,8 @@ import { AutomaticMasker } from '@/sdk/automatic-masking';
 import type { SnapshotNode } from '@/sdk/snapshot-assets';
 import { SnapshotMasker } from '@/sdk/snapshot-masking';
 import { findCssNames, rewriteReferences } from '@/sdk/structural-references';
+import { sanitizeReplayEvents } from '@/sdk/replay-sanitize';
+import type { ScreenSnapshotEvent } from '@/types/screen-snapshot';
 
 function element(tagName: string, attributes: Record<string, string>, childNodes: SnapshotNode[] = []): SnapshotNode {
   return { type: 2, tagName, attributes, childNodes };
@@ -111,5 +113,138 @@ describe('structural references in a masked screen', () => {
   it('finds what a stylesheet spells out', () => {
     expect([...findCssNames('#a\\:b{} ::part(x y){} [data-k=v]{} [role="tab" i]{} a[href^=\'/x\']{}')].sort())
       .toEqual(['/x', 'a:b', 'tab', 'v', 'x', 'y']);
+  });
+});
+
+function recorded(id: number, tagName: string, attributes: Record<string, string>, childNodes: SnapshotNode[] = []): SnapshotNode {
+  return { type: 2, id, tagName, attributes, childNodes };
+}
+
+function textNode(id: number, textContent: string): SnapshotNode {
+  return { type: 3, id, textContent };
+}
+
+const PRIVATE_TEXT = 'Mina Park';
+const MASKED_TEXT = '\u25cf\u25cf\u25cf\u25cf \u25cf\u25cf\u25cf\u25cf';
+
+// A container (1) holds a wrapper (2) holding a text node (3).
+function createKeptSubtree(markers: Record<string, string> = { 'data-lattice-keep': '' }) {
+  const masking = new SnapshotMasker(new AutomaticMasker(new Set()));
+  masking.node(recorded(1, 'div', markers, [recorded(2, 'span', {}, [textNode(3, 'Public heading')])]));
+  return masking;
+}
+
+describe('the exemption and the mask of a node follow the markers it has now', () => {
+  it('masks later text and attributes of a kept subtree once the keep marker is removed from its container', () => {
+    const masking = createKeptSubtree();
+    expect(masking.text(3, PRIVATE_TEXT)).toBe(PRIVATE_TEXT);
+
+    masking.attributes(1, { 'data-lattice-keep': null });
+    const change = { 'data-customer': PRIVATE_TEXT };
+    masking.attributes(2, change);
+
+    expect(masking.text(3, PRIVATE_TEXT)).toBe(MASKED_TEXT);
+    expect(change['data-customer']).toBe(MASKED_TEXT);
+  });
+
+  it('applies a keep marker removed in the same change to the values written by that change', () => {
+    const masking = createKeptSubtree();
+    const change = { 'data-lattice-keep': null, 'data-customer': PRIVATE_TEXT };
+
+    masking.attributes(1, change);
+
+    expect(change['data-customer']).toBe(MASKED_TEXT);
+  });
+
+  it('exempts a subtree whose container gets the keep marker later', () => {
+    const masking = createKeptSubtree({});
+    expect(masking.text(3, PRIVATE_TEXT)).toBe(MASKED_TEXT);
+
+    masking.attributes(1, { 'data-lattice-keep': '' });
+
+    expect(masking.text(3, PRIVATE_TEXT)).toBe(PRIVATE_TEXT);
+  });
+
+  it('lets a mask or block marker on an ancestor win over keep markers below it, and lifts it when it is removed', () => {
+    const masking = new SnapshotMasker(new AutomaticMasker(new Set()));
+    masking.node(recorded(1, 'div', {}, [recorded(2, 'span', { 'data-lattice-keep': '' }, [textNode(3, 'Public heading')])]));
+
+    masking.attributes(1, { 'data-lattice-mask': '' });
+    expect(masking.text(3, PRIVATE_TEXT)).toBe(MASKED_TEXT);
+    masking.attributes(1, { 'data-lattice-mask': null, 'data-lattice-block': '' });
+    expect(masking.text(3, PRIVATE_TEXT)).toBe(MASKED_TEXT);
+    masking.attributes(1, { 'data-lattice-block': null });
+    expect(masking.text(3, PRIVATE_TEXT)).toBe(PRIVATE_TEXT);
+  });
+
+  it('keeps a password field masked after a show-password toggle changes its type', () => {
+    const masking = new SnapshotMasker(new AutomaticMasker(new Set()));
+    masking.node(recorded(5, 'input', { type: 'password' }));
+    const change = { type: 'text', value: 'hunter2' };
+
+    masking.attributes(5, change);
+
+    expect(change.value).toBe('\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf');
+  });
+});
+
+function mutation(data: Record<string, unknown>): ScreenSnapshotEvent {
+  return { type: 3, timestamp: 1, data: { source: 0, ...data } } as ScreenSnapshotEvent;
+}
+
+function replayText(masking: SnapshotMasker, events: ScreenSnapshotEvent[], id: number): string | null {
+  sanitizeReplayEvents(events, new Map(), masking);
+  const texts = (events.at(-1)?.data as { texts: { id: number; value: string | null }[] }).texts;
+  return texts.find((change) => change.id === id)?.value ?? null;
+}
+
+describe('the context of nodes that a page change moves or removes', () => {
+  function startReplay() {
+    const masking = new SnapshotMasker(new AutomaticMasker(new Set()));
+    const full = {
+      type: 2, timestamp: 0,
+      data: {
+        node: {
+          type: 0, id: 0,
+          childNodes: [
+            recorded(1, 'div', { 'data-lattice-keep': '' }, [recorded(2, 'span', {}, [textNode(3, 'Public heading'), recorded(5, 'input', { type: 'password' })])]),
+            recorded(4, 'div', {}),
+          ],
+        },
+      },
+    } as unknown as ScreenSnapshotEvent;
+    sanitizeReplayEvents([full], new Map(), masking);
+    return masking;
+  }
+  const move = (id: number, from: number, to: number) => mutation({
+    removes: [{ id, parentId: from }],
+    adds: [{ parentId: to, node: { type: 2, id, tagName: 'span', attributes: {} } }],
+    texts: [{ id: 3, value: PRIVATE_TEXT }],
+  });
+
+  it('masks the text of a subtree moved out of a kept container, and exempts it again when it moves back', () => {
+    const masking = startReplay();
+
+    expect(replayText(masking, [move(2, 1, 4)], 3)).toBe(MASKED_TEXT);
+    expect(replayText(masking, [move(2, 4, 1)], 3)).toBe(PRIVATE_TEXT);
+  });
+
+  it('keeps the markers of nodes inside a moved subtree that the change does not list again', () => {
+    const masking = startReplay();
+    sanitizeReplayEvents([move(2, 1, 4)], new Map(), masking);
+    const change = { value: 'hunter2' };
+
+    masking.attributes(5, change);
+
+    expect(change.value).toBe('\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf');
+  });
+
+  it('forgets a removed subtree, so it keeps no exemption and later text for it is masked', () => {
+    const masking = startReplay();
+    expect(masking.text(3, PRIVATE_TEXT)).toBe(PRIVATE_TEXT);
+
+    sanitizeReplayEvents([mutation({ removes: [{ id: 1, parentId: 0 }] })], new Map(), masking);
+
+    expect(masking.text(3, PRIVATE_TEXT)).toBe(MASKED_TEXT);
   });
 });

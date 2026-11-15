@@ -23,6 +23,8 @@ export interface AttributeChange {
 export interface MutationData {
   source: number;
   adds?: { node: SnapshotNode; parentId?: number }[];
+  /** A node that is only moved is listed here and added again by the same change. */
+  removes?: { id: number; parentId?: number }[];
   attributes?: AttributeChange[];
   /** New text of text nodes. The text of a <style> element is CSS. */
   texts?: { id: number; value: string | null }[];
@@ -119,6 +121,7 @@ export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], ele
       continue;
     }
     const data = event.data as MutationData;
+    data.removes?.forEach((remove) => masking?.detach(remove.id));
     data.adds?.forEach((add) => sanitizeNode(add.node, elements));
     data.attributes?.forEach((change) => sanitizeAttributeChange(change, elements));
     data.adds?.forEach((add) => masking?.node(add.node, add.parentId));
@@ -126,6 +129,7 @@ export function sanitizeReplayEvents(events: readonly ScreenSnapshotEvent[], ele
     data.texts?.forEach((change) => {
       if (change.value !== null) change.value = masking?.text(change.id, change.value) ?? change.value;
     });
+    masking?.forgetDetached();
     if (masking) addMaskingReport(event, masking.masker);
   }
   return elements;
