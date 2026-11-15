@@ -121,7 +121,8 @@ export function createLazyCapture(options: LazyCaptureOptions) {
     },
     maskTitle,
     handleCommand(command: CaptureCommand): void {
-      controller?.handleCommand(command);
+      if (controller) controller.handleCommand(command);
+      else if (command.type === 'draft:reset') emitIdleState(null);
     },
     sync(): void {
       if (controller) controller.sync();
@@ -137,7 +138,11 @@ export function createLazyCapture(options: LazyCaptureOptions) {
       else emitIdleState(null);
     },
     cancelTransient: () => controller?.cancelTransient(),
-    reset: () => controller?.reset(),
+    // A new draft starts clean, as with the controller: a load failure shown for the last one is dropped.
+    reset(): void {
+      if (controller) controller.reset();
+      else emitIdleState(null);
+    },
     takeFlowReplay: () => controller?.takeFlowReplay() ?? Promise.resolve(null),
     getCommentPinSources: () => controller?.getCommentPinSources() ?? [],
     getEditMoveSources: () => controller?.getEditMoveSources() ?? [],

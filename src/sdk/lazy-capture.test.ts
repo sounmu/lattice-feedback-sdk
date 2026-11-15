@@ -149,6 +149,19 @@ describe('loading the capture tools', () => {
     expect(exports.createCaptureController).toHaveBeenCalledTimes(1);
   });
 
+  it('drops the failure message when the draft is reset or sent', async () => {
+    stubWindow();
+    const { capture, onUpdate } = createCapture(vi.fn<() => Promise<CaptureRuntime>>().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(capture.load()).rejects.toThrow(TypeError);
+
+    capture.reportUnavailable();
+    capture.handleCommand(createCaptureCommand({ type: 'draft:reset', payload: {} }));
+    capture.reportUnavailable();
+    capture.reset();
+
+    expect(onUpdate.mock.calls.map(([state]) => state.errorMessage === null)).toEqual([false, true, false, true]);
+  });
+
   it('warms the static text index once loaded while the panel is on screen', async () => {
     stubWindow();
     const { runtime, exports } = createFakeRuntime();
