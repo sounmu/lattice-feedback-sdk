@@ -20,6 +20,7 @@ import {
   SCREEN_SNAPSHOT_FORMAT,
 } from '@/lib/screen-snapshot';
 import { getPageUrl } from '@/sdk/page-context';
+import { serializeAfterWait } from '@/sdk/capture-guard';
 import { extractSnapshotAssets, normalizeFontFamily, SnapshotAssetTooLargeError } from '@/sdk/snapshot-assets';
 import { findLiveImageSource } from '@/sdk/live-image-source';
 import { removeHiddenValues } from '@/sdk/snapshot-hidden-values';
@@ -111,11 +112,7 @@ export function findUsedCssImageUrls(excludedSelector: string): Set<string> {
   return urls;
 }
 
-export async function captureScreen(
-  sdkSelector: string,
-  marks: ScreenMarkSources = { comments: [], edits: [] },
-): Promise<ScreenCapture> {
-  await prepareStaticTextIndex();
+function serializeScreen(sdkSelector: string, marks: ScreenMarkSources) {
   const capturedAt = Date.now();
   const excludedSelector = `${sdkSelector}, ${BLOCKED_SELECTOR}`;
   const mirror = createMirror();
@@ -157,6 +154,19 @@ export async function captureScreen(
     scrollX: page.scrollX,
     scrollY: page.scrollY,
   });
+  return { capturedAt, excludedSelector, mirror, node, page, pins, moves, url, masker };
+}
+
+export async function captureScreen(
+  sdkSelector: string,
+  marks: ScreenMarkSources = { comments: [], edits: [] },
+  isPageAllowed: () => boolean = () => true,
+): Promise<ScreenCapture> {
+  const { capturedAt, excludedSelector, mirror, node, page, pins, moves, url, masker } = await serializeAfterWait(
+    prepareStaticTextIndex(),
+    { startPathname: window.location.pathname, getPathname: () => window.location.pathname, isAllowed: isPageAllowed },
+    () => serializeScreen(sdkSelector, marks),
+  );
   const { assetFiles, missingAssets } = await extractSnapshotAssets(node, {
     pageOrigin: window.location.origin,
     loadedFontFamilies: findLoadedFontFamilies(),

@@ -324,3 +324,63 @@ it('allows capture without an explicit policy and ignores commands after destroy
   controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
   expect(states).toHaveLength(count);
 });
+
+function holdIndex(): () => Promise<void> {
+  let release: () => void = () => undefined;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  index.ready.mockReturnValue(false);
+  index.prepare.mockReturnValue(pending);
+  return async () => {
+    release();
+    await pending;
+  };
+}
+
+it('does not record a page the policy leaves out when the index finishes after the reporter visited it', async () => {
+  const finishIndex = holdIndex();
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
+
+  visit('/admin');
+  controller.pageChanged();
+  visit('/');
+  await finishIndex();
+
+  expect(engines.replay).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ recordPage: false }));
+  controller.destroy();
+});
+
+it('records the page when the index finishes and the reporter stayed on allowed pages', async () => {
+  const finishIndex = holdIndex();
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
+
+  await finishIndex();
+
+  expect(engines.replay).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ recordPage: true }));
+  controller.destroy();
+});
+
+it('never starts the replay of a Flow that ended while the index was still loading', async () => {
+  const finishIndex = holdIndex();
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
+  controller.handleCommand(createCaptureCommand({ type: 'flow:stop', payload: {} }));
+
+  await finishIndex();
+
+  expect(engines.replay).not.toHaveBeenCalled();
+  controller.destroy();
+});
+
+it('never starts the replay of a Flow discarded by a reset while the index was still loading', async () => {
+  const finishIndex = holdIndex();
+  const { controller } = createHarness();
+  controller.handleCommand(createCaptureCommand({ type: 'capture:start', payload: { mode: 'flow' } }));
+  controller.reset();
+
+  await finishIndex();
+
+  expect(engines.replay).not.toHaveBeenCalled();
+  controller.destroy();
+});

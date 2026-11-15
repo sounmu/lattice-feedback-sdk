@@ -333,37 +333,45 @@ export function createCaptureController(options: CaptureControllerOptions) {
 
   // Text is classified as it is recorded, so the first snapshot waits for the static text index (a resumed Flow starts without a click).
   let replayStartToken = 0;
+  // The page was left for one the policy excludes while the replay waited for the index; it is not recorded after returning.
+  let isReplayStartCutOff = false;
+  let isReplayStartPending = false;
 
   function startReplay(sessionId: string, resumed: boolean): void {
     discardReplay();
     finishedReplay = null;
     stoppedReplay = null;
+    isReplayStartCutOff = false;
     const token = replayStartToken;
     const launch = (): void => {
       if (isDestroyed || token !== replayStartToken) return;
+      isReplayStartPending = false;
       // On an excluded page, recover earlier segments without recording this document.
       replayRecorder = startReplayRecording(options.sdkSelector, {
         projectKey: options.projectKey,
         sessionId,
         resumed,
-        recordPage: isCapturePageAllowed(policy),
+        recordPage: isCapturePageAllowed(policy) && !isReplayStartCutOff,
       });
     };
     if (isStaticIndexReady()) {
       launch();
       return;
     }
+    isReplayStartPending = true;
     void prepareStaticTextIndex().then(launch);
   }
 
   // The replay must not carry a page the policy leaves out. Once cut off it is not resumed, even back on an allowed page.
   function cutOffReplayOnDisallowedPage(): void {
-    if (!replayRecorder || isCapturePageAllowed(policy)) return;
-    replayRecorder.cutOff();
+    if (isCapturePageAllowed(policy)) return;
+    if (replayRecorder) replayRecorder.cutOff();
+    else if (isReplayStartPending) isReplayStartCutOff = true;
   }
 
   function discardReplay(): void {
     replayStartToken += 1;
+    isReplayStartPending = false;
     replayRecorder?.discard();
     replayRecorder = null;
   }
