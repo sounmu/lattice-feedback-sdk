@@ -144,7 +144,7 @@
 }
 
 .widget-composer .astryx-text-area {
-  border-color: transparent;
+  border-width: 0;
   background-color: transparent;
   box-shadow: none;
 }
