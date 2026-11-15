@@ -461,7 +461,11 @@ export function FeedbackWidget() {
         </ChatMessageBubble>
         <ChatMessageBubble group="last">
           <Text as="p">
-            불편한 점을 편하게 적어 주세요. 글로 설명하기 어려우면 아래 도구로 <Text weight="semibold">화면에서 직접</Text> 보여주셔도 돼요.
+            불편한 점을 편하게 적어 주세요. 글로 설명하기 어려우면 아래 도구로{' '}
+            <Text weight="semibold" className="whitespace-nowrap">
+              화면에서 직접
+            </Text>{' '}
+            보여주셔도 돼요.
           </Text>
         </ChatMessageBubble>
         <SegmentedControl label="피드백 유형" value={type} onChange={handleTypeChange} size="lg" isDisabled={isBusy}>
