@@ -205,6 +205,14 @@
   color: color-mix(in srgb, var(--color-on-accent) 50%, var(--color-background-muted));
 }
 
+/* A saved screen shown at its captured size is wider than the preview, so its frame scrolls and the
+   keyboard can focus it to scroll. The frame is the one thing in the preview that takes focus without
+   being a control of the widget, and it shows the widget's focus ring. */
+.widget-screen-preview :focus-visible:not(button, input) {
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset);
+}
+
 /* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would
    truncate. A name too long for a narrow panel wraps, and the icons still line up because each tool
    starts at the top of its cell. */
