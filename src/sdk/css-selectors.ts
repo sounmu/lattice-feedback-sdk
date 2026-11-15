@@ -1,4 +1,4 @@
-import { isReferenceAttribute } from '@/sdk/structural-references';
+import { isReferenceAttribute, rewriteReferences } from '@/sdk/structural-references';
 
 export type AttributeOperator = '=' | '~=' | '|=' | '^=' | '$=' | '*=';
 
@@ -16,26 +16,88 @@ export interface CssSelectors {
   dataSelectors: AttributeSelector[];
 }
 
-// #id, ::part(names) and [attribute operator value flag]
-const CSS_SELECTOR = /#((?:\\.|[\w\u00a1-\uffff-])+)|::part\(([^)]*)\)|\[\s*([^\]=~|^$*\s]+)\s*([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s\]"']+))(\s+[iIsS])?\s*\]/g;
+// #id, ::part(names) and [attribute operator value flag]. An id can spell a character as an escape: \: or \31 and a space.
+const CSS_SELECTOR = /#((?:\\[0-9a-fA-F]{1,6}\s?|\\.|[\w\u00a1-\uffff-])+)|::part\(([^)]*)\)|\[\s*([^\]=~|^$*\s]+)\s*([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s\]"']+))(\s+[iIsS])?\s*\]/g;
+
+// The condition of these rules is not a selector: @supports (color: #fff). Only @scope names elements.
+const AT_RULE_WITHOUT_SELECTORS = /^(?:\s|\/\*[\s\S]*?\*\/)*@(?!scope\b)/i;
 
 function unescapeIdentifier(identifier: string): string {
-  return identifier.replace(/\\(.)/g, '$1');
+  return identifier.replace(/\\(?:([0-9a-fA-F]{1,6})\s?|(.))/g, (_escape, hex: string | undefined, character: string | undefined) => {
+    if (hex === undefined) return character ?? '';
+    const codePoint = parseInt(hex, 16);
+    const isCharacter = codePoint > 0 && codePoint <= 0x10ffff && (codePoint < 0xd800 || codePoint > 0xdfff);
+    return isCharacter ? String.fromCodePoint(codePoint) : '\ufffd';
+  });
+}
+
+/** A stretch of stylesheet text up to the "{", "}" or ";" that ends it. The one before a "{" holds selectors. */
+interface CssPiece {
+  text: string;
+  isSelector: boolean;
+}
+
+// "#fff" is an id before a "{" and a color in a declaration, so the text is read piece by piece. Strings, comments
+// and escaped characters do not end a piece, and neither does a ";" inside parentheses (a data: URL). Text that
+// has none of the three is a selector list on its own.
+function splitCssPieces(cssText: string): CssPiece[] {
+  const pieces: CssPiece[] = [];
+  let start = 0;
+  let depth = 0;
+  let quote = '';
+  for (let at = 0; at < cssText.length; at += 1) {
+    const character = cssText[at];
+    if (quote) {
+      if (character === '\\') at += 1;
+      else if (character === quote) quote = '';
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === '/' && cssText[at + 1] === '*') {
+      const end = cssText.indexOf('*/', at + 2);
+      at = end === -1 ? cssText.length : end + 1;
+    } else if (character === '\\') {
+      at += 1;
+    } else if (character === '(') {
+      depth += 1;
+    } else if (character === ')') {
+      depth = Math.max(0, depth - 1);
+    } else if (character === '{' || character === '}' || (character === ';' && depth === 0)) {
+      const text = cssText.slice(start, at + 1);
+      pieces.push({ text, isSelector: character === '{' && !AT_RULE_WITHOUT_SELECTORS.test(text) });
+      start = at + 1;
+      depth = 0;
+    }
+  }
+  if (start < cssText.length) {
+    const text = cssText.slice(start);
+    pieces.push({ text, isSelector: pieces.length === 0 && !AT_RULE_WITHOUT_SELECTORS.test(text) });
+  }
+  return pieces;
 }
 
 export function scanCssSelectors(cssText: string): CssSelectors {
   const names = new Set<string>();
   const dataSelectors: AttributeSelector[] = [];
-  for (const match of cssText.matchAll(CSS_SELECTOR)) {
-    if (match[1] !== undefined) names.add(unescapeIdentifier(match[1]));
-    if (match[2] !== undefined) match[2].split(/\s+/).filter(Boolean).forEach((part) => names.add(part));
-    if (match[3] === undefined) continue;
-    const attribute = match[3].toLowerCase();
-    const operator = match[4] as AttributeOperator;
-    const value = match[5] ?? match[6] ?? match[7] ?? '';
-    if (isReferenceAttribute(attribute) && (operator === '=' || operator === '~=')) names.add(value);
-    if (attribute.startsWith('data-')) {
-      dataSelectors.push({ attribute, operator, value, ignoreCase: /i/i.test(match[8] ?? '') && !/s/i.test(match[8] ?? '') });
+  for (const piece of splitCssPieces(cssText)) {
+    if (!piece.isSelector) {
+      // A declaration names another node only as url(#name).
+      rewriteReferences('style', piece.text, (name) => {
+        names.add(name);
+        return name;
+      });
+      continue;
+    }
+    for (const match of piece.text.matchAll(CSS_SELECTOR)) {
+      if (match[1] !== undefined) names.add(unescapeIdentifier(match[1]));
+      if (match[2] !== undefined) match[2].split(/\s+/).filter(Boolean).forEach((part) => names.add(part));
+      if (match[3] === undefined) continue;
+      const attribute = match[3].toLowerCase();
+      const operator = match[4] as AttributeOperator;
+      const value = match[5] ?? match[6] ?? match[7] ?? '';
+      if (isReferenceAttribute(attribute) && (operator === '=' || operator === '~=')) names.add(value);
+      if (attribute.startsWith('data-')) {
+        dataSelectors.push({ attribute, operator, value, ignoreCase: /i/i.test(match[8] ?? '') && !/s/i.test(match[8] ?? '') });
+      }
     }
   }
   return { names, dataSelectors };
@@ -43,7 +105,16 @@ export function scanCssSelectors(cssText: string): CssSelectors {
 
 /** The same stylesheet with the names that already have another name in this document written as that other name. */
 export function rewriteCssNames(cssText: string, findReplacement: (name: string) => string | undefined): string {
-  return cssText.replace(CSS_SELECTOR, (
+  return splitCssPieces(cssText)
+    .map((piece) => {
+      if (piece.isSelector) return rewriteSelectorNames(piece.text, findReplacement);
+      return rewriteReferences('style', piece.text, (name) => findReplacement(name) ?? name);
+    })
+    .join('');
+}
+
+function rewriteSelectorNames(selector: string, findReplacement: (name: string) => string | undefined): string {
+  return selector.replace(CSS_SELECTOR, (
     whole: string, id: string | undefined, parts: string | undefined, attribute: string | undefined,
     operator: string | undefined, double: string | undefined, single: string | undefined, bare: string | undefined, flag: string | undefined,
   ) => {
