@@ -4,9 +4,11 @@ import type { ReactNode } from 'react';
 import { CommentAttachmentList } from '@/components/admin/CommentAttachmentList';
 import { EditComparison } from '@/components/admin/EditComparison';
 import { FeedbackActionPanel } from '@/components/admin/FeedbackActionPanel';
+import { FeedbackTicketPanel } from '@/components/admin/FeedbackTicketPanel';
 import { StatusBadge, TypeBadge } from '@/components/admin/FeedbackBadges';
 import { FlowTimeline } from '@/components/admin/FlowTimeline';
 import { SavedScreenList } from '@/components/admin/SavedScreenList';
+import type { UseCreateTicketResult } from '@/hooks/useCreateTicket';
 import type { SaveStatus } from '@/hooks/useFeedbackDetail';
 import { formatDateTime, getPagePath } from '@/lib/feedback-display';
 import type { FeedbackDetailResponse, UpdateFeedbackInput } from '@/types/feedback';
@@ -17,6 +19,7 @@ interface FeedbackDetailViewProps {
   saveStatus: SaveStatus;
   saveErrorMessage: string;
   onSave: (changes: UpdateFeedbackInput) => Promise<boolean>;
+  ticket: UseCreateTicketResult;
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -28,7 +31,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMessage, onSave }: FeedbackDetailViewProps) {
+export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMessage, onSave, ticket }: FeedbackDetailViewProps) {
   const { feedback, screenSnapshots } = detail;
   const { comments, edits, flow } = feedback.attachments;
 
@@ -83,6 +86,7 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
             saveErrorMessage={saveErrorMessage}
             onSave={onSave}
           />
+          <FeedbackTicketPanel status={ticket.status} url={ticket.url} errorMessage={ticket.errorMessage} onCreate={ticket.create} />
           <Section title="보낸 사람 · 페이지">
             <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-2 gap-y-1">
               <dt className="text-(--admin-text-muted)">이름</dt>

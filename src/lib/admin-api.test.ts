@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getFeedbackDetail, getFeedbackList, updateFeedback } from '@/lib/admin-api';
+import { createTicket, getFeedbackDetail, getFeedbackList, updateFeedback } from '@/lib/admin-api';
 import { MOCK_FEEDBACKS } from '@/mocks/feedback';
 
 function mockFetchResponse(body: unknown, status = 200) {
@@ -108,5 +108,44 @@ describe('updateFeedback', () => {
     const result = await updateFeedback({ projectKey: 'demo', token: 'secret', id: 'missing', changes: { status: 'open' } });
 
     expect(result).toEqual({ ok: false, status: 404, message: '피드백을 찾을 수 없어요.' });
+  });
+});
+
+describe('createTicket', () => {
+  it('posts to the ticket endpoint and returns the link', async () => {
+    const fetchMock = mockFetchResponse({ ticket: { url: 'https://www.notion.so/ticket-1' } }, 201);
+
+    const result = await createTicket({ projectKey: 'demo', token: 'secret', id: 'fb_0001' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/feedback/fb_0001/ticket?projectKey=demo',
+      expect.objectContaining({ method: 'POST', headers: { Authorization: 'Bearer secret' } }),
+    );
+    expect(result).toEqual({ ok: true, data: { ticket: { url: 'https://www.notion.so/ticket-1' } } });
+  });
+
+  it('explains a board that is not shared, using the error code', async () => {
+    mockFetchResponse({ error: { code: 'ticket_target_not_shared', message: 'x' } }, 502);
+
+    const result = await createTicket({ projectKey: 'demo', token: 'secret', id: 'fb_0001' });
+
+    expect(result).toMatchObject({ ok: false, status: 502 });
+    expect(result.ok === false && result.message).toContain('노션 보드를 찾을 수 없어요');
+  });
+
+  it('falls back to the status message for an unknown error code', async () => {
+    mockFetchResponse({ error: { code: 'something_else', message: 'x' } }, 401);
+
+    const result = await createTicket({ projectKey: 'demo', token: 'wrong', id: 'fb_0001' });
+
+    expect(result).toEqual({ ok: false, status: 401, message: '관리자 토큰이 올바르지 않아요.' });
+  });
+
+  it('rejects a response without a link', async () => {
+    mockFetchResponse({ ticket: {} }, 201);
+
+    const result = await createTicket({ projectKey: 'demo', token: 'secret', id: 'fb_0001' });
+
+    expect(result).toMatchObject({ ok: false, status: 502 });
   });
 });
