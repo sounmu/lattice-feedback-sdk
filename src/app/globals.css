@@ -1,3 +1,8 @@
+/* Cascade-layer order for the whole app. It only names layers; the Astryx stylesheets that fill
+   reset/astryx-base/astryx-theme are imported by the widget route alone (src/app/widget/widget.css),
+   so the admin console never loads them. The line must stay above the Tailwind import. */
+@layer reset, theme, base, astryx-base, astryx-theme, components, utilities;
+
 @import "tailwindcss";
 
 :root {
