@@ -242,12 +242,21 @@
 }
 
 /* Playback sits on one row where there is room: play and restart, the step pager, then the position.
-   On a narrow panel the position wraps onto its own row. */
+   On a phone the position wraps onto its own row, and the pager takes what the first row has left. */
 .widget-replay-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--spacing-2) var(--spacing-3);
+}
+
+.widget-replay-pager {
+  display: flex;
+  flex: 1 1 12.5rem;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-inline-size: 0;
+  max-inline-size: 16rem;
 }
 
 .widget-replay-position {
@@ -259,9 +268,11 @@
   padding-inline: var(--spacing-2);
 }
 
-/* A step's name changes length as the replay moves. Room for the longest keeps the next-step button still. */
+/* A step's name changes length as the replay moves. It fills the room between the two step buttons, so
+   they stay where they are. */
 .widget-replay-step {
-  min-inline-size: 11em;
+  flex: 1 1 auto;
+  min-inline-size: 0;
   text-align: center;
 }
 

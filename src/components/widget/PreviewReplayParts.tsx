@@ -101,7 +101,7 @@ function PreviewReplayControls({ isPlaying, currentMs, totalMs, steps, onPlay, o
               onClick={() => onSeek(0)}
             />
           </HStack>
-          <HStack gap={1} align="center">
+          <div className="widget-replay-pager">
             <IconButton
               label={PREVIOUS_STEP_LABEL}
               tooltip={PREVIOUS_STEP_LABEL}
@@ -123,7 +123,7 @@ function PreviewReplayControls({ isPlaying, currentMs, totalMs, steps, onPlay, o
               isDisabled={!nextStep}
               onClick={() => nextStep && onStep(nextStep.atMs)}
             />
-          </HStack>
+          </div>
           <div className="widget-replay-position">
             <Slider
               label="재생 위치"
