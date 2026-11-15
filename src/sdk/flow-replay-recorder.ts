@@ -193,22 +193,26 @@ export function startReplayRecording(sdkSelector: string, session: ReplaySession
       return;
     }
     const isChange = event.type === RRWEB_INCREMENTAL_EVENT_TYPE;
-    const text = JSON.stringify(event);
-    const bytes = encoder.encode(text).length;
-    // Only the very first snapshot is kept whatever its size; everything after it has to fit an upload,
-    // so a long recording is saved cut short instead of being rejected whole.
-    const isOverBytes = (isChange || earlier.length > 0) && totalBytes + bytes > maxReplayBytes;
-    if (totalCount >= MAX_REPLAY_EVENTS || event.timestamp - startedAtMs > MAX_REPLAY_DURATION_MS || isOverBytes) {
+    if (totalCount >= MAX_REPLAY_EVENTS || event.timestamp - startedAtMs > MAX_REPLAY_DURATION_MS) {
       finish();
       return;
     }
     // rrweb keeps the nodes it emitted as its own record of the page, so a copy is what gets cleaned and kept.
-    const recorded = JSON.parse(text) as ScreenSnapshotEvent;
+    const recorded = JSON.parse(JSON.stringify(event)) as ScreenSnapshotEvent;
     if (recorded.type === RRWEB_META_EVENT_TYPE) {
       // The Meta event carries window.location.href; the kept one gets the URL without query and fragment.
       recorded.data = { ...(recorded.data as Record<string, unknown>), href: page.url };
     }
     sanitizeReplayEvents([recorded], elements, masking);
+    // What is kept and uploaded is the cleaned copy: each masked character is three bytes and the masking
+    // report adds more, so the original size says little about it.
+    const bytes = encoder.encode(JSON.stringify(recorded)).length;
+    // Only the very first snapshot is kept whatever its size; everything after it has to fit an upload,
+    // so a long recording is saved cut short instead of being rejected whole.
+    if ((isChange || earlier.length > 0) && totalBytes + bytes > maxReplayBytes) {
+      finish();
+      return;
+    }
     events.push(recorded);
     unsaved.events.push(recorded);
     unsaved.bytes += bytes;
