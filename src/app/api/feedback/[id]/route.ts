@@ -8,6 +8,7 @@ import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavaila
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
 import { createPrivateJsonResponse } from '@/lib/http/private-json-response';
+import { ServerTiming } from '@/lib/http/server-timing';
 import { findProject } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
@@ -29,22 +30,30 @@ function createFeedbackNotFoundResponse() {
 }
 
 export async function GET(request: Request, context: RouteContext) {
+  const timing = new ServerTiming();
   const { id } = await context.params;
   const projectKey = new URL(request.url).searchParams.get('projectKey') ?? '';
   const project = findProject(projectKey);
   if (!project) {
     return createApiErrorResponse(404, 'project_not_found', 'Project not found.');
   }
-  if (!authorizeAdmin(request, project)) {
+  if (!(await timing.measure('auth', () => authorizeAdmin(request, project)))) {
     return createApiErrorResponse(401, 'unauthorized', 'Admin authorization is required.');
   }
 
   try {
-    const feedback = await getFeedbackRepository().find(project.projectKey, id);
+    // Both reads are scoped by the project and the id alone, so neither waits for the other.
+    const [feedback, screenSnapshots] = await timing.measure('db', () =>
+      Promise.all([
+        getFeedbackRepository().find(project.projectKey, id),
+        getScreenSnapshotRepository().findManyByFeedback(project.projectKey, id),
+      ]),
+    );
     if (!feedback) {
       return createFeedbackNotFoundResponse();
     }
-    return createPrivateJsonResponse(request, await createDetailBody(feedback));
+    const body: FeedbackDetailResponse = { feedback, screenSnapshots };
+    return createPrivateJsonResponse(request, body, timing);
   } catch (error) {
     if (error instanceof FeedbackStorageUnavailableError) {
       return createApiErrorResponse(503, 'storage_unavailable', error.message);

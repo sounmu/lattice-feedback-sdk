@@ -28,7 +28,14 @@ import {
   type ReplayStepKind,
 } from '@/lib/screen-preview';
 import { findCommentPins, findEditMoves, hasReplayEvents, isReplayTruncated } from '@/lib/screen-snapshot';
-import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
+import { loadReplayModule } from '@/lib/replay-module';
+import { markReplay, measureReplay, resetReplayTiming } from '@/lib/replay-timing';
+import { copyWithResolvedAssetReferences } from '@/lib/snapshot-asset-references';
+import {
+  createSnapshotAssetPrefetch,
+  findRememberedAssetHashes,
+  type SnapshotAssetPrefetch,
+} from '@/lib/snapshot-asset-prefetch';
 import type {
   CapturedScreen,
   MissingSnapshotAssetReason,
@@ -40,7 +47,7 @@ import type {
 
 type ReplayerEvents = ConstructorParameters<typeof Replayer>[0];
 export type ZoomMode = 'fit' | 'actual';
-type LoadResult = { key: string; snapshot: ScreenSnapshot } | { key: string; status: number };
+type LoadResult = { key: string; snapshot: ScreenSnapshot; assets: SnapshotAssetPrefetch } | { key: string; status: number };
 
 const DEFAULT_PROJECT_KEY = 'demo';
 const UNAUTHORIZED_STATUS = 401;
@@ -570,30 +577,18 @@ export async function fetchSavedScreen(id: string, projectKey: string, token: st
       headers: { authorization: `Bearer ${token}`, accept: isGzipSupported() ? GZIP_MEDIA_TYPE : 'application/json' },
       signal,
     });
+    markReplay('snapshot-headers');
     if (!response.ok) {
       return { status: response.status };
     }
     const body = await readSnapshotResponse(response);
+    markReplay('snapshot-parsed');
     return { snapshot: body.snapshot };
   } catch (error) {
     if (signal?.aborted) {
       throw error;
     }
     return { status: 0 };
-  }
-}
-
-async function fetchAssetUrl(hash: string, projectKey: string, token: string): Promise<string | null> {
-  try {
-    const response = await fetch(`/api/snapshots/assets/${hash}?projectKey=${encodeURIComponent(projectKey)}`, {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return URL.createObjectURL(await response.blob());
-  } catch {
-    return null;
   }
 }
 
@@ -766,10 +761,12 @@ export function ScreenReplay({
     }
 
     async function mount(root: HTMLDivElement) {
-      // Loaded in the browser only: rrweb expects a DOM when its module is evaluated.
       const [{ Replayer: ReplayerClass }, urls] = await Promise.all([
-        import('@rrweb/replay'),
-        loadAssetUrls(),
+        loadReplayModule(),
+        loadAssetUrls().then((loaded) => {
+          markReplay('assets-ready');
+          return loaded;
+        }),
       ]);
       assetUrls = urls;
       if (isCancelled) {
@@ -777,15 +774,24 @@ export function ScreenReplay({
         return;
       }
       setUnloadedAssetCount(urls.filter((url) => url === null).length);
-      const events = JSON.parse(
-        resolveAssetReferences(JSON.stringify(screen.events), (index) => urls[index] ?? null),
-      ) as ReplayerEvents;
+      markReplay('rewrite-start');
+      const events = copyWithResolvedAssetReferences(screen.events, (index) => urls[index] ?? null) as ReplayerEvents;
+      markReplay('rewrite-end');
       // rrweb strips scripts and rebuilds into an iframe sandboxed without allow-scripts.
       replayer = new ReplayerClass(events, {
         root,
         mouseTail: false,
         showWarning: false,
         triggerFocus: false,
+      });
+      markReplay('replayer-created');
+      let hasRebuilt = false;
+      replayer.on('fullsnapshot-rebuilded', () => {
+        if (!hasRebuilt) {
+          hasRebuilt = true;
+          markReplay('first-rebuilt');
+          measureReplay();
+        }
       });
       if (isInert) {
         replayer.iframe.inert = true;
@@ -890,16 +896,12 @@ export function ScreenReplay({
 
 interface AdminScreenReplayProps extends Pick<ScreenReplayProps, 'initiallyShowsProposed'> {
   snapshot: ScreenSnapshot;
-  projectKey: string;
-  token: string;
+  assets: SnapshotAssetPrefetch;
 }
 
-// The saved files are read with the admin token here, so the shared replay never sees it.
-export function AdminScreenReplay({ snapshot, projectKey, token, initiallyShowsProposed }: AdminScreenReplayProps) {
-  const loadAssetUrls = useCallback(
-    () => Promise.all(snapshot.assetHashes.map((hash) => fetchAssetUrl(hash, projectKey, token))),
-    [snapshot, projectKey, token],
-  );
+// The saved files are read with the admin token inside `assets`, so the shared replay never sees it.
+export function AdminScreenReplay({ snapshot, assets, initiallyShowsProposed }: AdminScreenReplayProps) {
+  const loadAssetUrls = useCallback(() => assets.loadUrls(snapshot.assetHashes), [snapshot, assets]);
   return <ScreenReplay screen={snapshot} loadAssetUrls={loadAssetUrls} initiallyShowsProposed={initiallyShowsProposed} />;
 }
 
@@ -940,11 +942,22 @@ export function ScreenSnapshotViewer() {
       return;
     }
     const controller = new AbortController();
+    // The rrweb module and the files the list already knows load while the saved screen is still being read.
+    const assets = createSnapshotAssetPrefetch({ projectKey, token, signal: controller.signal });
+    resetReplayTiming();
+    markReplay('snapshot-start');
+    // ScreenReplay asks for the module again when it needs it, so a failed early load is not reported here.
+    loadReplayModule().catch(() => undefined);
+    assets.prefetch(findRememberedAssetHashes(projectKey, id));
 
-    fetchSavedScreen(id, projectKey, token, controller.signal).then(
-      (loaded) => setResult({ key: requestKey, ...loaded }),
-      () => undefined,
-    );
+    fetchSavedScreen(id, projectKey, token, controller.signal).then((loaded) => {
+      if ('status' in loaded) {
+        setResult({ key: requestKey, status: loaded.status });
+        return;
+      }
+      assets.prefetch(loaded.snapshot.assetHashes);
+      setResult({ key: requestKey, snapshot: loaded.snapshot, assets });
+    }, () => undefined);
     return () => controller.abort();
   }, [id, projectKey, token, requestKey]);
 
@@ -968,7 +981,7 @@ export function ScreenSnapshotViewer() {
     return (
       <>
         <ScreenSnapshotDetails snapshot={result.snapshot} />
-        <AdminScreenReplay snapshot={result.snapshot} projectKey={projectKey} token={token} />
+        <AdminScreenReplay snapshot={result.snapshot} assets={result.assets} />
       </>
     );
   }

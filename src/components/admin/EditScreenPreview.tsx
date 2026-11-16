@@ -6,6 +6,7 @@ import { EditComparison } from '@/components/admin/EditComparison';
 import { AdminScreenReplay, fetchSavedScreen } from '@/components/admin/ScreenSnapshotViewer';
 import { useAdminToken } from '@/hooks/useAdminToken';
 import { findEditMoves, findUnshownEditIndexes } from '@/lib/screen-snapshot';
+import { createSnapshotAssetPrefetch, type SnapshotAssetPrefetch } from '@/lib/snapshot-asset-prefetch';
 import type { EditAttachment } from '@/types/feedback';
 import type { ScreenSnapshot, ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
@@ -19,6 +20,7 @@ interface EditScreenPreviewProps {
 interface MarkedScreenState {
   requestKey: string;
   snapshot: ScreenSnapshot | null;
+  assets: SnapshotAssetPrefetch;
 }
 
 /**
@@ -52,24 +54,31 @@ export function EditScreenPreview({ screens, projectKey, edits }: EditScreenPrev
       return;
     }
     const controller = new AbortController();
+    const assets = createSnapshotAssetPrefetch({ projectKey, token, signal: controller.signal });
     findMarkedScreen(screens, projectKey, token, controller.signal).then(
-      (snapshot) => setState({ requestKey, snapshot }),
+      (snapshot) => {
+        if (snapshot) {
+          assets.prefetch(snapshot.assetHashes);
+        }
+        setState({ requestKey, snapshot, assets });
+      },
       () => undefined,
     );
     return () => controller.abort();
   }, [screens, projectKey, token, requestKey]);
 
-  const snapshot = state?.requestKey === requestKey ? state.snapshot : null;
+  const loaded = state?.requestKey === requestKey ? state : null;
+  const snapshot = loaded?.snapshot ?? null;
   // An edit whose screen could not be saved is still part of the feedback, so it keeps its box drawing.
   const boxIndexes = snapshot ? findUnshownEditIndexes(edits.length, findEditMoves(snapshot.events)) : edits.map((_, index) => index);
   const boxes = boxIndexes.map((index) => <EditComparison key={`${edits[index].target.selector}-${index}`} edit={edits[index]} />);
-  if (!snapshot) {
+  if (!loaded || !snapshot) {
     return <>{boxes}</>;
   }
   return (
     <div className="flex flex-col gap-2">
       <p className="text-xs text-(--admin-text-muted)">저장된 화면에서 요소를 제안 위치로 옮겨 보여줘요. 아래 버튼으로 원래 화면과 비교할 수 있어요.</p>
-      <AdminScreenReplay snapshot={snapshot} projectKey={projectKey} token={token} initiallyShowsProposed />
+      <AdminScreenReplay snapshot={snapshot} assets={loaded.assets} initiallyShowsProposed />
       {boxes.length > 0 ? (
         <>
           <p className="text-xs text-(--admin-warning)">아래 위치 편집 {boxes.length}개는 저장된 화면에 표시되지 않아 상자 그림으로 보여줘요.</p>

@@ -101,7 +101,8 @@ async function requestAdminApi<TData>(
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
-      cache: 'no-store',
+      // A GET is private and carries an ETag, so the browser cache revalidates it; writes are never cached.
+      ...(method === 'GET' ? {} : { cache: 'no-store' as const }),
     });
   } catch {
     return createFailure(NETWORK_ERROR_STATUS);

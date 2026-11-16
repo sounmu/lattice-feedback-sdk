@@ -1,6 +1,9 @@
+'use client';
+
 import Link from 'next/link';
 
 import { formatDateTime, getPagePath } from '@/lib/feedback-display';
+import { rememberSnapshotAssetHashes } from '@/lib/snapshot-asset-prefetch';
 import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
 interface SavedScreenListProps {
@@ -22,6 +25,7 @@ export function SavedScreenList({ screens, projectKey }: SavedScreenListProps) {
           </div>
           <Link
             href={`/admin/snapshots/${encodeURIComponent(screen.id)}?projectKey=${encodeURIComponent(projectKey)}`}
+            onClick={() => rememberSnapshotAssetHashes(projectKey, screen.id, screen.assetHashes)}
             className="flex min-h-11 shrink-0 items-center rounded-[10px] bg-(--admin-primary) px-4 font-semibold text-white hover:bg-(--admin-primary-hover)"
           >
             화면 보기

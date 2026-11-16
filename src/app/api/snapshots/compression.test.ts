@@ -73,7 +73,7 @@ describe('saved screen compression transport', () => {
     expect(pulledChunks).toBeLessThanOrEqual(2);
   });
 
-  it.each(['application/json', 'application/gzip'])('preserves Unicode and varies the %s response without HTTP content encoding', async (accept) => {
+  it.each(['application/json', 'application/gzip'])('preserves Unicode and varies the %s response by format and credentials without HTTP content encoding', async (accept) => {
     const input = createScreenSnapshotBody({ events: [
       ...createScreenSnapshotBody().events,
       { type: 3, timestamp: 2, data: { source: 0, adds: [], removes: [], attributes: [],
@@ -89,7 +89,7 @@ describe('saved screen compression transport', () => {
     }), { params: Promise.resolve({ id }) });
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('vary')).toBe('Accept');
+    expect(response.headers.get('vary')).toBe('Accept, Authorization');
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(response.headers.get('content-encoding')).toBeNull();
     const bytes = Buffer.from(await response.arrayBuffer());
