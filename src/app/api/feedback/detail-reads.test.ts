@@ -39,6 +39,15 @@ it('reads the saved screens while the feedback read is still pending', async () 
   expect(await response.json()).toMatchObject({ feedback: { id: ID }, screenSnapshots: [] });
 });
 
+it('answers 404 for a missing feedback even when the saved-screen read fails', async () => {
+  vi.spyOn(getScreenSnapshotRepository(), 'findManyByFeedback').mockRejectedValue(new Error('screen storage down'));
+
+  const response = await detail(new Request(URL, { headers: { authorization: ADMIN_AUTHORIZATION } }), CONTEXT);
+
+  expect(response.status).toBe(404);
+  expect(await response.json()).toMatchObject({ error: { code: 'feedback_not_found' } });
+});
+
 it('reads only the requested project and still answers 404 for a missing feedback', async () => {
   const findScreens = vi.spyOn(getScreenSnapshotRepository(), 'findManyByFeedback');
 

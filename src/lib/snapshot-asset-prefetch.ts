@@ -1,8 +1,7 @@
-import { markReplay } from '@/lib/replay-timing';
+import type { AdminRequestInput } from '@/lib/admin-api';
+import type { ReplayTiming } from '@/lib/replay-timing';
 
-export interface SnapshotAssetScope {
-  readonly projectKey: string;
-  readonly token: string;
+export interface SnapshotAssetScope extends Readonly<Pick<AdminRequestInput, 'projectKey' | 'token'>> {
   readonly signal: AbortSignal;
 }
 
@@ -39,7 +38,7 @@ async function fetchAssetBlob(hash: string, { projectKey, token, signal }: Snaps
   }
 }
 
-export function createSnapshotAssetPrefetch(scope: SnapshotAssetScope): SnapshotAssetPrefetch {
+export function createSnapshotAssetPrefetch(scope: SnapshotAssetScope, timing?: ReplayTiming): SnapshotAssetPrefetch {
   const blobs = new Map<string, Promise<Blob | null>>();
 
   function requestBlob(hash: string): Promise<Blob | null> {
@@ -48,7 +47,7 @@ export function createSnapshotAssetPrefetch(scope: SnapshotAssetScope): Snapshot
       return existing;
     }
     if (blobs.size === 0) {
-      markReplay('assets-start');
+      timing?.mark('assets-start');
     }
     const requested = fetchAssetBlob(hash, scope);
     blobs.set(hash, requested);

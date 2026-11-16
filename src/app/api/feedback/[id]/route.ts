@@ -42,17 +42,20 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   try {
-    // Both reads are scoped by the project and the id alone, so neither waits for the other.
-    const [feedback, screenSnapshots] = await timing.measure('db', () =>
-      Promise.all([
-        getFeedbackRepository().find(project.projectKey, id),
-        getScreenSnapshotRepository().findManyByFeedback(project.projectKey, id),
-      ]),
-    );
-    if (!feedback) {
+    // Both reads are scoped by the project and the id alone, so neither waits for the other. A missing
+    // feedback still answers 404 even when the saved-screen read fails.
+    const body = await timing.measure('db', async (): Promise<FeedbackDetailResponse | null> => {
+      const screenSnapshotsRead = getScreenSnapshotRepository().findManyByFeedback(project.projectKey, id);
+      screenSnapshotsRead.catch(() => undefined);
+      const feedback = await getFeedbackRepository().find(project.projectKey, id);
+      if (!feedback) {
+        return null;
+      }
+      return { feedback, screenSnapshots: await screenSnapshotsRead };
+    });
+    if (!body) {
       return createFeedbackNotFoundResponse();
     }
-    const body: FeedbackDetailResponse = { feedback, screenSnapshots };
     return createPrivateJsonResponse(request, body, timing);
   } catch (error) {
     if (error instanceof FeedbackStorageUnavailableError) {

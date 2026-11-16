@@ -29,7 +29,7 @@ import {
 } from '@/lib/screen-preview';
 import { findCommentPins, findEditMoves, hasReplayEvents, isReplayTruncated } from '@/lib/screen-snapshot';
 import { loadReplayModule } from '@/lib/replay-module';
-import { markReplay, measureReplay, resetReplayTiming } from '@/lib/replay-timing';
+import { createReplayTiming, type ReplayTiming } from '@/lib/replay-timing';
 import { copyWithResolvedAssetReferences } from '@/lib/snapshot-asset-references';
 import {
   createSnapshotAssetPrefetch,
@@ -47,7 +47,7 @@ import type {
 
 type ReplayerEvents = ConstructorParameters<typeof Replayer>[0];
 export type ZoomMode = 'fit' | 'actual';
-type LoadResult = { key: string; snapshot: ScreenSnapshot; assets: SnapshotAssetPrefetch } | { key: string; status: number };
+type LoadResult = { key: string; snapshot: ScreenSnapshot; assets: SnapshotAssetPrefetch; timing: ReplayTiming } | { key: string; status: number };
 
 const DEFAULT_PROJECT_KEY = 'demo';
 const UNAUTHORIZED_STATUS = 401;
@@ -485,6 +485,8 @@ interface ScreenReplayProps {
   initiallyShowsProposed?: boolean;
   /** Keeps the rebuilt page out of the tab order: it is shown as a picture, and its links and buttons do nothing. */
   isInert?: boolean;
+  /** Marks the steps up to the first rebuilt page for the load that opened this replay. */
+  timing?: ReplayTiming;
   /** A host with its own look draws these pieces itself. Each one left out is this viewer's. */
   parts?: Partial<ScreenReplayParts>;
   /** Class names of the replay and of the frame around the rebuilt page, for a host with its own look. */
@@ -571,18 +573,24 @@ async function readSnapshotResponse(response: Response): Promise<ScreenSnapshotD
 export type SavedScreenResult = { snapshot: ScreenSnapshot } | { status: number };
 
 /** Reads one saved screen with the admin token. Status 0 means the request never reached the server. */
-export async function fetchSavedScreen(id: string, projectKey: string, token: string, signal?: AbortSignal): Promise<SavedScreenResult> {
+export async function fetchSavedScreen(
+  id: string,
+  projectKey: string,
+  token: string,
+  signal?: AbortSignal,
+  timing?: ReplayTiming,
+): Promise<SavedScreenResult> {
   try {
     const response = await fetch(`/api/snapshots/${encodeURIComponent(id)}?projectKey=${encodeURIComponent(projectKey)}`, {
       headers: { authorization: `Bearer ${token}`, accept: isGzipSupported() ? GZIP_MEDIA_TYPE : 'application/json' },
       signal,
     });
-    markReplay('snapshot-headers');
+    timing?.mark('snapshot-headers');
     if (!response.ok) {
       return { status: response.status };
     }
     const body = await readSnapshotResponse(response);
-    markReplay('snapshot-parsed');
+    timing?.mark('snapshot-parsed');
     return { snapshot: body.snapshot };
   } catch (error) {
     if (signal?.aborted) {
@@ -599,6 +607,7 @@ export function ScreenReplay({
   loadAssetUrls,
   initiallyShowsProposed = false,
   isInert = false,
+  timing,
   parts,
   className = 'flex flex-col gap-2',
   frameClassName = 'w-full overflow-auto rounded-xl border bg-white',
@@ -764,7 +773,7 @@ export function ScreenReplay({
       const [{ Replayer: ReplayerClass }, urls] = await Promise.all([
         loadReplayModule(),
         loadAssetUrls().then((loaded) => {
-          markReplay('assets-ready');
+          timing?.mark('assets-ready');
           return loaded;
         }),
       ]);
@@ -774,9 +783,9 @@ export function ScreenReplay({
         return;
       }
       setUnloadedAssetCount(urls.filter((url) => url === null).length);
-      markReplay('rewrite-start');
+      timing?.mark('rewrite-start');
       const events = copyWithResolvedAssetReferences(screen.events, (index) => urls[index] ?? null) as ReplayerEvents;
-      markReplay('rewrite-end');
+      timing?.mark('rewrite-end');
       // rrweb strips scripts and rebuilds into an iframe sandboxed without allow-scripts.
       replayer = new ReplayerClass(events, {
         root,
@@ -784,13 +793,12 @@ export function ScreenReplay({
         showWarning: false,
         triggerFocus: false,
       });
-      markReplay('replayer-created');
+      timing?.mark('replayer-created');
       let hasRebuilt = false;
       replayer.on('fullsnapshot-rebuilded', () => {
         if (!hasRebuilt) {
           hasRebuilt = true;
-          markReplay('first-rebuilt');
-          measureReplay();
+          timing?.mark('first-rebuilt');
         }
       });
       if (isInert) {
@@ -834,7 +842,7 @@ export function ScreenReplay({
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed, isInert]);
+  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed, isInert, timing]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -894,15 +902,15 @@ export function ScreenReplay({
   );
 }
 
-interface AdminScreenReplayProps extends Pick<ScreenReplayProps, 'initiallyShowsProposed'> {
+interface AdminScreenReplayProps extends Pick<ScreenReplayProps, 'initiallyShowsProposed' | 'timing'> {
   snapshot: ScreenSnapshot;
   assets: SnapshotAssetPrefetch;
 }
 
 // The saved files are read with the admin token inside `assets`, so the shared replay never sees it.
-export function AdminScreenReplay({ snapshot, assets, initiallyShowsProposed }: AdminScreenReplayProps) {
+export function AdminScreenReplay({ snapshot, assets, initiallyShowsProposed, timing }: AdminScreenReplayProps) {
   const loadAssetUrls = useCallback(() => assets.loadUrls(snapshot.assetHashes), [snapshot, assets]);
-  return <ScreenReplay screen={snapshot} loadAssetUrls={loadAssetUrls} initiallyShowsProposed={initiallyShowsProposed} />;
+  return <ScreenReplay screen={snapshot} loadAssetUrls={loadAssetUrls} initiallyShowsProposed={initiallyShowsProposed} timing={timing} />;
 }
 
 function ScreenSnapshotDetails({ snapshot }: { snapshot: ScreenSnapshot }) {
@@ -943,20 +951,21 @@ export function ScreenSnapshotViewer() {
     }
     const controller = new AbortController();
     // The rrweb module and the files the list already knows load while the saved screen is still being read.
-    const assets = createSnapshotAssetPrefetch({ projectKey, token, signal: controller.signal });
-    resetReplayTiming();
-    markReplay('snapshot-start');
+    const timing = createReplayTiming();
+    timing.mark('snapshot-start');
+    const assets = createSnapshotAssetPrefetch({ projectKey, token, signal: controller.signal }, timing);
+    timing.mark('import-start');
     // ScreenReplay asks for the module again when it needs it, so a failed early load is not reported here.
-    loadReplayModule().catch(() => undefined);
+    loadReplayModule().then(() => timing.mark('import-end'), () => undefined);
     assets.prefetch(findRememberedAssetHashes(projectKey, id));
 
-    fetchSavedScreen(id, projectKey, token, controller.signal).then((loaded) => {
+    fetchSavedScreen(id, projectKey, token, controller.signal, timing).then((loaded) => {
       if ('status' in loaded) {
         setResult({ key: requestKey, status: loaded.status });
         return;
       }
       assets.prefetch(loaded.snapshot.assetHashes);
-      setResult({ key: requestKey, snapshot: loaded.snapshot, assets });
+      setResult({ key: requestKey, snapshot: loaded.snapshot, assets, timing });
     }, () => undefined);
     return () => controller.abort();
   }, [id, projectKey, token, requestKey]);
@@ -981,7 +990,7 @@ export function ScreenSnapshotViewer() {
     return (
       <>
         <ScreenSnapshotDetails snapshot={result.snapshot} />
-        <AdminScreenReplay snapshot={result.snapshot} assets={result.assets} />
+        <AdminScreenReplay snapshot={result.snapshot} assets={result.assets} timing={result.timing} />
       </>
     );
   }

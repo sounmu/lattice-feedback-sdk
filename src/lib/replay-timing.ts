@@ -30,30 +30,45 @@ const REPLAY_MEASURES: readonly ReplayMeasure[] = [
   { name: 'first-display', from: 'snapshot-start', to: 'first-rebuilt' },
 ];
 
-function getEntryName(name: string): string {
-  return `${ENTRY_PREFIX}${name}`;
+export interface ReplayTiming {
+  mark(mark: ReplayMark): void;
 }
 
-function hasMark(mark: ReplayMark): boolean {
-  return performance.getEntriesByName(getEntryName(mark), 'mark').length > 0;
-}
+let lastLoadId = 0;
 
-export function markReplay(mark: ReplayMark): void {
-  performance.mark(getEntryName(mark));
-}
+/**
+ * The marks of one saved-screen load. Each load names its marks apart, so a load that was left behind or
+ * another replay on the page cannot mix into its measures. The measures keep one name per step, and the
+ * latest load replaces them once its first page is rebuilt.
+ */
+export function createReplayTiming(): ReplayTiming {
+  lastLoadId += 1;
+  const markPrefix = `${ENTRY_PREFIX}${lastLoadId}:`;
+  const marked = new Set<ReplayMark>();
 
-export function resetReplayTiming(): void {
-  for (const { name, from, to } of REPLAY_MEASURES) {
-    performance.clearMeasures(getEntryName(name));
-    performance.clearMarks(getEntryName(from));
-    performance.clearMarks(getEntryName(to));
+  function getMarkName(mark: ReplayMark): string {
+    return `${markPrefix}${mark}`;
   }
-}
 
-export function measureReplay(): void {
-  for (const { name, from, to } of REPLAY_MEASURES) {
-    if (hasMark(from) && hasMark(to)) {
-      performance.measure(getEntryName(name), getEntryName(from), getEntryName(to));
+  function measure() {
+    for (const { name, from, to } of REPLAY_MEASURES) {
+      if (marked.has(from) && marked.has(to)) {
+        performance.clearMeasures(`${ENTRY_PREFIX}${name}`);
+        performance.measure(`${ENTRY_PREFIX}${name}`, getMarkName(from), getMarkName(to));
+      }
+    }
+    for (const mark of marked) {
+      performance.clearMarks(getMarkName(mark));
     }
   }
+
+  return {
+    mark(mark) {
+      performance.mark(getMarkName(mark));
+      marked.add(mark);
+      if (mark === 'first-rebuilt') {
+        measure();
+      }
+    },
+  };
 }
