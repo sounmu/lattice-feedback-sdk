@@ -1,7 +1,10 @@
 import { expect, it } from 'vitest';
 
+import { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } from '@/lib/feedback-limits';
 import { SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
 import { createTicketDraft, MAX_TICKET_FLOW_STEPS, summarizeFlowSteps } from '@/lib/ticket-draft';
+import { MAX_TICKET_BODY_LENGTH, MAX_TICKET_TITLE_LENGTH } from '@/lib/ticket-limits';
+import { MAX_MESSAGE_LENGTH } from '@/lib/validation/feedback-schema';
 import type { ElementTarget, Feedback, FeedbackDetailResponse, FlowEvent } from '@/types/feedback';
 import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
@@ -17,6 +20,7 @@ function createDetail(feedback: Partial<Feedback> = {}, screenSnapshots: ScreenS
       type: 'bug',
       status: 'open',
       duplicateOfId: null,
+      ticketUrl: null,
       reporter: { id: 'user-1', name: '홍길동', email: 'hong@example.com' },
       page: { url: 'https://host.example.com/orders', title: '주문', viewportWidth: 1440, viewportHeight: 900, userAgent: 'vitest' },
       attachments: { comments: [], edits: [], flow: null },
@@ -128,4 +132,42 @@ it('lists a verified organization as signature-confirmed and leaves the line out
   // The signed id is what was verified; the name is only the host page's display text.
   expect(verified).toContain('- 소속: acme (고객사 서버 서명으로 확인됨), 표시 이름: 에이콤 \\*영업\\*팀 (미검증)');
   expect(createTicketDraft(createDetail(), ADMIN_ORIGIN).body).not.toContain('소속');
+});
+
+// The largest draft the stored-feedback limits allow. The ticket body limit must fit it: an administrator
+// who did not touch the draft must still be able to post it.
+function createLargestDetail(): FeedbackDetailResponse {
+  const target: ElementTarget = { ...TARGET, selector: '*'.repeat(500), feedbackId: '*'.repeat(200) };
+  const event: FlowEvent = { type: 'click', offsetMs: 1, path: `/${'*'.repeat(2047)}`, targetLabel: '*'.repeat(200) };
+  const comments = Array.from({ length: MAX_COMMENTS }, () => ({ target, comment: '*'.repeat(MAX_COMMENT_LENGTH) }));
+  const edits = Array.from({ length: MAX_EDITS }, () => ({
+    target,
+    originalRect: { x: -99999, y: -99999, width: 99999, height: 99999 },
+    proposedRect: { x: 99999, y: 99999, width: 1, height: 1 },
+    viewportWidth: 1440,
+    viewportHeight: 900,
+    note: '*'.repeat(MAX_COMMENT_LENGTH),
+  }));
+  const flow = { startedAt: '2026-11-14T14:00:00.000Z', endedAt: '2026-11-14T14:05:00.000Z', events: Array.from({ length: MAX_FLOW_EVENTS }, () => event), truncated: true, interrupted: true };
+  const screens = Array.from({ length: MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK }, (_, index) => ({
+    ...createScreen(`screen-${index}`),
+    page: { ...createScreen('x').page, url: `https://host.example.com/${'*'.repeat(2000)}` },
+    missingAssets: Array.from({ length: 5 }, (__, assetIndex) => ({ url: `https://host.example.com/asset-${assetIndex}`, reason: 'fetch_failed' as const })),
+  }));
+  const message = `a${'\n'.repeat(MAX_MESSAGE_LENGTH - 2)}b`;
+  return createDetail(
+    {
+      message,
+      reporter: { id: 'user-1', name: '*'.repeat(200), verifiedOrganization: { id: '*'.repeat(200), name: '*'.repeat(200) } },
+      attachments: { comments, edits, flow },
+    },
+    screens,
+  );
+}
+
+it('fits the largest draft the stored-feedback limits allow within the ticket body limit', () => {
+  const { body, title } = createTicketDraft(createLargestDetail(), ADMIN_ORIGIN);
+
+  expect(body.length).toBeLessThanOrEqual(MAX_TICKET_BODY_LENGTH);
+  expect(title.length).toBeLessThanOrEqual(MAX_TICKET_TITLE_LENGTH);
 });

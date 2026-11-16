@@ -37,6 +37,7 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
   ticket_not_configured: '노션 연결이 설정되지 않았거나 토큰이 올바르지 않아요. 서버 환경변수를 확인해 주세요.',
   ticket_target_not_shared: '노션 보드를 찾을 수 없어요. 보드에 연동 앱을 추가했는지 확인해 주세요.',
   ticket_target_invalid: '노션 보드가 티켓을 받아주지 않았어요. 제목 칼럼 이름을 확인해 주세요.',
+  ticket_in_progress: '이미 올리는 중이거나 결과를 확인하는 중이에요. 잠시 뒤 노션 보드를 확인하고, 없으면 다시 시도해 주세요.',
   ticket_rate_limited: '노션이 요청을 잠시 제한하고 있어요. 조금 뒤에 다시 시도해 주세요.',
   ticket_failed: '노션에 티켓을 만들지 못했어요. 잠시 후 다시 시도해 주세요.',
 };

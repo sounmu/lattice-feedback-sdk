@@ -63,6 +63,83 @@ describe('convertMarkdownToNotionBlocks', () => {
   });
 });
 
+function readRichTextCounts(blocks: Record<string, unknown>[]): number[] {
+  return blocks.map((block) => (block[block.type as string] as { rich_text: unknown[] }).rich_text.length);
+}
+
+// Alternating `code` and plain pieces cannot be merged: n code spans and n - 1 spaces make 2n - 1 items.
+function createAlternatingLine(codeSpanCount: number, suffix = ''): string {
+  return `- ${Array.from({ length: codeSpanCount }, () => '`x`').join(' ')}${suffix}`;
+}
+
+describe('rich-text count limit', () => {
+  it('keeps a line of exactly 100 items in one block', () => {
+    const blocks = convertMarkdownToNotionBlocks(createAlternatingLine(50, ' y'));
+
+    expect(blocks).toHaveLength(1);
+    expect(readRichTextCounts(blocks)).toEqual([100]);
+  });
+
+  it('continues a line of 101 items in a second block', () => {
+    const blocks = convertMarkdownToNotionBlocks(createAlternatingLine(51));
+
+    expect(readRichTextCounts(blocks)).toEqual([100, 1]);
+    expect(blocks.map((block) => block.type)).toEqual(['bulleted_list_item', 'paragraph']);
+  });
+
+  it('never sends a block with more than 100 items, and keeps all the text', () => {
+    const blocks = convertMarkdownToNotionBlocks(createAlternatingLine(101));
+
+    expect(Math.max(...readRichTextCounts(blocks))).toBeLessThanOrEqual(100);
+    expect(blocks.map(readText).join('').replaceAll(' ', '')).toBe('x'.repeat(101));
+  });
+
+  it('merges neighbouring pieces that look the same', () => {
+    const [block] = convertMarkdownToNotionBlocks('- 가 \\* 나 \\_ 다');
+
+    expect(readRichTextCounts([block])).toEqual([1]);
+  });
+});
+
+describe('link address limit', () => {
+  const PREFIX = 'https://admin.example/';
+
+  it('links an address of exactly 2000 characters', () => {
+    const url = PREFIX + 'a'.repeat(2000 - PREFIX.length);
+    const [block] = convertMarkdownToNotionBlocks(`- [화면](${url})`);
+
+    expect(JSON.stringify(block)).toContain('"link"');
+  });
+
+  it('keeps an address of 2001 characters as text instead of a link', () => {
+    const url = PREFIX + 'a'.repeat(2001 - PREFIX.length);
+    const [block] = convertMarkdownToNotionBlocks(`- [화면](${url})`);
+
+    expect(JSON.stringify(block)).not.toContain('"link"');
+    expect(readText(block).startsWith('화면 (https://admin.example/')).toBe(true);
+  });
+});
+
+describe('backslashes', () => {
+  it('keeps a Windows path in a reporter quote', () => {
+    const [block] = convertMarkdownToNotionBlocks('> C:\\Users\\alice\\report.csv 를 못 열어요');
+
+    expect(readText(block)).toBe('C:\\Users\\alice\\report.csv 를 못 열어요');
+  });
+
+  it('keeps a backslash before an ordinary letter outside a quote too', () => {
+    const [block] = convertMarkdownToNotionBlocks('- 작성자: C:\\Users\\alice');
+
+    expect(readText(block)).toBe('작성자: C:\\Users\\alice');
+  });
+
+  it('keeps a quote exactly as written, including escape-like text', () => {
+    const [block] = convertMarkdownToNotionBlocks('> 별표 \\* 와 `코드` 와 [링크](https://a.example)');
+
+    expect(readText(block)).toBe('별표 \\* 와 `코드` 와 [링크](https://a.example)');
+  });
+});
+
 describe('createNotionTitle', () => {
   it('puts the title on one line', () => {
     const [item] = createNotionTitle('[버그]\n두 줄   제목') as unknown as { text: { content: string } }[];

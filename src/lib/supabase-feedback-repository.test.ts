@@ -24,6 +24,7 @@ const storedRow = {
   type: input.type,
   status: 'open',
   duplicateOfId: null,
+  ticketUrl: null,
   reporter: input.reporter,
   page: input.page,
   attachments: input.attachments,
@@ -244,6 +245,76 @@ describe('Supabase REST repository contract', () => {
       .rejects.toEqual(new FeedbackDuplicateTargetError());
     await expect(repository.update('demo', storedRow.id, { adminReply: 'x' }))
       .rejects.toEqual(new FeedbackStorageUnavailableError());
+  });
+
+  describe('ticket claim', () => {
+    const TICKET_URL = 'https://www.notion.so/ticket-1';
+
+    it('takes the claim with one conditional update, scoped to the project and only while no ticket exists', async () => {
+      responseBodies = [JSON.stringify([storedRow])];
+
+      const claim = await createSupabaseFeedbackRepository().claimTicket('demo', storedRow.id);
+
+      expect(claim).toEqual({ status: 'claimed' });
+      expect(received).toHaveLength(1);
+      const [request] = received;
+      expect(request.method).toBe('PATCH');
+      expect(request.url.searchParams.get('project_key')).toBe('eq.demo');
+      expect(request.url.searchParams.get('id')).toBe(`eq.${storedRow.id}`);
+      expect(request.url.searchParams.get('ticket_url')).toBe('is.null');
+      expect(request.url.searchParams.get('or')).toMatch(/^\(ticket_claimed_at\.is\.null,ticket_claimed_at\.lt\.\d{4}-\d{2}-\d{2}T[^)]+\)$/);
+      expect(JSON.parse(request.body)).toEqual({ ticket_claimed_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) });
+    });
+
+    it('reports a ticket that already exists, with its link', async () => {
+      responseBodies = ['[]', JSON.stringify([{ ...storedRow, ticketUrl: TICKET_URL }])];
+
+      const claim = await createSupabaseFeedbackRepository().claimTicket('demo', storedRow.id);
+
+      expect(claim).toEqual({ status: 'created', url: TICKET_URL });
+      expect(received.map((request) => request.method)).toEqual(['PATCH', 'GET']);
+    });
+
+    it('reports a ticket another request is making, and a feedback that is missing', async () => {
+      responseBodies = ['[]', JSON.stringify([storedRow]), '[]', '[]'];
+      const repository = createSupabaseFeedbackRepository();
+
+      expect(await repository.claimTicket('demo', storedRow.id)).toEqual({ status: 'in_progress' });
+      expect(await repository.claimTicket('demo', storedRow.id)).toBeNull();
+    });
+
+    it('saves the link and ends the claim without touching the update time', async () => {
+      responseBodies = [JSON.stringify([{ ...storedRow, ticketUrl: TICKET_URL }])];
+
+      const feedback = await createSupabaseFeedbackRepository().saveTicketUrl('demo', storedRow.id, TICKET_URL);
+
+      expect(feedback?.ticketUrl).toBe(TICKET_URL);
+      expect(JSON.parse(received[0].body)).toEqual({ ticket_url: TICKET_URL, ticket_claimed_at: null });
+    });
+
+    it('releases only a claim that has not produced a ticket', async () => {
+      await createSupabaseFeedbackRepository().releaseTicket('demo', storedRow.id);
+
+      expect(received[0].url.searchParams.get('ticket_url')).toBe('is.null');
+      expect(JSON.parse(received[0].body)).toEqual({ ticket_claimed_at: null });
+    });
+
+    it('sends nothing for an identifier that is not a UUID', async () => {
+      const repository = createSupabaseFeedbackRepository();
+
+      expect(await repository.claimTicket('demo', 'not-a-uuid')).toBeNull();
+      expect(await repository.saveTicketUrl('demo', 'not-a-uuid', TICKET_URL)).toBeNull();
+      await repository.releaseTicket('demo', 'not-a-uuid');
+      expect(received).toHaveLength(0);
+    });
+
+    it('reads the ticket link from its own column', async () => {
+      responseBodies = [JSON.stringify([storedRow])];
+
+      await createSupabaseFeedbackRepository().find('demo', storedRow.id);
+
+      expect(received[0].url.searchParams.get('select')).toContain('ticketUrl:ticket_url');
+    });
   });
 
   it('treats a non-UUID identifier as missing without sending a failing SQL filter', async () => {

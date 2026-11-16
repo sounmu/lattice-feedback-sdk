@@ -6,6 +6,7 @@ import { AdminSection } from '@/components/admin/AdminSection';
 import { useAdminToken } from '@/hooks/useAdminToken';
 import { useCreateTicket } from '@/hooks/useCreateTicket';
 import { createTicketDraft } from '@/lib/ticket-draft';
+import { MAX_TICKET_BODY_LENGTH, MAX_TICKET_TITLE_LENGTH } from '@/lib/ticket-limits';
 import type { FeedbackDetailResponse } from '@/types/feedback';
 
 type CopyStatus = 'idle' | 'copied' | 'failed';
@@ -17,6 +18,9 @@ export function TicketDraftPanel({ detail, projectKey }: { detail: FeedbackDetai
   // Made once per feedback, in the browser: its links start with this admin app's own address.
   const [draft, setDraft] = useState(() => createTicketDraft(detail, window.location.origin));
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
+  // The link saved with the feedback shows a ticket made earlier, also after a reload or from another screen.
+  const postedUrl = notion.url || detail.feedback.ticketUrl;
+  const isTooLong = draft.title.length > MAX_TICKET_TITLE_LENGTH || draft.body.length > MAX_TICKET_BODY_LENGTH;
 
   function handleChange(changes: Partial<typeof draft>) {
     setDraft((current) => ({ ...current, ...changes }));
@@ -47,6 +51,7 @@ export function TicketDraftPanel({ detail, projectKey }: { detail: FeedbackDetai
         type="text"
         value={draft.title}
         onChange={(event) => handleChange({ title: event.target.value })}
+        maxLength={MAX_TICKET_TITLE_LENGTH}
         className="min-h-11 rounded-[10px] border border-(--admin-border) px-3 focus:outline-2 focus:outline-(--admin-primary)"
       />
 
@@ -58,6 +63,7 @@ export function TicketDraftPanel({ detail, projectKey }: { detail: FeedbackDetai
         rows={14}
         value={draft.body}
         onChange={(event) => handleChange({ body: event.target.value })}
+        maxLength={MAX_TICKET_BODY_LENGTH}
         className="rounded-[10px] border border-(--admin-border) p-3 font-mono text-sm focus:outline-2 focus:outline-(--admin-primary)"
       />
 
@@ -69,11 +75,11 @@ export function TicketDraftPanel({ detail, projectKey }: { detail: FeedbackDetai
         >
           마크다운 복사
         </button>
-        {notion.status === 'created' ? null : (
+        {postedUrl ? null : (
           <button
             type="button"
             onClick={() => notion.create(draft)}
-            disabled={notion.status === 'creating'}
+            disabled={notion.status === 'creating' || isTooLong}
             className="min-h-11 rounded-[10px] border border-(--admin-primary) px-5 font-semibold text-(--admin-primary) hover:bg-(--admin-primary-weak) disabled:opacity-50"
           >
             {notion.status === 'creating' ? '올리는 중…' : '노션에 올리기'}
@@ -82,10 +88,10 @@ export function TicketDraftPanel({ detail, projectKey }: { detail: FeedbackDetai
         <p role="status" className="text-sm text-(--admin-text-sub)">
           {copyStatus === 'copied' ? '복사했어요.' : ''}
         </p>
-        {notion.status === 'created' ? (
+        {postedUrl ? (
           <p role="status" className="text-sm text-(--admin-success)">
             노션에 올렸어요.{' '}
-            <a href={notion.url} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
+            <a href={postedUrl} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
               노션에서 열기
             </a>
           </p>

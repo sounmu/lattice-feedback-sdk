@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
-export const MAX_TICKET_TITLE_LENGTH = 300;
-export const MAX_TICKET_BODY_LENGTH = 20000;
+import { MAX_TICKET_BODY_LENGTH, MAX_TICKET_TITLE_LENGTH } from '@/lib/ticket-limits';
 
 export const ticketContentSchema = z.object({
   title: z.string().trim().min(1).max(MAX_TICKET_TITLE_LENGTH),
