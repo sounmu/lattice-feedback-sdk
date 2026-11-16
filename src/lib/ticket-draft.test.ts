@@ -1,7 +1,12 @@
 import { expect, it } from 'vitest';
 
+import {
+  MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS, MAX_MISSING_SNAPSHOT_ASSETS, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK,
+} from '@/lib/feedback-limits';
 import { SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
 import { createTicketDraft, MAX_TICKET_FLOW_STEPS, summarizeFlowSteps } from '@/lib/ticket-draft';
+import { MAX_TICKET_BODY_LENGTH, MAX_TICKET_TITLE_LENGTH } from '@/lib/ticket-limits';
+import { MAX_MESSAGE_LENGTH, MAX_SELECTOR_LENGTH, pageUrlSchema } from '@/lib/validation/feedback-schema';
 import type { ElementTarget, Feedback, FeedbackDetailResponse, FlowEvent } from '@/types/feedback';
 import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
@@ -17,6 +22,7 @@ function createDetail(feedback: Partial<Feedback> = {}, screenSnapshots: ScreenS
       type: 'bug',
       status: 'open',
       duplicateOfId: null,
+      ticketUrl: null,
       reporter: { id: 'user-1', name: '홍길동', email: 'hong@example.com' },
       page: { url: 'https://host.example.com/orders', title: '주문', viewportWidth: 1440, viewportHeight: 900, userAgent: 'vitest' },
       attachments: { comments: [], edits: [], flow: null },
@@ -128,4 +134,51 @@ it('lists a verified organization as signature-confirmed and leaves the line out
   // The signed id is what was verified; the name is only the host page's display text.
   expect(verified).toContain('- 소속: acme (고객사 서버 서명으로 확인됨), 표시 이름: 에이콤 \\*영업\\*팀 (미검증)');
   expect(createTicketDraft(createDetail(), ADMIN_ORIGIN).body).not.toContain('소속');
+});
+
+// The largest draft the stored-feedback limits allow. The ticket body limit must fit it: an administrator
+// who did not touch the draft must still be able to post it.
+const LONGEST_ADMIN_ORIGIN = `https://${[63, 63, 63, 61].map((length) => 'a'.repeat(length)).join('.')}:65535`;
+// A page address is stored with its path percent-encoded, so each Korean character of it takes nine.
+const LONGEST_PAGE_URL = pageUrlSchema.parse(`http://a/${'가'.repeat(2048 - 'http://a/'.length)}`);
+
+function createLargestDetail(): FeedbackDetailResponse {
+  // Without a data-feedback-id an element is named by its selector, which may be longer.
+  const target: ElementTarget = { ...TARGET, selector: '*'.repeat(MAX_SELECTOR_LENGTH), feedbackId: null };
+  const event: FlowEvent = { type: 'input', offsetMs: 1, path: `/${'*'.repeat(2047)}`, targetLabel: '*'.repeat(200) };
+  const comments = Array.from({ length: MAX_COMMENTS }, () => ({ target, comment: '*'.repeat(MAX_COMMENT_LENGTH) }));
+  const edits = Array.from({ length: MAX_EDITS }, () => ({
+    target,
+    originalRect: { ...TARGET.rect, x: Number.MAX_VALUE, y: Number.MAX_VALUE },
+    proposedRect: TARGET.rect,
+    viewportWidth: 1440,
+    viewportHeight: 900,
+    note: '*'.repeat(MAX_COMMENT_LENGTH),
+  }));
+  const flow = { startedAt: '2026-11-14T14:00:00.000Z', endedAt: '2026-11-14T14:05:00.000Z', events: Array.from({ length: MAX_FLOW_EVENTS }, () => event), truncated: true, interrupted: true };
+  const screens = Array.from({ length: MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK }, (_, index) => ({
+    ...createScreen(String(index).padStart(36, '0')),
+    page: { ...createScreen('x').page, url: LONGEST_PAGE_URL },
+    missingAssets: Array.from({ length: MAX_MISSING_SNAPSHOT_ASSETS }, (__, assetIndex) => ({ url: `https://host.example.com/asset-${assetIndex}`, reason: 'fetch_failed' as const })),
+  }));
+  const message = `a${'\n'.repeat(MAX_MESSAGE_LENGTH - 2)}b`;
+  return createDetail(
+    {
+      id: '0'.repeat(36),
+      message,
+      type: 'improvement',
+      // A display name equal to the id is left out of the draft, so the two differ.
+      reporter: { id: 'user-1', name: '*'.repeat(200), verifiedOrganization: { id: '*'.repeat(200), name: '_'.repeat(200) } },
+      page: { url: LONGEST_PAGE_URL, title: '주문', viewportWidth: Number.MAX_VALUE, viewportHeight: Number.MAX_VALUE, userAgent: 'vitest' },
+      attachments: { comments, edits, flow },
+    },
+    screens,
+  );
+}
+
+it('fits the largest draft the stored-feedback limits allow within the ticket body limit', () => {
+  const { body, title } = createTicketDraft(createLargestDetail(), LONGEST_ADMIN_ORIGIN);
+
+  expect(body.length).toBeLessThanOrEqual(MAX_TICKET_BODY_LENGTH);
+  expect(title.length).toBeLessThanOrEqual(MAX_TICKET_TITLE_LENGTH);
 });

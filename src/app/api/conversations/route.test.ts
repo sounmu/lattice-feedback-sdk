@@ -144,7 +144,7 @@ describe('reporter conversation access', () => {
   });
 
   it('presents the legacy reply once and keeps it when new messages arrive', () => {
-    const legacy = { ...input, id: crypto.randomUUID(), status: 'open' as const, duplicateOfId: null, adminReply: 'Legacy answer', createdAt: '2026-11-14T00:00:00Z', updatedAt: '2026-11-14T01:00:00Z' };
+    const legacy = { ...input, id: crypto.randomUUID(), status: 'open' as const, duplicateOfId: null, ticketUrl: null, adminReply: 'Legacy answer', createdAt: '2026-11-14T00:00:00Z', updatedAt: '2026-11-14T01:00:00Z' };
     expect(getConversationMessages(legacy).map((message) => message.body)).toEqual([input.message, 'Legacy answer']);
     expect(getConversationMessages({ ...legacy, messages: [{ id: 'legacy', authorRole: 'admin', body: 'Legacy answer', createdAt: legacy.updatedAt }] })).toHaveLength(2);
   });

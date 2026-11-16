@@ -1,4 +1,5 @@
 import type { FeedbackDetailResponse, FeedbackListResponse, UpdateFeedbackInput } from '@/types/feedback';
+import type { CreateTicketResponse, TicketContent } from '@/types/ticket';
 
 export type AdminApiResult<TData> = { ok: true; data: TData } | { ok: false; status: number; message: string };
 
@@ -9,6 +10,10 @@ export interface AdminRequestInput {
 
 export interface FeedbackDetailRequestInput extends AdminRequestInput {
   id: string;
+}
+
+export interface CreateTicketRequestInput extends FeedbackDetailRequestInput {
+  ticket: TicketContent;
 }
 
 export interface UpdateFeedbackRequestInput extends FeedbackDetailRequestInput {
@@ -27,14 +32,24 @@ const ERROR_MESSAGES: Record<number, string> = {
   [INVALID_RESPONSE_STATUS]: '서버 응답 형식이 올바르지 않아요.',
   503: '저장소를 사용할 수 없어요. 잠시 후 다시 시도해 주세요.',
 };
+// Some endpoints say more than the status code does; their error code wins over the status message.
+const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
+  ticket_not_configured: '노션 연결이 설정되지 않았거나 토큰이 올바르지 않아요. 서버 환경변수를 확인해 주세요.',
+  ticket_target_not_shared: '노션 보드를 찾을 수 없어요. 보드에 연동 앱을 추가했는지 확인해 주세요.',
+  ticket_target_invalid: '노션 보드가 티켓을 받아주지 않았어요. 제목 칼럼 이름을 확인해 주세요.',
+  ticket_in_progress: '이미 올리는 중이거나 결과를 확인하는 중이에요. 잠시 뒤 노션 보드를 확인하고, 없으면 다시 시도해 주세요.',
+  ticket_rate_limited: '노션이 요청을 잠시 제한하고 있어요. 조금 뒤에 다시 시도해 주세요.',
+  ticket_failed: '노션에 티켓을 만들지 못했어요. 잠시 후 다시 시도해 주세요.',
+};
 const FALLBACK_ERROR_MESSAGE = '요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.';
 
 export function findAdminErrorMessage(status: number): string {
   return ERROR_MESSAGES[status] ?? FALLBACK_ERROR_MESSAGE;
 }
 
-function createFailure(status: number): { ok: false; status: number; message: string } {
-  return { ok: false, status, message: findAdminErrorMessage(status) };
+function createFailure(status: number, errorCode?: string): { ok: false; status: number; message: string } {
+  const codeMessage = errorCode === undefined ? undefined : ERROR_MESSAGES_BY_CODE[errorCode];
+  return { ok: false, status, message: codeMessage ?? findAdminErrorMessage(status) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -53,8 +68,19 @@ export function isFeedbackDetailResponse(value: unknown): value is FeedbackDetai
   return isRecord(value) && isFeedbackLike(value.feedback) && Array.isArray(value.screenSnapshots);
 }
 
+function findErrorCode(value: unknown): string | undefined {
+  if (!isRecord(value) || !isRecord(value.error)) {
+    return undefined;
+  }
+  return typeof value.error.code === 'string' ? value.error.code : undefined;
+}
+
+export function isCreateTicketResponse(value: unknown): value is CreateTicketResponse {
+  return isRecord(value) && isRecord(value.ticket) && typeof value.ticket.url === 'string';
+}
+
 interface RequestInitInput {
-  method: 'GET' | 'PATCH';
+  method: 'GET' | 'PATCH' | 'POST';
   body?: unknown;
 }
 
@@ -82,7 +108,8 @@ async function requestAdminApi<TData>(
   }
 
   if (!response.ok) {
-    return createFailure(response.status);
+    const errorBody: unknown = await response.json().catch(() => null);
+    return createFailure(response.status, findErrorCode(errorBody));
   }
   const responseBody: unknown = await response.json().catch(() => null);
   if (!isValidBody(responseBody)) {
@@ -106,4 +133,8 @@ export function updateFeedback({ id, changes, ...input }: UpdateFeedbackRequestI
     { method: 'PATCH', body: changes },
     isFeedbackDetailResponse,
   );
+}
+
+export function createTicket({ id, ticket, ...input }: CreateTicketRequestInput): Promise<AdminApiResult<CreateTicketResponse>> {
+  return requestAdminApi(`/api/feedback/${encodeURIComponent(id)}/ticket`, input, { method: 'POST', body: ticket }, isCreateTicketResponse);
 }

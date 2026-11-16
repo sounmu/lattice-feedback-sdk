@@ -1,6 +1,7 @@
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { once } from 'node:events';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { createFeedbackBody } from '@/app/api/feedback/feedback-test-fixtures';
 import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-error';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
@@ -24,6 +25,7 @@ const storedRow = {
   type: input.type,
   status: 'open',
   duplicateOfId: null,
+  ticketUrl: null,
   reporter: input.reporter,
   page: input.page,
   attachments: input.attachments,
@@ -149,55 +151,46 @@ describe('Supabase REST repository contract', () => {
     });
   });
 
-  it('continues through capped responses and requests a stable newest-first order', async () => {
-    const first = { ...storedRow, id: '00000000-0000-4000-8000-000000000003' };
-    const second = { ...storedRow, id: '00000000-0000-4000-8000-000000000002' };
-    responseBodies = [JSON.stringify([first, second]), JSON.stringify([storedRow]), '[]'];
+  it.each([{ cap: 2, count: 3 }, { cap: 100, count: 101 }, { cap: 100, count: 200 }, { cap: 100, count: 0 }])(
+    'traverses $count rows with cap $cap, timestamp ties and concurrent inserts without loss or duplication',
+    async ({ cap, count }) => {
+      const originalRows = Array.from({ length: count }, (_, index) => ({
+        ...storedRow,
+        id: `00000000-0000-4000-8000-${String(count - index).padStart(12, '0')}`,
+      }));
+      if (originalRows.length) originalRows[originalRows.length - 1] = {
+        ...storedRow, id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', createdAt: '2026-11-11T12:00:00+00:00',
+      };
+      const databaseRows = [...originalRows];
+      let pageRequests = 0;
+      respondToRequest = ({ url, body }) => {
+        const cursor = body ? z.object({ p_project: z.string(), p_created_at: z.string(), p_id: z.uuid() }).parse(JSON.parse(body)) : null;
+        const project = cursor?.p_project ?? url.searchParams.get('project_key')?.slice(3);
+        if (project !== 'demo' || (pageRequests > 0 && !cursor)) return [];
+        const page = databaseRows.filter((row) => !cursor || row.createdAt < cursor.p_created_at ||
+          (row.createdAt === cursor.p_created_at && row.id < cursor.p_id)).slice(0, cap);
+        if (pageRequests++ === 0) {
+          databaseRows.unshift({
+            ...storedRow,
+            id: '00000000-0000-4000-8000-000000000999',
+            createdAt: '2026-11-12T13:00:00+00:00',
+          });
+        }
+        return page;
+      };
 
-    const items = await createSupabaseFeedbackRepository().findMany('demo');
+      const items = await createSupabaseFeedbackRepository().findMany('demo');
 
-    expect(items.map((item) => item.id)).toEqual([first.id, second.id, storedRow.id]);
-    expect(received.map((request) => request.url.searchParams.get('or'))).toEqual([
-      null,
-      `(created_at.lt.${second.createdAt},and(created_at.eq.${second.createdAt},id.lt.${second.id}))`,
-      `(created_at.lt.${storedRow.createdAt},and(created_at.eq.${storedRow.createdAt},id.lt.${storedRow.id}))`,
-    ]);
-    for (const request of received) {
-      expect(request.url.searchParams.get('project_key')).toBe('eq.demo');
-      expect(request.url.searchParams.get('order')).toBe('created_at.desc,id.desc');
-      expect(request.url.searchParams.get('limit')).toBe('100');
-    }
-  });
-
-  it('does not duplicate rows when a new feedback arrives between pages', async () => {
-    const originalRows = Array.from({ length: 101 }, (_, index) => ({
-      ...storedRow,
-      id: `00000000-0000-4000-8000-${String(101 - index).padStart(12, '0')}`,
-    }));
-    const databaseRows = [...originalRows];
-    let pageRequests = 0;
-    respondToRequest = ({ url }) => {
-      const cursor = url.searchParams.get('or')?.match(/created_at\.lt\.([^,]+),and\(created_at\.eq\.[^,]+,id\.lt\.([^)]+)/);
-      const matchingRows = databaseRows.filter((row) => {
-        if (!cursor) return true;
-        return row.createdAt < cursor[1] || (row.createdAt === cursor[1] && row.id < cursor[2]);
-      });
-      const offset = Number(url.searchParams.get('offset') ?? 0);
-      const page = matchingRows.slice(offset, offset + Number(url.searchParams.get('limit')));
-      if (pageRequests++ === 0) {
-        databaseRows.unshift({
-          ...storedRow,
-          id: '00000000-0000-4000-8000-000000000999',
-          createdAt: '2026-11-12T13:00:00+00:00',
-        });
+      expect(items.map((item) => item.id)).toEqual(originalRows.map((row) => row.id));
+      expect(received.slice(1).map((request) => JSON.parse(request.body))).toEqual(originalRows
+        .filter((_, index) => (index + 1) % cap === 0 || index === count - 1)
+        .map((row) => ({ p_project: 'demo', p_created_at: row.createdAt, p_id: row.id })));
+      for (const request of received) {
+        expect(request.url.pathname).toBe(request.method === 'POST' ? '/rest/v1/rpc/read_feedback_before' : '/rest/v1/feedback');
+        expect(request.url.searchParams.get('order')).toBe('created_at.desc,id.desc');
+        expect(request.url.searchParams.get('limit')).toBe('100');
       }
-      return page;
-    };
-
-    const items = await createSupabaseFeedbackRepository().findMany('demo');
-
-    expect(items.map((item) => item.id)).toEqual(originalRows.map((row) => row.id));
-  });
+    });
 
   it('scopes detail and update requests to the project even when the ID is known', async () => {
     const repository = createSupabaseFeedbackRepository();
@@ -244,6 +237,76 @@ describe('Supabase REST repository contract', () => {
       .rejects.toEqual(new FeedbackDuplicateTargetError());
     await expect(repository.update('demo', storedRow.id, { adminReply: 'x' }))
       .rejects.toEqual(new FeedbackStorageUnavailableError());
+  });
+
+  describe('ticket claim', () => {
+    const TICKET_URL = 'https://www.notion.so/ticket-1';
+
+    it('takes the claim with one conditional update, scoped to the project and only while no ticket exists', async () => {
+      responseBodies = [JSON.stringify([storedRow])];
+
+      const claim = await createSupabaseFeedbackRepository().claimTicket('demo', storedRow.id);
+
+      expect(claim).toEqual({ status: 'claimed' });
+      expect(received).toHaveLength(1);
+      const [request] = received;
+      expect(request.method).toBe('PATCH');
+      expect(request.url.searchParams.get('project_key')).toBe('eq.demo');
+      expect(request.url.searchParams.get('id')).toBe(`eq.${storedRow.id}`);
+      expect(request.url.searchParams.get('ticket_url')).toBe('is.null');
+      expect(request.url.searchParams.get('or')).toMatch(/^\(ticket_claimed_at\.is\.null,ticket_claimed_at\.lt\.\d{4}-\d{2}-\d{2}T[^)]+\)$/);
+      expect(JSON.parse(request.body)).toEqual({ ticket_claimed_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) });
+    });
+
+    it('reports a ticket that already exists, with its link', async () => {
+      responseBodies = ['[]', JSON.stringify([{ ...storedRow, ticketUrl: TICKET_URL }])];
+
+      const claim = await createSupabaseFeedbackRepository().claimTicket('demo', storedRow.id);
+
+      expect(claim).toEqual({ status: 'created', url: TICKET_URL });
+      expect(received.map((request) => request.method)).toEqual(['PATCH', 'GET']);
+    });
+
+    it('reports a ticket another request is making, and a feedback that is missing', async () => {
+      responseBodies = ['[]', JSON.stringify([storedRow]), '[]', '[]'];
+      const repository = createSupabaseFeedbackRepository();
+
+      expect(await repository.claimTicket('demo', storedRow.id)).toEqual({ status: 'in_progress' });
+      expect(await repository.claimTicket('demo', storedRow.id)).toBeNull();
+    });
+
+    it('saves the link and ends the claim without touching the update time', async () => {
+      responseBodies = [JSON.stringify([{ ...storedRow, ticketUrl: TICKET_URL }])];
+
+      const feedback = await createSupabaseFeedbackRepository().saveTicketUrl('demo', storedRow.id, TICKET_URL);
+
+      expect(feedback?.ticketUrl).toBe(TICKET_URL);
+      expect(JSON.parse(received[0].body)).toEqual({ ticket_url: TICKET_URL, ticket_claimed_at: null });
+    });
+
+    it('releases only a claim that has not produced a ticket', async () => {
+      await createSupabaseFeedbackRepository().releaseTicket('demo', storedRow.id);
+
+      expect(received[0].url.searchParams.get('ticket_url')).toBe('is.null');
+      expect(JSON.parse(received[0].body)).toEqual({ ticket_claimed_at: null });
+    });
+
+    it('sends nothing for an identifier that is not a UUID', async () => {
+      const repository = createSupabaseFeedbackRepository();
+
+      expect(await repository.claimTicket('demo', 'not-a-uuid')).toBeNull();
+      expect(await repository.saveTicketUrl('demo', 'not-a-uuid', TICKET_URL)).toBeNull();
+      await repository.releaseTicket('demo', 'not-a-uuid');
+      expect(received).toHaveLength(0);
+    });
+
+    it('reads the ticket link from its own column', async () => {
+      responseBodies = [JSON.stringify([storedRow])];
+
+      await createSupabaseFeedbackRepository().find('demo', storedRow.id);
+
+      expect(received[0].url.searchParams.get('select')).toContain('ticketUrl:ticket_url');
+    });
   });
 
   it('treats a non-UUID identifier as missing without sending a failing SQL filter', async () => {

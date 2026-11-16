@@ -86,7 +86,7 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
             </AdminSection>
           ) : null}
 
-          <TicketDraftPanel key={feedback.id} detail={detail} />
+          <TicketDraftPanel key={feedback.id} detail={detail} projectKey={projectKey} />
         </div>
 
         <aside className="flex flex-col gap-4">

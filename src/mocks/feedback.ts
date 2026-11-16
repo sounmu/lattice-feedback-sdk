@@ -20,6 +20,7 @@ export const MOCK_FEEDBACKS: Feedback[] = [
     type: 'bug',
     status: 'open',
     duplicateOfId: null,
+    ticketUrl: null,
     reporter: { id: 'user_001', name: '테스트 사용자 A', email: 'tester-a@example.com' },
     page: createDemoPage('/orders', '주문 관리'),
     attachments: { comments: [], edits: [], flow: null },
@@ -34,6 +35,7 @@ export const MOCK_FEEDBACKS: Feedback[] = [
     type: 'question',
     status: 'in_progress',
     duplicateOfId: null,
+    ticketUrl: null,
     reporter: { id: 'user_002', name: '테스트 사용자 B' },
     page: createDemoPage('/inventory', '재고 현황'),
     attachments: {
@@ -62,6 +64,7 @@ export const MOCK_FEEDBACKS: Feedback[] = [
     type: 'improvement',
     status: 'resolved',
     duplicateOfId: null,
+    ticketUrl: null,
     reporter: { id: 'user_003', name: '테스트 사용자 C', email: 'tester-c@example.com' },
     page: createDemoPage('/settings/profile', '프로필 설정'),
     attachments: {
@@ -94,6 +97,7 @@ export const MOCK_FEEDBACKS: Feedback[] = [
     type: 'bug',
     status: 'open',
     duplicateOfId: null,
+    ticketUrl: null,
     reporter: { id: 'user_004', name: '테스트 사용자 D' },
     page: createDemoPage('/partners', '거래처 목록'),
     attachments: {

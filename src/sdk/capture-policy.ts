@@ -25,8 +25,8 @@ export function isCapturePageAllowed(policy: CapturePolicy | null): boolean {
 function isExcluded(element: Element): boolean {
   if (EXCLUDED_TAGS.has(element.localName) || EXCLUDED_ATTRIBUTES.some((name) => element.hasAttribute(name))) return true;
   // A password field switched to text by a "show" button still declares itself through autocomplete.
-  const autocomplete = (element.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/);
-  if (autocomplete.some((token) => PASSWORD_AUTOCOMPLETE_TOKENS.has(token))) return true;
+  const autocomplete = element.getAttribute('autocomplete');
+  if (autocomplete?.toLowerCase().split(/\s+/).some((token) => PASSWORD_AUTOCOMPLETE_TOKENS.has(token))) return true;
   return element.localName === 'input' && SECRET_INPUT_TYPES.has((element.getAttribute('type') ?? '').toLowerCase());
 }
 
@@ -45,9 +45,13 @@ function findSegment(element: Element): string | null {
   const parent = element.parentElement;
   const tag = element.localName;
   if (!parent || !TAG_NAME_PATTERN.test(tag)) return null;
+  // Read in place and only as far as needed: this runs for every ancestor on each pointer move, and a table
+  // body has hundreds of rows. Past the element itself only whether a second one of its type exists matters.
+  const siblings = parent.children;
   let position = 0;
   let total = 0;
-  for (const sibling of Array.from(parent.children)) {
+  for (let index = 0; index < siblings.length && (position === 0 || total < 2); index += 1) {
+    const sibling = siblings[index];
     if (sibling.localName !== tag || sibling.namespaceURI !== element.namespaceURI) continue;
     total += 1;
     if (sibling === element) position = total;
@@ -128,11 +132,15 @@ export function findCaptureTarget(eventTarget: EventTarget | null, policy: Captu
   };
 }
 
-/** Label of a Flow event on this element: the nearest configured target's id, otherwise its tag. Never text. */
-export function findFlowTargetLabel(eventTarget: EventTarget | null, policy: CapturePolicy | null): string | null {
+/**
+ * The target of a Flow event on this element, named by the nearest configured target's id, otherwise by its tag.
+ * Never text. The element is looked up once: this runs on every click and keystroke while a Flow records.
+ */
+export function findFlowTarget(eventTarget: EventTarget | null, policy: CapturePolicy | null): ElementTarget | null {
   const found = findCaptureTarget(eventTarget, policy);
   if (!found) {
     return null;
   }
-  return findConfiguredTarget(found.element, policy, true)?.id ?? getGenericTargetLabel(found.target.tagName);
+  const label = findConfiguredTarget(found.element, policy, true)?.id ?? getGenericTargetLabel(found.target.tagName);
+  return { ...found.target, feedbackId: label };
 }

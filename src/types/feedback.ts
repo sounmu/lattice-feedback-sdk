@@ -107,6 +107,8 @@ export interface Feedback {
   status: FeedbackStatus;
   /** The feedback this one repeats. Set exactly when status is 'duplicate'. */
   duplicateOfId: string | null;
+  /** Link to the ticket made from this feedback. Null until one is made. */
+  ticketUrl: string | null;
   reporter: FeedbackReporter;
   page: PageContext;
   attachments: FeedbackAttachments;

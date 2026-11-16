@@ -8,11 +8,13 @@ import type { Feedback } from '@/types/feedback';
 import type { ConversationCredentials } from '@/types/conversation';
 import { conversationMessagesSchema, reporterOrganizationSchema } from '@/lib/validation/conversation-schema';
 import { ConversationLimitError } from '@/lib/conversation';
+import { TICKET_CLAIM_TTL_MS } from '@/lib/ticket-limits';
+import type { TicketClaim } from '@/types/ticket';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const PAGE_SIZE = 100;
 const FEEDBACK_SELECT = [
-  'id', 'projectKey:project_key', 'message', 'type', 'status', 'duplicateOfId:duplicate_of', 'reporter', 'page',
+  'id', 'projectKey:project_key', 'message', 'type', 'status', 'duplicateOfId:duplicate_of', 'ticketUrl:ticket_url', 'reporter', 'page',
   'attachments', 'adminReply:admin_reply', 'createdAt:created_at', 'updatedAt:updated_at', 'messages',
 ].join(',');
 
@@ -34,6 +36,7 @@ const feedbackRowsSchema = z.array(
     reporter: createFeedbackInputSchema.shape.reporter.extend({ verifiedOrganization: reporterOrganizationSchema.optional() }),
     status: updateFeedbackInputSchema.shape.status.unwrap(),
     duplicateOfId: z.uuid().nullable(),
+    ticketUrl: z.string().max(2048).nullable(),
     adminReply: updateFeedbackInputSchema.shape.adminReply.unwrap(),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
@@ -99,7 +102,7 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
     }
   }
 
-  return {
+  const repository: FeedbackRepository = {
     async create(input, id, access) {
       const rows = await requestRows({}, {
         method: 'POST',
@@ -138,16 +141,16 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
       const items: Feedback[] = [];
       let cursor: Pick<Feedback, 'createdAt' | 'id'> | undefined;
       while (true) {
-        const cursorFilter: Record<string, string> = {};
-        if (cursor) {
-          cursorFilter.or = `(created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id}))`;
-        }
-        const rows = await requestRows({
-          project_key: `eq.${projectKey}`,
+        const parameters = {
           order: 'created_at.desc,id.desc',
           limit: String(PAGE_SIZE),
-          ...cursorFilter,
-        });
+        };
+        // A tuple comparison lets Postgres seek in the existing project/created/id index.
+        const rows = cursor
+          ? await requestRows(parameters, { method: 'POST', body: JSON.stringify({
+            p_project: projectKey, p_created_at: cursor.createdAt, p_id: cursor.id,
+          }) }, false, 'rpc/read_feedback_before')
+          : await requestRows({ ...parameters, project_key: `eq.${projectKey}` });
         items.push(...rows);
         if (rows.length === 0) {
           return items;
@@ -191,7 +194,51 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
       }, typeof input.duplicateOfId === 'string');
       return rows[0] ?? null;
     },
+
+    // One UPDATE with the conditions in its WHERE, so the database lets only one of two requests at once take it.
+    async claimTicket(projectKey, id): Promise<TicketClaim | null> {
+      if (!z.uuid().safeParse(id).success) {
+        return null;
+      }
+      const now = Date.now();
+      const claimed = await requestRows({
+        project_key: `eq.${projectKey}`,
+        id: `eq.${id}`,
+        ticket_url: 'is.null',
+        or: `(ticket_claimed_at.is.null,ticket_claimed_at.lt.${new Date(now - TICKET_CLAIM_TTL_MS).toISOString()})`,
+      }, { method: 'PATCH', body: JSON.stringify({ ticket_claimed_at: new Date(now).toISOString() }) });
+      if (claimed.length > 0) {
+        return { status: 'claimed' };
+      }
+      const current = await repository.find(projectKey, id);
+      if (!current) {
+        return null;
+      }
+      return current.ticketUrl === null ? { status: 'in_progress' } : { status: 'created', url: current.ticketUrl };
+    },
+
+    async saveTicketUrl(projectKey, id, url) {
+      if (!z.uuid().safeParse(id).success) {
+        return null;
+      }
+      const rows = await requestRows({ project_key: `eq.${projectKey}`, id: `eq.${id}` }, {
+        method: 'PATCH',
+        body: JSON.stringify({ ticket_url: url, ticket_claimed_at: null }),
+      });
+      return rows[0] ?? null;
+    },
+
+    async releaseTicket(projectKey, id) {
+      if (!z.uuid().safeParse(id).success) {
+        return;
+      }
+      await requestRows({ project_key: `eq.${projectKey}`, id: `eq.${id}`, ticket_url: 'is.null' }, {
+        method: 'PATCH',
+        body: JSON.stringify({ ticket_claimed_at: null }),
+      });
+    },
   };
+  return repository;
 }
 
 function getCredentialParameters(credentials: ConversationCredentials) {
