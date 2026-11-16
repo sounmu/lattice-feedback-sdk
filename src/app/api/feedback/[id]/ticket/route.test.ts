@@ -5,7 +5,7 @@ import { POST as createFeedback } from '@/app/api/feedback/route';
 import { getFeedbackRepository } from '@/lib/feedback-repository';
 import { resetRateLimit } from '@/lib/http/rate-limit';
 import { resetMemoryFeedbackStore } from '@/lib/memory-feedback-repository';
-import { MAX_TICKET_BODY_LENGTH, MAX_TICKET_REQUEST_BYTES, TICKET_CLAIM_TTL_MS } from '@/lib/ticket-limits';
+import { MAX_TICKET_BODY_LENGTH, MAX_TICKET_REQUEST_BYTES, MAX_TICKET_TITLE_LENGTH, TICKET_CLAIM_TTL_MS } from '@/lib/ticket-limits';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import type { ApiErrorResponse, CreateFeedbackResponse } from '@/types/feedback';
 import type { CreateTicketResponse } from '@/types/ticket';
@@ -144,12 +144,15 @@ describe('POST /api/feedback/[id]/ticket', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('accepts a body at the length limit', async () => {
+  it('accepts a title and body at their length limits, also in Korean where a character takes three bytes', async () => {
     const id = await createFeedbackId();
     stubNotion({ url: 'https://www.notion.so/t' });
 
     const response = await createTicket(
-      createTicketRequest(id, { authorization: ADMIN_AUTHORIZATION }, 'demo', { title: 't', body: 'x'.repeat(MAX_TICKET_BODY_LENGTH) }),
+      createTicketRequest(id, { authorization: ADMIN_AUTHORIZATION }, 'demo', {
+        title: '가'.repeat(MAX_TICKET_TITLE_LENGTH),
+        body: '가'.repeat(MAX_TICKET_BODY_LENGTH),
+      }),
       createContext(id),
     );
 
