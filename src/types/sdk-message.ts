@@ -14,6 +14,18 @@
  *   - event.source === the expected window (SDK: iframe.contentWindow, widget: window.parent), AND
  *   - the guard from '@/lib/sdk-protocol' passes (isWidgetToHostMessage / isHostToWidgetMessage).
  * Anything else is ignored silently.
+ *
+ * Large preview of a saved screen:
+ * 1. The widget creates a MessageChannel, queues 'preview:content' on one port and posts 'preview:open'
+ *    to the SDK with the other port as a transferable.
+ * 2. The SDK mounts a second panel with <iframe src="https://APP/widget/preview?...">. That iframe posts
+ *    'preview:ready' to window.parent; the SDK answers 'preview:connect', transferring the widget's port.
+ *    The SDK never reads from the port, so a saved screen goes from the widget to the preview directly
+ *    and does not pass through the host page a second time.
+ * 3. 'preview:close' (from the widget or the preview iframe) or the SDK itself ends the preview; the SDK
+ *    then tells the widget with 'preview:closed'.
+ * The same receiving rule applies to the preview iframe (it expects hostOrigin and window.parent). A port
+ * message carries no origin, so its content is checked by shape alone (isPreviewContentMessage).
  */
 import type { ElementTarget, FeedbackAttachments, FeedbackReporter, PageContext } from '@/types/feedback';
 import type { ScreenCapture, ScreenCaptureFailureReason } from '@/types/screen-snapshot';
@@ -61,13 +73,24 @@ export interface ScreenCaptureRequest {
 export type ScreenCapturedMessage = ProtocolMessage<'screen:captured', ScreenCapture & ScreenCaptureRequest>;
 export type ScreenCaptureFailedMessage = ProtocolMessage<'screen:capture-failed', ScreenCaptureRequest & { reason: ScreenCaptureFailureReason }>;
 
+// Each preview has an id, so a 'preview:closed' that arrives after the widget opened the next one is ignored.
+export interface PreviewRequest {
+  previewId: string;
+}
+/** Posted with exactly one MessagePort as a transferable. */
+export type PreviewOpenMessage = ProtocolMessage<'preview:open', PreviewRequest>;
+export type PreviewCloseMessage = ProtocolMessage<'preview:close', EmptyPayload>;
+/** Sent for every preview that ends, whoever closed it. */
+export type PreviewClosedMessage = ProtocolMessage<'preview:closed', PreviewRequest>;
+
 export type HostToWidgetMessage =
   | ProtocolMessage<'visibility:update', { isOpen: boolean }>
   | InitMessage
   | ReporterUpdateMessage
   | PageUpdateMessage
   | ScreenCapturedMessage
-  | ScreenCaptureFailedMessage;
+  | ScreenCaptureFailedMessage
+  | PreviewClosedMessage;
 
 export type ReadyMessage = ProtocolMessage<'ready', EmptyPayload>;
 export type CloseMessage = ProtocolMessage<'close', EmptyPayload>;
@@ -85,7 +108,22 @@ export type ScreenCaptureMessage = ProtocolMessage<'screen:capture', ScreenCaptu
 // After a Flow is attached, the widget asks for its replay; the SDK answers with 'screen:captured' once.
 export type FlowCaptureMessage = ProtocolMessage<'flow:capture', ScreenCaptureRequest>;
 
-export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage | ScreenCaptureMessage | FlowCaptureMessage;
+export type WidgetToHostMessage = ReadyMessage | CloseMessage | SubmittedMessage | ScreenCaptureMessage | FlowCaptureMessage |
+  PreviewOpenMessage | PreviewCloseMessage;
+
+export type PreviewReadyMessage = ProtocolMessage<'preview:ready', EmptyPayload>;
+export type PreviewToHostMessage = PreviewReadyMessage | PreviewCloseMessage;
+/** Posted to the preview iframe with the widget's MessagePort as a transferable. */
+export type PreviewConnectMessage = ProtocolMessage<'preview:connect', EmptyPayload>;
+
+/** What the preview shows: the names the widget gives the screen, and the screen as this browser captured it. */
+export interface PreviewContent {
+  title: string;
+  subtitle: string;
+  capture: ScreenCapture;
+}
+/** Sent over the MessagePort, from the widget to the preview iframe. */
+export type PreviewContentMessage = ProtocolMessage<'preview:content', PreviewContent>;
 
 export type HostToWidgetMessageType = HostToWidgetMessage['type'];
 export type WidgetToHostMessageType = WidgetToHostMessage['type'];

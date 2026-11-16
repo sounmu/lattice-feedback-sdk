@@ -6,7 +6,7 @@
 //
 // Sources: @astryxdesign/theme-neutral/dist/theme.css (the light and dark value of each token) and
 // @astryxdesign/core/dist/astryx.css (focus outline, control box, motion). Brand and shape overrides
-// match src/app/widget/widget.css; Astryx uses a scoped hover overlay rather than an accent-hover token.
+// match src/app/widget/widget.css; Astryx uses scoped hover and press overlays rather than accent-state tokens.
 
 /** The stack the widget sets on --font-family-body (src/app/widget/widget.css). No web font is loaded. */
 export const SDK_FONT_FAMILY = [
@@ -28,6 +28,8 @@ export const SDK_THEME = {
   accent: '#3b5bfd',
   /** Primary action's --color-overlay-hover override */
   accentHover: '#2f4ae0',
+  /** Primary action's --color-overlay-pressed override: one step darker than the hover */
+  accentPressed: '#2740c8',
   /** --color-on-accent */
   onAccent: '#ffffff',
   /** --color-background-popover */
@@ -46,6 +48,8 @@ export const SDK_THEME = {
   overlayHover: 'rgba(0, 0, 0, 0.05)',
   /** --color-overlay-pressed (#0000001a) */
   overlayPressed: 'rgba(0, 0, 0, 0.1)',
+  /** --color-overlay (#00000080): the dimmer between a modal layer and the page under it */
+  overlay: 'rgba(0, 0, 0, 0.5)',
   /** --color-info */
   info: '#0074e2',
   /** --color-on-info */
@@ -68,6 +72,8 @@ export const SDK_THEME_DARK = {
   accent: '#3b5bfd',
   /** Primary action's --color-overlay-hover override */
   accentHover: '#2f4ae0',
+  /** Primary action's --color-overlay-pressed override: one step darker than the hover */
+  accentPressed: '#2740c8',
   /** --color-on-accent */
   onAccent: '#ffffff',
   /** --color-text-primary */
@@ -112,6 +118,18 @@ export const SDK_TRANSITION = '125ms cubic-bezier(0.24, 1, 0.4, 1)';
 export const SDK_PRESSED_SCALE = 'scale(0.98)';
 
 /**
+ * Turns off the rectangle a mobile browser flashes over whatever a finger taps. It ignores the control's
+ * rounded shape, and every SDK control already shows its own pressed state.
+ */
+export const SDK_NO_TAP_HIGHLIGHT = '-webkit-tap-highlight-color: transparent';
+
+/**
+ * Wraps every :hover rule. A finger leaves :hover set on what it tapped until the next tap lands elsewhere,
+ * so hover styles apply only where the pointer can hover.
+ */
+export const SDK_HOVER_MEDIA = '@media (hover: hover)';
+
+/**
  * The box and label every SDK button shares: Astryx's large button, 44px so it is a touch target.
  * The colours are added where the button is used, because they depend on the surface under it.
  */
@@ -125,6 +143,7 @@ export const SDK_BUTTON_BASE = [
   `font: ${SDK_FONT.label}`,
   'white-space: nowrap',
   'cursor: pointer',
+  SDK_NO_TAP_HIGHLIGHT,
   `transition: background-color ${SDK_TRANSITION}, transform ${SDK_TRANSITION}`,
 ].join('; ');
 

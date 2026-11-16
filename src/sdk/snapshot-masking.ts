@@ -1,6 +1,8 @@
 import { AutomaticMasker, type TextMaskingContext } from '@/sdk/automatic-masking';
 import type { SnapshotNode, SnapshotStyleChange } from '@/sdk/snapshot-assets';
-import { findSelectorRanges, maskOutsideRanges, rewriteCssNames, scanCssSelectors, type AttributeSelector } from '@/sdk/css-selectors';
+import {
+  findSelectorRanges, isVerbatimWithoutReplacements, maskOutsideRanges, rewriteCssNames, scanCssSelectors, type AttributeSelector,
+} from '@/sdk/css-selectors';
 import { rewriteReferences } from '@/sdk/structural-references';
 
 // Displayed or submitted text. Names that other nodes point at are handled by structural-references instead.
@@ -69,6 +71,9 @@ export class SnapshotMasker {
   // The tokens handed out. A page name spelled like one of them gets a token of its own, or two nodes would share a name.
   private readonly issuedTokens = new Set<string>();
   private opaqueCount = 0;
+  // The names each stylesheet text of the tree being cleaned mentions. A text is read once, where its names are
+  // collected, and not again where it is rewritten. Empty outside node().
+  private readonly treeCssNames = new Map<string, ReadonlySet<string>>();
 
   constructor(
     readonly masker: AutomaticMasker,
@@ -156,7 +161,7 @@ export class SnapshotMasker {
     return maskOutsideRanges(value, findSelectorRanges(value, selectors), (gap) => this.masker.text(gap, context));
   }
 
-  private registerCss(cssText: string): void {
+  private registerCss(cssText: string): ReadonlySet<string> {
     const { names, dataSelectors } = scanCssSelectors(cssText);
     names.forEach((name) => {
       if (!this.opaqueNames.has(name) && !this.issuedTokens.has(name)) this.cssNames.add(name);
@@ -167,20 +172,36 @@ export class SnapshotMasker {
       this.knownSelectors.add(key);
       this.dataSelectors.set(selector.attribute, [...(this.dataSelectors.get(selector.attribute) ?? []), selector]);
     }
+    return names;
+  }
+
+  private hasToken(names: ReadonlySet<string>): boolean {
+    // A token is only ever issued together with the name it stands for.
+    if (this.opaqueNames.size === 0) return false;
+    for (const name of names) {
+      if (this.opaqueNames.has(name) || this.issuedTokens.has(name)) return true;
+    }
+    return false;
   }
 
   /** Stylesheet text from any route: names it mentions that already have a token are written with it, the rest stay. */
   css(cssText: string): string {
-    this.registerCss(cssText);
+    // Registering a text again adds nothing, so a text of the tree being cleaned is not read a second time.
+    const names = this.treeCssNames.get(cssText) ?? this.registerCss(cssText);
+    if (isVerbatimWithoutReplacements(cssText) && !this.hasToken(names)) return cssText;
     return rewriteCssNames(cssText, (name) => this.opaqueNames.get(name) ?? (this.issuedTokens.has(name) ? this.remapName(name) : undefined));
+  }
+
+  private collectCss(cssText: string): void {
+    if (!this.treeCssNames.has(cssText)) this.treeCssNames.set(cssText, this.registerCss(cssText));
   }
 
   private collectCssNames(node: SnapshotNode): void {
     const serialized = node.attributes?._cssText;
-    if (typeof serialized === 'string') this.registerCss(serialized);
+    if (typeof serialized === 'string') this.collectCss(serialized);
     if (node.tagName === 'style') {
       node.childNodes?.forEach((child) => {
-        if (typeof child.textContent === 'string') this.registerCss(child.textContent);
+        if (typeof child.textContent === 'string') this.collectCss(child.textContent);
       });
     }
     node.childNodes?.forEach((child) => this.collectCssNames(child));
@@ -196,6 +217,7 @@ export class SnapshotMasker {
   node(node: SnapshotNode, parentId?: number): void {
     this.collectCssNames(node);
     this.visit(node, parentId);
+    this.treeCssNames.clear();
   }
 
   private visit(node: SnapshotNode, parentId?: number): void {

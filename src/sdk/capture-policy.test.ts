@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { findCapturePolicy, isStructuralSelector, type CapturePolicy } from '@/lib/capture-policy';
-import { findCaptureTarget, findFlowTargetLabel, isCapturePageAllowed } from '@/sdk/capture-policy';
+import { findCaptureTarget, findFlowTarget, isCapturePageAllowed } from '@/sdk/capture-policy';
 
 class FakeElement {
   parentElement: FakeElement | null = null;
@@ -36,7 +36,8 @@ class FakeHtmlElement extends FakeElement {}
 const POLICY: CapturePolicy = { allowedPaths: ['/contracts'], targets: [{ id: 'register-contract', selector: 'main button' }] };
 const html = (tag: string, attributes?: Record<string, string>) => new FakeHtmlElement(tag, attributes);
 const find = (element: FakeElement, policy: CapturePolicy | null) => findCaptureTarget(element as unknown as EventTarget, policy);
-const label = (element: FakeElement, policy: CapturePolicy | null) => findFlowTargetLabel(element as unknown as EventTarget, policy);
+const flowTarget = (element: FakeElement, policy: CapturePolicy | null) => findFlowTarget(element as unknown as EventTarget, policy);
+const label = (element: FakeElement, policy: CapturePolicy | null) => flowTarget(element, policy)?.feedbackId ?? null;
 let body: FakeHtmlElement;
 let queryAll: ReturnType<typeof vi.fn>;
 
@@ -171,7 +172,9 @@ describe('generic element selection', () => {
     const button = body.add(html('button'));
     button.matched = ['main button'];
 
-    expect(label(button.add(html('span')), POLICY)).toBe('register-contract');
+    expect(flowTarget(button.add(html('span')), POLICY)).toMatchObject({
+      selector: 'body > button > span', tagName: 'span', feedbackId: 'register-contract',
+    });
     expect(label(body.add(html('div')), POLICY)).toBe('div');
     expect(label(body.add(html('x-date-picker')), null)).toBe('element');
     expect(label(body.add(html('input', { type: 'password' })), null)).toBeNull();

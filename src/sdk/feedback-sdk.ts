@@ -1,15 +1,13 @@
 import { createHostToWidgetMessage, isWidgetToHostMessage } from '@/lib/sdk-protocol';
 import { createCaptureUpdate, isCaptureCommand } from '@/lib/capture-protocol';
 import { findCapturePolicy, type CapturePolicy } from '@/lib/capture-policy';
-import { CapturePageNotAllowedError } from '@/sdk/capture-guard';
 import { isCapturePageAllowed } from '@/sdk/capture-policy';
-import { createCaptureController } from '@/sdk/capture-controller';
+import { createLazyCapture, type LazyCapture } from '@/sdk/lazy-capture';
 import { createPendingStartGate } from '@/sdk/pending-start';
 import { trackHistory } from '@/sdk/history-tracking';
 import { copyReporter, isFeedbackReporter } from '@/sdk/reporter';
 import { getPageContext } from '@/sdk/page-context';
-import { captureRecording, captureScreen } from '@/sdk/screen-capture';
-import { configureAutomaticMasking, onStaticIndexSettled, prepareStaticTextIndex, warmStaticTextIndex } from '@/sdk/static-text-index';
+import { createRuntimeLoader, type CaptureRuntime } from '@/sdk/runtime-loader';
 import {
   HOST_ELEMENT_STYLE, LAUNCHER_CLOSE_ICON_CLASS_NAME, LAUNCHER_ICON_CLASS_NAME, LAUNCHER_LABEL_CLASS_NAME, PANEL_OPEN_CLASS_NAME,
   SDK_STYLES,
@@ -52,14 +50,12 @@ export class FeedbackSdk {
   private isDestroyed = false;
   private stopHistoryTracking: (() => void) | null = null;
   private capturePolicy: CapturePolicy | null = null;
-  private captureController: ReturnType<typeof createCaptureController> | null = null;
+  private captureController: LazyCapture | null = null;
   private pendingResizeFrame: number | null = null;
   // Each save serializes the page as soon as it is asked, so a save asked during another keeps its own moment.
   private activeScreenCaptures = 0;
   // Starts waiting for the static text index; close, cancel, reset and submit make them stale.
   private readonly pendingStarts = createPendingStartGate();
-  // The page title is classified against the index, so it is sent again once the index has finished.
-  private stopWatchingIndex: (() => void) | null = null;
 
   constructor(appOrigin: string) {
     this.appOrigin = appOrigin;
@@ -83,8 +79,6 @@ export class FeedbackSdk {
     this.capturePolicy = options.capturePolicy === undefined
       ? null
       : findCapturePolicy(options.capturePolicy) ?? { allowedPaths: [], targets: [] };
-    configureAutomaticMasking(this.capturePolicy?.automaticMasking);
-    this.stopWatchingIndex = onStaticIndexSettled(() => this.updatePageContext());
     window.addEventListener('message', this.handleMessage);
     this.stopHistoryTracking = trackHistory(this.handleNavigation);
     if (document.body) {
@@ -118,12 +112,15 @@ export class FeedbackSdk {
     this.launcherButton.setAttribute('aria-expanded', 'true');
     this.isPanelOpen = true;
     this.postToWidget(createHostToWidgetMessage('visibility:update', { isOpen: true }));
-    warmStaticTextIndex();
     // Keyboard focus follows the panel in, so the next Tab lands inside it instead of back on the page.
     this.iframeElement?.focus({ preventScroll: true });
     // The viewport may have changed since the iframe was created, so refresh on every open.
     this.updatePageContext();
     this.captureController?.setPanelVisible(true);
+    // The capture tools are loaded once the widget is ready, so they do not compete with it for the network.
+    if (this.isWidgetReady) {
+      this.captureController?.warm();
+    }
     window.addEventListener('resize', this.handleResize);
   }
 
@@ -140,6 +137,8 @@ export class FeedbackSdk {
     this.panelElement.classList.remove(PANEL_OPEN_CLASS_NAME);
     this.launcherButton.setAttribute('aria-expanded', 'false');
     this.isPanelOpen = false;
+    // A preview belongs to a button in the widget, so it goes when the widget does.
+    this.captureController?.previewPanel?.close();
     this.postToWidget(createHostToWidgetMessage('visibility:update', { isOpen: false }));
     this.stopResizeTracking();
     this.captureController?.setPanelVisible(false);
@@ -147,8 +146,6 @@ export class FeedbackSdk {
 
   destroy(): void {
     this.pendingStarts.invalidate();
-    this.stopWatchingIndex?.();
-    this.stopWatchingIndex = null;
     window.removeEventListener('message', this.handleMessage);
     document.removeEventListener('DOMContentLoaded', this.handleDomContentLoaded);
     this.stopResizeTracking();
@@ -202,15 +199,29 @@ export class FeedbackSdk {
 
     this.hostElement = hostElement;
     this.panelElement = panelElement;
-    this.captureController = createCaptureController({
+    this.captureController = createLazyCapture({
       projectKey, policy: this.capturePolicy, root: shadowRoot, sdkSelector: HOST_ELEMENT_TAG_NAME,
+      widgetPanel: panelElement, appOrigin: this.appOrigin, loadRuntime: createRuntimeLoader(this.appOrigin),
       onUpdate: (state) => {
         if (this.isWidgetReady) this.postToWidget(createCaptureUpdate(state));
       },
       onShowWidget: () => this.open(),
       onHideWidget: () => this.hideForCapture(),
+      onPreviewClose: (previewId) => this.handlePreviewClose(previewId, shadowRoot),
+      onTitleChange: () => this.updatePageContext(),
     });
     this.launcherButton = launcherButton;
+  }
+
+  private handlePreviewClose(previewId: string, root: ShadowRoot): void {
+    this.postToWidget(createHostToWidgetMessage('preview:closed', { previewId }));
+    // Keyboard focus returns to the widget, which puts it back on the button that opened the preview.
+    // A widget that closed the preview itself still has the focus: focusing its iframe again would take
+    // the focus off the control it is on.
+    const iframeElement = this.iframeElement;
+    if (this.isPanelOpen && iframeElement && root.activeElement !== iframeElement) {
+      iframeElement.focus({ preventScroll: true });
+    }
   }
 
   private ensureIframe(): void {
@@ -236,17 +247,18 @@ export class FeedbackSdk {
   }
 
   private sendInit(): void {
-    if (this.projectKey === null) {
+    const { projectKey, captureController } = this;
+    if (projectKey === null || !captureController) {
       return;
     }
     this.postToWidget(
       createHostToWidgetMessage('init', {
-        projectKey: this.projectKey,
+        projectKey,
         reporter: this.reporter,
-        page: getPageContext(),
+        page: getPageContext(captureController.maskTitle),
       }),
     );
-    this.captureController?.sync();
+    captureController.sync();
     this.postToWidget(createHostToWidgetMessage('visibility:update', { isOpen: this.isPanelOpen }));
   }
 
@@ -292,15 +304,17 @@ export class FeedbackSdk {
   };
 
   private updatePageContext(): void {
-    if (this.isDestroyed || !this.isWidgetReady) {
+    const { captureController } = this;
+    if (this.isDestroyed || !this.isWidgetReady || !captureController) {
       return;
     }
-    this.postToWidget(createHostToWidgetMessage('page:update', { page: getPageContext() }));
+    this.postToWidget(createHostToWidgetMessage('page:update', { page: getPageContext(captureController.maskTitle) }));
   }
 
   // Saving is allowed on any page with the SDK unless the customer's policy restricts the paths.
   private async saveScreen(requestId: string): Promise<void> {
-    if (this.activeScreenCaptures >= MAX_CONCURRENT_SCREEN_CAPTURES) {
+    const { captureController } = this;
+    if (!captureController || this.activeScreenCaptures >= MAX_CONCURRENT_SCREEN_CAPTURES) {
       this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
       return;
     }
@@ -309,16 +323,23 @@ export class FeedbackSdk {
       return;
     }
     this.activeScreenCaptures += 1;
+    // The first save may wait for the tools to load. The screen asked for is the page that was open then.
+    const pathname = window.location.pathname;
+    let runtime: CaptureRuntime | null = null;
     try {
-      const capture = await captureScreen(HOST_ELEMENT_TAG_NAME, {
-        comments: this.captureController?.getCommentPinSources() ?? [],
-        edits: this.captureController?.getEditMoveSources() ?? [],
+      runtime = await captureController.load();
+      if (window.location.pathname !== pathname) {
+        throw new runtime.CapturePageChangedError();
+      }
+      const capture = await runtime.captureScreen(HOST_ELEMENT_TAG_NAME, {
+        comments: captureController.getCommentPinSources(),
+        edits: captureController.getEditMoveSources(),
       }, () => isCapturePageAllowed(this.capturePolicy));
       this.updatePageContext();
       this.postToWidget(createHostToWidgetMessage('screen:captured', { ...capture, requestId }));
     } catch (error) {
       console.warn(`${LOG_PREFIX} Saving the screen failed.`, error);
-      const reason = error instanceof CapturePageNotAllowedError ? 'page_not_allowed' : 'capture_failed';
+      const reason = runtime && error instanceof runtime.CapturePageNotAllowedError ? 'page_not_allowed' : 'capture_failed';
       this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason }));
     } finally {
       this.activeScreenCaptures -= 1;
@@ -326,13 +347,16 @@ export class FeedbackSdk {
   }
 
   private async saveFlowReplay(requestId: string): Promise<void> {
+    const { captureController } = this;
     try {
-      const replay = await this.captureController?.takeFlowReplay();
-      if (!replay) {
+      const replay = await captureController?.takeFlowReplay();
+      if (!captureController || !replay) {
         this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
         return;
       }
-      this.postToWidget(createHostToWidgetMessage('screen:captured', { ...(await captureRecording(replay, HOST_ELEMENT_TAG_NAME)), requestId }));
+      // A replay exists only once the tools are loaded, so this does not wait.
+      const runtime = await captureController.load();
+      this.postToWidget(createHostToWidgetMessage('screen:captured', { ...(await runtime.captureRecording(replay, HOST_ELEMENT_TAG_NAME)), requestId }));
     } catch (error) {
       console.warn(`${LOG_PREFIX} Saving the Flow replay failed.`, error);
       this.postToWidget(createHostToWidgetMessage('screen:capture-failed', { requestId, reason: 'capture_failed' }));
@@ -343,19 +367,27 @@ export class FeedbackSdk {
     if (event.origin !== this.appOrigin) {
       return;
     }
+    const { captureController } = this;
+    if (captureController?.previewPanel?.handleMessage(event)) {
+      return;
+    }
     if (!this.iframeElement || event.source !== this.iframeElement.contentWindow) {
       return;
     }
     const message: unknown = event.data;
     if (isCaptureCommand(message)) {
-      if (message.type === 'capture:start') {
+      if (message.type === 'capture:start' && captureController) {
+        // A capture starts once its tools are loaded and the static text index is ready.
         const isCurrent = this.pendingStarts.begin(message.payload.mode !== 'flow');
-        void prepareStaticTextIndex().then(() => {
-          if (isCurrent() && !this.isDestroyed) this.captureController?.handleCommand(message);
+        void captureController.load().then((runtime) => runtime.prepareStaticTextIndex()).then(() => {
+          if (isCurrent() && !this.isDestroyed) captureController.handleCommand(message);
+        }, (error: unknown) => {
+          console.warn(`${LOG_PREFIX} The capture tools could not be loaded.`, error);
+          if (isCurrent()) captureController.reportUnavailable();
         });
       } else {
         if (message.type === 'capture:cancel' || message.type === 'draft:reset') this.pendingStarts.invalidate();
-        this.captureController?.handleCommand(message);
+        captureController?.handleCommand(message);
       }
       return;
     }
@@ -366,19 +398,37 @@ export class FeedbackSdk {
       case 'ready':
         this.isWidgetReady = true;
         this.sendInit();
+        if (this.isPanelOpen) {
+          captureController?.warm();
+        }
         break;
       case 'close':
         this.close();
         break;
       case 'submitted':
         this.pendingStarts.invalidate();
-        this.captureController?.reset();
+        captureController?.reset();
         break;
       case 'screen:capture':
         void this.saveScreen(message.payload.requestId);
         break;
       case 'flow:capture':
         void this.saveFlowReplay(message.payload.requestId);
+        break;
+      case 'preview:open': {
+        const [port] = event.ports;
+        const previewPanel = captureController?.previewPanel;
+        if (port && event.ports.length === 1 && this.isPanelOpen && previewPanel) {
+          previewPanel.open(message.payload.previewId, port);
+        } else {
+          // The request cannot be met: the widget is told, so its button does not stay pressed.
+          event.ports.forEach((unusedPort) => unusedPort.close());
+          this.postToWidget(createHostToWidgetMessage('preview:closed', { previewId: message.payload.previewId }));
+        }
+        break;
+      }
+      case 'preview:close':
+        captureController?.previewPanel?.close();
         break;
       default: {
         const unhandledMessage: never = message;

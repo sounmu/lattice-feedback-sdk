@@ -44,10 +44,10 @@ vi.mock('@rrweb/record', () => ({
     },
   ),
 }));
+vi.mock('@/sdk/css-image-usage', () => ({ findUsedCssImageUrls: () => new Set(usedNow.urls) }));
 vi.mock('@/sdk/screen-capture', () => ({
   BLOCKED_SELECTOR: '[data-lattice-block]',
   MASKED_SELECTOR: '[data-lattice-mask]',
-  findUsedCssImageUrls: () => new Set(usedNow.urls),
   findLoadedFontFamilies: () => new Set(fontsNow.families),
 }));
 vi.mock('@/sdk/flow-replay-session', () => ({

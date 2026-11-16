@@ -10,5 +10,6 @@ it('writes a #rrggbb token as rgba at the given opacity', () => {
 it.each([SDK_THEME, SDK_THEME_DARK])('uses the brand primary palette on SDK surfaces', (theme) => {
   expect(theme.accent).toBe('#3b5bfd');
   expect(theme.accentHover).toBe('#2f4ae0');
+  expect(theme.accentPressed).toBe('#2740c8');
   expect(theme.onAccent).toBe('#ffffff');
 });

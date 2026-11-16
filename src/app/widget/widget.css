@@ -20,8 +20,11 @@
   --font-family-body: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
     'Segoe UI', 'Malgun Gothic', Roboto, 'Noto Sans KR', Helvetica, Arial, sans-serif;
   --font-family-heading: var(--font-family-body);
-  /* Large controls are the widget's touch targets: 44px instead of the theme's 36px. */
-  --size-element-lg: 2.75rem;
+  /* Large controls are the widget's touch targets: 44px instead of the theme's 36px. A pill, such as a tab
+     or a feedback type, is drawn 8px shorter and keeps the full 44px as its press area. */
+  --widget-target-size: 2.75rem;
+  --widget-pill-size: calc(var(--widget-target-size) - var(--spacing-2));
+  --size-element-lg: var(--widget-target-size);
   /* Shape, after the messenger the widget is modelled on: rounder controls and cards than the theme's,
      and 16px chat bubbles whose grouped corner tightens to the inner radius. src/sdk/theme-tokens.ts
      carries the same values for the SDK's own UI on the host page. */
@@ -32,15 +35,12 @@
 }
 
 /* Astryx paints hover/press with shared overlays, rather than accent-state tokens.
-   Scope the opaque brand hover to primary actions so neutral controls stay neutral. */
+   Scope the opaque brand hover to primary actions so neutral controls stay neutral. A press is one more
+   step darker: the theme's translucent press overlay came out lighter than the opaque hover.
+   src/sdk/theme-tokens.ts carries the same two colours for the SDK's primary buttons. */
 [data-astryx-theme='neutral'] .astryx-button[data-variant='primary'] {
   --color-overlay-hover: #2f4ae0;
-}
-
-/* The selected segment uses surface/text tokens instead of accent tokens. */
-[data-astryx-theme='neutral'] .astryx-segmented-control-item[data-selected='selected'] {
-  --color-background-surface: var(--color-accent-muted);
-  --color-text-primary: var(--color-text-accent);
+  --color-overlay-pressed: #2740c8;
 }
 
 .widget-root {
@@ -72,8 +72,12 @@
   word-break: keep-all;
 }
 
+/* A tooltip stays clear of the focus ring of the control it names. The theme's 4px offset put it on the
+   ring's outer edge, which reaches 5px out. The browser moves this margin to the other side when the
+   tooltip flips below its control. */
 [data-astryx-theme='neutral'] .astryx-tooltip {
   overflow-wrap: anywhere;
+  margin-block-end: calc(var(--focus-outline-offset) + var(--focus-outline-width) + var(--spacing-0-5));
 }
 
 /* Typed text wraps plainly, so earlier lines do not move while the user is writing. */
@@ -89,33 +93,47 @@
 }
 
 /* The tabs sit under the header as two pills. The chosen one is a wash with accent ink, like the chosen
-   feedback type, in place of the theme's underline. A pill is 8px shorter than its 44px press area. */
+   feedback type, in place of the theme's underline. Astryx sizes a tab and the hover layer inside it from
+   the large-control size, so inside the bar that size is the pill's. The bar itself stays 44px tall: its
+   padding and its divider make up the difference. */
 .widget-root .astryx-tab-list {
+  --size-element-lg: var(--widget-pill-size);
   gap: var(--spacing-1);
-  padding: var(--spacing-1) var(--spacing-3) var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-3) calc(var(--spacing-1) - var(--border-width));
 }
 
-.widget-root .astryx-tab-strip {
-  padding-block-end: 0;
-}
-
-.widget-root .astryx-tab {
-  min-block-size: calc(var(--size-element-lg) - var(--spacing-2));
-}
-
+/* A tab takes a press anywhere in the bar's height, 4px above and below its pill. */
 .widget-root .astryx-tab::after {
   content: '';
   position: absolute;
   inset: calc(var(--spacing-1) * -1) 0;
 }
 
+/* The chosen tab is already open: pointing at it or pressing it does nothing, so it shows no state change. */
 .widget-root .astryx-tab[data-selected='selected'] {
   --color-text-primary: var(--color-text-accent);
+  --color-overlay-hover: transparent;
+  --color-overlay-pressed: transparent;
   background-color: var(--color-accent-muted);
 }
 
 .widget-root .astryx-tab-indicator {
   display: none;
+}
+
+/* A conversation in the list is a row to press. The list clips what is drawn outside it, which cut the
+   sides off a row's focus ring, so the ring is drawn just inside the row. */
+.widget-root .astryx-list-item {
+  outline-offset: calc(var(--focus-outline-width) * -1);
+}
+
+/* A message's time is a tab stop: focusing it opens a card with the full date. It shows the widget's focus
+   ring in place of the browser's, drawn close to the small text so it stays clear of that card, which
+   opens 4px above the time. */
+.widget-root .astryx-timestamp time:focus-visible {
+  border-radius: var(--radius-inner);
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: var(--border-width);
 }
 
 /* The reporter's own messages are accent bubbles. The theme paints both sides neutral. */
@@ -165,8 +183,8 @@
 .widget-composer .astryx-button {
   position: relative;
   flex-shrink: 0;
-  inline-size: calc(var(--size-element-lg) - var(--spacing-2));
-  block-size: calc(var(--size-element-lg) - var(--spacing-2));
+  inline-size: var(--widget-pill-size);
+  block-size: var(--widget-pill-size);
   min-inline-size: 0;
   min-block-size: 0;
   margin: var(--spacing-1);
@@ -179,9 +197,243 @@
   inset: calc(var(--spacing-1) * -1);
 }
 
+/* A send button that cannot send yet is dimmed through its own colours, half way to the surface behind it.
+   The opacity Astryx puts on a disabled button would fade its focus ring along with it. */
+.widget-composer .astryx-button[aria-disabled='true'] {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-background-muted));
+  color: color-mix(in srgb, var(--color-on-accent) 50%, var(--color-background-muted));
+}
+
+/* A dialog's title takes focus when the dialog opens, so a screen reader starts with its name. It is not
+   a control and shows no ring; the next Tab lands on the first control, which does. */
+.widget-dialog-title:focus {
+  outline: none;
+}
+
+/* The large preview is its own document in a second panel the SDK opens. It draws the saved screen with
+   the widget's controls, in one column: playback, zoom, the screen, then what was marked on it. */
+.widget-replay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+/* A saved screen shown at its captured size can be wider than the preview. Its frame then scrolls, and
+   ScreenReplay makes it a keyboard stop so the arrow keys can scroll it. It is the one thing in the
+   preview that takes focus without being a control of the widget. It shows the widget's focus ring just
+   inside its edge, where the scrolling body cannot clip it. */
+.widget-replay-frame {
+  inline-size: 100%;
+  overflow: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-container);
+  background-color: var(--color-background-muted);
+}
+
+.widget-replay-frame:focus-visible {
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: calc(var(--focus-outline-width) * -1);
+}
+
+/* A screen narrower than its frame sits in the middle of it. */
+.widget-replay-frame > div {
+  margin-inline: auto;
+}
+
+/* Playback sits on one row where there is room: play and restart, the step pager, then the position.
+   On a phone the position wraps onto its own row, and the pager takes what the first row has left. */
+.widget-replay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2) var(--spacing-3);
+}
+
+.widget-replay-pager {
+  display: flex;
+  flex: 1 1 12.5rem;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-inline-size: 0;
+  max-inline-size: 16rem;
+}
+
+.widget-replay-position {
+  display: flex;
+  flex: 1 1 14rem;
+  align-items: center;
+  gap: var(--spacing-3);
+  min-inline-size: 0;
+  padding-inline: var(--spacing-2);
+}
+
+/* A step's name changes length as the replay moves. It fills the room between the two step buttons, so
+   they stay where they are. */
+.widget-replay-step {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  text-align: center;
+}
+
+/* The saved screen answers a mouse wheel only, so the hint is for pointers that have one. */
+@media not ((hover: hover) and (pointer: fine)) {
+  .widget-wheel-hint {
+    display: none;
+  }
+}
+
+/* Marks over a saved screen look like the ones the SDK draws on the live page: the theme's info colour,
+   which keeps page annotations apart from the widget's primary actions. src/sdk/comment-overlay.ts and
+   src/sdk/element-selection.ts carry the same shapes for the host page. */
+.widget-mark-target {
+  border: 2px solid color-mix(in srgb, var(--color-info) 70%, transparent);
+  border-radius: var(--radius-inner);
+}
+
+.widget-mark-target-selected {
+  border-color: var(--color-info);
+  background-color: color-mix(in srgb, var(--color-info) 12%, transparent);
+}
+
+/* A pin is drawn 28px wide and takes a press 44px wide, like a pin on the live page. */
+.widget-pin {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  border: 2px solid var(--color-background-surface);
+  border-radius: var(--radius-full);
+  background-color: var(--color-info);
+  color: var(--color-on-info);
+  font-size: var(--text-supporting-size);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  box-shadow: var(--shadow-med);
+  cursor: pointer;
+  transition: scale var(--duration-fast) var(--ease-standard);
+}
+
+.widget-pin::after {
+  content: '';
+  position: absolute;
+  inset: calc(var(--spacing-2) * -1 - 2px);
+}
+
+@media (hover: hover) {
+  .widget-pin:hover {
+    background-image: linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover));
+    scale: 1.1;
+  }
+}
+
+.widget-pin:active {
+  background-image: linear-gradient(var(--color-overlay-pressed), var(--color-overlay-pressed));
+  scale: 0.94;
+}
+
+.widget-pin:focus-visible {
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-pin {
+    transition: none;
+  }
+
+  .widget-pin:hover,
+  .widget-pin:active {
+    scale: none;
+  }
+}
+
+/* The comment of a chosen pin opens beside it as a popover. Its width is the one the overlay places it by. */
+.widget-pin-note {
+  inline-size: 16rem;
+  margin-block-start: var(--spacing-1);
+  padding: var(--spacing-3);
+  border-radius: var(--radius-container);
+  background-color: var(--color-background-popover);
+  color: var(--color-text-primary);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+  box-shadow: 0 0 0 var(--border-width) var(--color-border), var(--shadow-high);
+}
+
+.widget-pin-note-label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-supporting-size);
+  line-height: var(--text-supporting-leading);
+}
+
+.widget-pin-note-comment {
+  margin-block-start: var(--spacing-0-5);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* An edit keeps both positions outlined: dashed where the element was, solid where it is proposed. The
+   position the element is drawn at carries the wash; a vacated original goes neutral. */
+.widget-move-outline {
+  border: 2px solid var(--color-info);
+  border-radius: var(--radius-inner);
+}
+
+.widget-move-original {
+  border-style: dashed;
+  background-color: color-mix(in srgb, var(--color-info) 12%, transparent);
+}
+
+.widget-move-vacated {
+  border-style: dashed;
+  border-color: var(--color-text-secondary);
+}
+
+.widget-move-proposed {
+  border-color: color-mix(in srgb, var(--color-info) 70%, transparent);
+}
+
+.widget-move-shown {
+  border-color: var(--color-info);
+  background-color: color-mix(in srgb, var(--color-info) 12%, transparent);
+}
+
+.widget-move-label {
+  padding: var(--spacing-0-5) var(--spacing-1-5);
+  border-radius: var(--radius-inner);
+  background-color: var(--color-info);
+  color: var(--color-on-info);
+  font-size: var(--text-supporting-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--text-supporting-leading);
+  white-space: nowrap;
+  box-shadow: var(--shadow-med);
+}
+
+/* The number a comment or edit has on the screen, repeated in front of its row in the lists below it. */
+.widget-mark-number {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-info);
+  color: var(--color-on-info);
+  font-size: var(--text-supporting-size);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
 /* A capture tool is an icon over its name, so four fit side by side where a row of text buttons would
-   truncate. Its usage count sits beside the icon. A name too long for a narrow panel wraps, and the
-   icons still line up because each tool starts at the top of its cell. */
+   truncate. A name too long for a narrow panel wraps, and the icons still line up because each tool
+   starts at the top of its cell. */
 .widget-root .widget-tool {
   align-items: flex-start;
   block-size: auto;
@@ -189,17 +441,25 @@
   padding: var(--spacing-2) var(--spacing-1);
 }
 
+/* Astryx wraps a button's content in a box that hugs it and clips it. A tool's content spans its cell
+   instead and may draw outside its own box, so the usage count can hang beside the icon. */
+.widget-root .widget-tool :has(> .widget-tool-content) {
+  inline-size: 100%;
+  overflow: visible;
+}
+
 .widget-tool-content {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-0-5);
+  inline-size: 100%;
 }
 
 .widget-tool-glyph {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: var(--spacing-1);
 }
 
 .widget-tool-usage,
@@ -208,9 +468,29 @@
   line-height: var(--text-supporting-leading);
 }
 
+/* The count hangs beside the icon without taking part in its centring, so the icon does not move when a
+   count appears. It may reach the cell's edge, less a hairline: the gap it keeps from the icon equals the
+   cell's own inline padding, so the two cancel out. Where "count/limit" is wider than that, the limit
+   wraps onto a second line, which is cut off, and the count shows alone. */
 .widget-tool-usage {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: calc(100% + var(--spacing-1));
+  display: flex;
+  flex-wrap: wrap;
+  inline-size: max-content;
+  max-inline-size: calc((100cqi - 100%) / 2 - var(--border-width));
+  block-size: 1lh;
+  overflow: hidden;
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
+  translate: 0 -50%;
+  white-space: nowrap;
+}
+
+/* Digits that take room without showing: they pad a count to the width of the widest one in the row. */
+.widget-tool-usage-filler {
+  visibility: hidden;
 }
 
 .widget-tool-label {
@@ -218,35 +498,69 @@
   white-space: normal;
 }
 
-/* The feedback type reads as quick replies under the greeting: separate outlined chips, the chosen one a
-   wash, in place of one filled track. The track keeps its block padding, so a chip is still 8px shorter
-   than the 44px the track gives a finger. */
-.widget-root .astryx-segmented-control {
+/* The feedback type reads as quick replies under the greeting: separate outlined chips that wrap onto a
+   second row on a narrow panel, the chosen one a wash with accent ink. A chip is drawn 8px shorter than
+   the 44px that take its press: 4px above and below it, which the row's padding and the gap between rows
+   leave free. */
+.widget-chips {
+  display: flex;
   flex-wrap: wrap;
   gap: var(--spacing-2);
-  padding-inline: 0;
-  background-color: transparent;
+  padding-block: var(--spacing-1);
 }
 
-.widget-root .astryx-segmented-control-item {
+.widget-chip {
+  position: relative;
+  min-block-size: var(--widget-pill-size);
+  padding-inline: var(--spacing-3);
   border: var(--border-width) solid var(--color-border-emphasized);
   border-radius: var(--radius-element);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-label-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--text-label-leading);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
-.widget-root .astryx-segmented-control-item[data-selected='selected'] {
+/* The press area is measured from inside the chip's border, so it reaches past the border as well. */
+.widget-chip::after {
+  content: '';
+  position: absolute;
+  inset: calc((var(--spacing-1) + var(--border-width)) * -1) 0;
+}
+
+.widget-chip[aria-checked='true'] {
   border-color: transparent;
+  background-color: var(--color-accent-muted);
+  color: var(--color-text-accent);
+  font-weight: var(--font-weight-semibold);
 }
 
-/* Under a finger the track itself takes the tap for the chip below it. Under a mouse this extends the
-   chip's press area to the track's full height. */
-@media (pointer: fine) {
-  .widget-root .astryx-segmented-control-item {
-    position: relative;
-  }
+.widget-chip:focus-visible {
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset);
+}
 
-  .widget-root .astryx-segmented-control-item::after {
-    content: '';
-    position: absolute;
-    inset: calc(var(--spacing-1) * -1) 0;
+/* Only a chip that would change the choice answers the pointer: the chosen one is already in effect. */
+@media (hover: hover) {
+  .widget-chip[aria-checked='false']:not([aria-disabled='true']):hover {
+    background-color: var(--color-overlay-hover);
   }
+}
+
+.widget-chip[aria-checked='false']:not([aria-disabled='true']):active {
+  background-color: var(--color-overlay-pressed);
+}
+
+/* While the feedback is being sent the choice is fixed. The chips dim through their ink, which leaves a
+   focus ring at full strength. */
+.widget-chip[aria-disabled='true'] {
+  color: var(--color-text-disabled);
+  cursor: default;
 }

@@ -100,32 +100,47 @@ export function findStartBlocker(mode: CaptureMode, attachments: Attachments, { 
   return null;
 }
 
-function getModeUsage(mode: CaptureMode, attachments: Attachments): string {
+/** How many attachments of a tool the draft holds, out of how many it may hold. */
+interface ToolUsage {
+  count: number;
+  limit: number;
+}
+
+function getModeUsage(mode: CaptureMode, attachments: Attachments): ToolUsage {
   if (mode === 'comment') {
-    return `${attachments.comments.length}/${MAX_COMMENTS}`;
+    return { count: attachments.comments.length, limit: MAX_COMMENTS };
   }
   if (mode === 'edit') {
-    return `${attachments.edits.length}/${MAX_EDITS}`;
+    return { count: attachments.edits.length, limit: MAX_EDITS };
   }
-  return `${attachments.flow ? 1 : 0}/${MAX_FLOWS}`;
+  return { count: attachments.flow ? 1 : 0, limit: MAX_FLOWS };
+}
+
+/** How many digits "count/limit" takes. Digits are set at one width, so this ranks the counts by width. */
+function countUsageDigits(usage: ToolUsage | null): number {
+  return usage ? String(usage.count).length + String(usage.limit).length : 0;
 }
 
 interface ToolButtonProps {
   icon: ComponentType<IconProps>;
   label: string;
-  usage: string | null;
+  usage: ToolUsage | null;
+  /** The digits of the widest count in the row. Every count takes that much room. */
+  usageDigits: number;
   /** Why the tool cannot start, or what it does when the name alone does not say. */
   tooltip: string | null;
   disabled: boolean;
   onClick: () => void;
 }
 
-// An icon over the tool's name, so the four fit side by side. The usage count sits beside the icon and is
-// read out with the name.
-function ToolButton({ icon, label, usage, tooltip, disabled, onClick }: ToolButtonProps) {
+// An icon over the tool's name, so the four fit side by side. The usage count hangs beside the icon, which
+// stays centred. Cells too narrow for "count/limit" show the count alone; the name that is read out always
+// carries both. Every count is padded to the widest one with digits that are not shown, so the four cells
+// make the same choice and never mix the two forms.
+function ToolButton({ icon, label, usage, usageDigits, tooltip, disabled, onClick }: ToolButtonProps) {
   return (
     <Button
-      label={usage ? `${label} ${usage}` : label}
+      label={usage ? `${label} ${usage.count}/${usage.limit}` : label}
       tooltip={tooltip ?? undefined}
       variant="ghost"
       size="lg"
@@ -137,7 +152,17 @@ function ToolButton({ icon, label, usage, tooltip, disabled, onClick }: ToolButt
       <span className="widget-tool-content">
         <span className="widget-tool-glyph">
           <Icon icon={icon} />
-          {usage ? <span className="widget-tool-usage">{usage}</span> : null}
+          {usage ? (
+            <span className="widget-tool-usage">
+              <span>{usage.count}</span>
+              <span>
+                /{usage.limit}
+                <span className="widget-tool-usage-filler" aria-hidden="true">
+                  {'0'.repeat(usageDigits - countUsageDigits(usage))}
+                </span>
+              </span>
+            </span>
+          ) : null}
         </span>
         <span className="widget-tool-label">{label}</span>
       </span>
@@ -170,6 +195,9 @@ export function CaptureToolBar({
   onCaptureScreen,
 }: CaptureToolBarProps) {
   const showUsage = screenCount > 0 || (attachments !== null && countAttachments(attachments) > 0);
+  const modeUsages = MODES.map((mode) => (showUsage && attachments ? getModeUsage(mode, attachments) : null));
+  const screenUsage = showUsage ? { count: screenCount, limit: MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK } : null;
+  const usageDigits = Math.max(...[...modeUsages, screenUsage].map(countUsageDigits));
 
   return (
     <section aria-label="화면으로 보여주기">
@@ -178,14 +206,15 @@ export function CaptureToolBar({
           화면으로 보여주기 (선택)
         </Text>
         <div className="grid grid-cols-4 gap-1">
-          {MODES.map((mode) => {
+          {MODES.map((mode, index) => {
             const blocker = attachments ? findStartBlocker(mode, attachments, { screenCount, isSavingScreen }) : null;
             return (
               <ToolButton
                 key={mode}
                 icon={MODE_ICONS[mode]}
                 label={MODE_LABELS[mode]}
-                usage={showUsage && attachments ? getModeUsage(mode, attachments) : null}
+                usage={modeUsages[index]}
+                usageDigits={usageDigits}
                 tooltip={blocker}
                 disabled={disabled || !enabled || attachments === null || blocker !== null}
                 onClick={() => onStart(mode)}
@@ -195,7 +224,8 @@ export function CaptureToolBar({
           <ToolButton
             icon={CameraIcon}
             label="화면 저장"
-            usage={showUsage ? `${screenCount}/${MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK}` : null}
+            usage={screenUsage}
+            usageDigits={usageDigits}
             tooltip={screenToolTitle}
             disabled={disabled || !canCaptureScreen}
             onClick={onCaptureScreen}

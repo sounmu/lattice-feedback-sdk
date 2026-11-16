@@ -141,16 +141,16 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
       const items: Feedback[] = [];
       let cursor: Pick<Feedback, 'createdAt' | 'id'> | undefined;
       while (true) {
-        const cursorFilter: Record<string, string> = {};
-        if (cursor) {
-          cursorFilter.or = `(created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id}))`;
-        }
-        const rows = await requestRows({
-          project_key: `eq.${projectKey}`,
+        const parameters = {
           order: 'created_at.desc,id.desc',
           limit: String(PAGE_SIZE),
-          ...cursorFilter,
-        });
+        };
+        // A tuple comparison lets Postgres seek in the existing project/created/id index.
+        const rows = cursor
+          ? await requestRows(parameters, { method: 'POST', body: JSON.stringify({
+            p_project: projectKey, p_created_at: cursor.createdAt, p_id: cursor.id,
+          }) }, false, 'rpc/read_feedback_before')
+          : await requestRows({ ...parameters, project_key: `eq.${projectKey}` });
         items.push(...rows);
         if (rows.length === 0) {
           return items;

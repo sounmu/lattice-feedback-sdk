@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FormEvent } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
@@ -10,6 +10,10 @@ import {
   CommentPinOverlay,
   EditMoveList,
   EditMoveOverlay,
+  type CommentPinListProps,
+  type CommentPinOverlayProps,
+  type EditMoveListProps,
+  type EditMoveOverlayProps,
   type MoveBox,
   type PinBox,
 } from '@/components/admin/ScreenMarkOverlay';
@@ -35,7 +39,7 @@ import type {
 } from '@/types/screen-snapshot';
 
 type ReplayerEvents = ConstructorParameters<typeof Replayer>[0];
-type ZoomMode = 'fit' | 'actual';
+export type ZoomMode = 'fit' | 'actual';
 type LoadResult = { key: string; snapshot: ScreenSnapshot } | { key: string; status: number };
 
 const DEFAULT_PROJECT_KEY = 'demo';
@@ -356,12 +360,12 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
   positionProposedClones(replayer, moves);
 }
 
-function formatPlaybackTime(milliseconds: number): string {
+export function formatPlaybackTime(milliseconds: number): string {
   const totalSeconds = Math.floor(milliseconds / 1000);
   return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
 }
 
-interface ReplayControlsProps {
+export interface ReplayControlsProps {
   isPlaying: boolean;
   currentMs: number;
   totalMs: number;
@@ -372,7 +376,7 @@ interface ReplayControlsProps {
   onStep: (milliseconds: number) => void;
 }
 
-const REPLAY_STEP_LABELS: Record<ReplayStepKind, string> = {
+export const REPLAY_STEP_LABELS: Record<ReplayStepKind, string> = {
   start: '시작',
   screen: '화면 전환',
   click: '클릭',
@@ -472,7 +476,80 @@ interface ScreenReplayProps {
   loadAssetUrls: () => Promise<(string | null)[]>;
   /** Opens with edited elements already at their proposed position. */
   initiallyShowsProposed?: boolean;
+  /** Keeps the rebuilt page out of the tab order: it is shown as a picture, and its links and buttons do nothing. */
+  isInert?: boolean;
+  /** A host with its own look draws these pieces itself. Each one left out is this viewer's. */
+  parts?: Partial<ScreenReplayParts>;
+  /** Class names of the replay and of the frame around the rebuilt page, for a host with its own look. */
+  className?: string;
+  frameClassName?: string;
+  /**
+   * Names the frame and makes it a keyboard stop while the screen is drawn wider than the frame, so the
+   * arrow keys can scroll it. Without a label the frame is never a stop.
+   */
+  frameLabel?: string;
 }
+
+interface ZoomModeButtonProps {
+  label: string;
+  isPressed: boolean;
+  onPress: () => void;
+}
+
+function ZoomModeButton({ label, isPressed, onPress }: ZoomModeButtonProps) {
+  return (
+    <button type="button" className={BUTTON_CLASS} aria-pressed={isPressed} onClick={onPress}>
+      {label}
+    </button>
+  );
+}
+
+/** The two zoom modes, the scale the chosen one gives, and how many saved files could not be loaded. */
+export interface ZoomBarProps {
+  zoomMode: ZoomMode;
+  scale: number;
+  unloadedAssetCount: number;
+  onZoomModeChange: (zoomMode: ZoomMode) => void;
+}
+
+function ZoomBar({ zoomMode, scale, unloadedAssetCount, onZoomModeChange }: ZoomBarProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <ZoomModeButton label="화면에 맞춤" isPressed={zoomMode === 'fit'} onPress={() => onZoomModeChange('fit')} />
+      <ZoomModeButton label="실제 크기" isPressed={zoomMode === 'actual'} onPress={() => onZoomModeChange('actual')} />
+      <span className="text-xs text-gray-600">{Math.round(scale * 100)}% · 마우스 휠로 저장된 화면을 스크롤할 수 있습니다.</span>
+      {unloadedAssetCount > 0 && (
+        <span role="alert" className="text-xs text-amber-700">
+          저장된 글꼴·이미지 {unloadedAssetCount}개를 불러오지 못했습니다.
+        </span>
+      )}
+    </div>
+  );
+}
+
+function TruncatedNotice() {
+  return (
+    <p role="alert" className="text-xs text-amber-700">
+      {REPLAY_TRUNCATED_MESSAGE}
+    </p>
+  );
+}
+
+/** The controls around the rebuilt page and the marks over it. */
+export interface ScreenReplayParts {
+  ReplayControls: ComponentType<ReplayControlsProps>;
+  /** Shown for a recorded Flow that lost a part. */
+  TruncatedNotice: ComponentType;
+  ZoomBar: ComponentType<ZoomBarProps>;
+  EditMoveOverlay: ComponentType<EditMoveOverlayProps>;
+  CommentPinOverlay: ComponentType<CommentPinOverlayProps>;
+  EditMoveList: ComponentType<EditMoveListProps>;
+  CommentPinList: ComponentType<CommentPinListProps>;
+}
+
+const DEFAULT_PARTS: ScreenReplayParts = {
+  ReplayControls, TruncatedNotice, ZoomBar, EditMoveOverlay, CommentPinOverlay, EditMoveList, CommentPinList,
+};
 
 // A long Flow replay arrives as a gzip file, because the platform limits how large a response may be.
 async function readSnapshotResponse(response: Response): Promise<ScreenSnapshotDetailResponse> {
@@ -522,7 +599,17 @@ async function fetchAssetUrl(hash: string, projectKey: string, token: string): P
 
 // Shared by the admin viewer and the widget's preview. It only draws what it is handed: reading a saved
 // screen from the server, and the admin token that needs, stay with the caller.
-export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = false }: ScreenReplayProps) {
+export function ScreenReplay({
+  screen,
+  loadAssetUrls,
+  initiallyShowsProposed = false,
+  isInert = false,
+  parts,
+  className = 'flex flex-col gap-2',
+  frameClassName = 'w-full overflow-auto rounded-xl border bg-white',
+  frameLabel,
+}: ScreenReplayProps) {
+  const Parts = { ...DEFAULT_PARTS, ...parts };
   const frameRef = useRef<HTMLDivElement>(null);
   const [unloadedAssetCount, setUnloadedAssetCount] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -700,6 +787,9 @@ export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = f
         showWarning: false,
         triggerFocus: false,
       });
+      if (isInert) {
+        replayer.iframe.inert = true;
+      }
       const hasMarks = pins.length > 0 || moves.length > 0;
       if (hasMarks) {
         // Rebuilding the page replaces its document, so the scroll watch is attached after each rebuild.
@@ -738,18 +828,20 @@ export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = f
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed]);
+  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed, isInert]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
   if (zoomMode === 'fit' && availableWidth !== null) {
     scale = Math.min(1, availableWidth / viewportWidth);
   }
+  // Drawn a px or more wider than the room it has, the screen makes its frame scroll sideways.
+  const isFrameStop = frameLabel !== undefined && availableWidth !== null && viewportWidth * scale - availableWidth >= 1;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={className}>
       {isReplay && (
-        <ReplayControls
+        <Parts.ReplayControls
           isPlaying={isPlaying}
           currentMs={currentMs}
           totalMs={totalMs}
@@ -760,31 +852,15 @@ export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = f
           onStep={stepTo}
         />
       )}
-      {isTruncated && (
-        <p role="alert" className="text-xs text-amber-700">
-          {REPLAY_TRUNCATED_MESSAGE}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={BUTTON_CLASS} aria-pressed={zoomMode === 'fit'} onClick={() => setZoomMode('fit')}>
-          화면에 맞춤
-        </button>
-        <button
-          type="button"
-          className={BUTTON_CLASS}
-          aria-pressed={zoomMode === 'actual'}
-          onClick={() => setZoomMode('actual')}
-        >
-          실제 크기
-        </button>
-        <span className="text-xs text-gray-600">{Math.round(scale * 100)}% · 마우스 휠로 저장된 화면을 스크롤할 수 있습니다.</span>
-        {unloadedAssetCount > 0 && (
-          <span role="alert" className="text-xs text-amber-700">
-            저장된 글꼴·이미지 {unloadedAssetCount}개를 불러오지 못했습니다.
-          </span>
-        )}
-      </div>
-      <div ref={frameRef} className="w-full overflow-auto rounded-xl border bg-white">
+      {isTruncated && <Parts.TruncatedNotice />}
+      <Parts.ZoomBar zoomMode={zoomMode} scale={scale} unloadedAssetCount={unloadedAssetCount} onZoomModeChange={setZoomMode} />
+      <div
+        ref={frameRef}
+        className={frameClassName}
+        tabIndex={isFrameStop ? 0 : undefined}
+        role={isFrameStop ? 'group' : undefined}
+        aria-label={isFrameStop ? frameLabel : undefined}
+      >
         <div className="overflow-hidden" style={{ width: viewportWidth * scale, height: viewportHeight * scale }}>
           <div
             className="relative"
@@ -797,8 +873,8 @@ export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = f
               className={isReplay ? '[&_.replayer-mouse-tail]:hidden' : '[&_.replayer-mouse]:hidden [&_.replayer-mouse-tail]:hidden'}
               style={{ width: viewportWidth, height: viewportHeight }}
             />
-            <EditMoveOverlay boxes={moveBoxes} scale={scale} showsProposed={showsProposed} />
-            <CommentPinOverlay
+            <Parts.EditMoveOverlay boxes={moveBoxes} scale={scale} showsProposed={showsProposed} />
+            <Parts.CommentPinOverlay
               boxes={pinBoxes}
               width={viewportWidth}
               height={viewportHeight}
@@ -806,8 +882,8 @@ export function ScreenReplay({ screen, loadAssetUrls, initiallyShowsProposed = f
           </div>
         </div>
       </div>
-      {moves.length > 0 && <EditMoveList moves={moves} showsProposed={showsProposed} onToggle={toggleProposed} />}
-      {pins.length > 0 && <CommentPinList pins={pins} selectedNumber={selectedPin} onSelect={setSelectedPin} />}
+      {moves.length > 0 && <Parts.EditMoveList moves={moves} showsProposed={showsProposed} onToggle={toggleProposed} />}
+      {pins.length > 0 && <Parts.CommentPinList pins={pins} selectedNumber={selectedPin} onSelect={setSelectedPin} />}
     </div>
   );
 }
