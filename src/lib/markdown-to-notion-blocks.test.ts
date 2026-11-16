@@ -120,6 +120,32 @@ describe('link address limit', () => {
   });
 });
 
+describe('request size limit', () => {
+  // 100 links with addresses as long as Notion allows make the largest block there is, about 206KB.
+  // Notion rejects a request over 500KB, so two such blocks fit in one and a third does not.
+  function createLargestLine(label: string): string {
+    const links = Array.from({ length: 100 }, (_, index) => {
+      const prefix = `https://admin.example/${label}/${index}/`;
+      return `[${label}](${prefix}${'a'.repeat(2000 - prefix.length)})`;
+    });
+    return `- ${links.join('')}`;
+  }
+
+  it('keeps the blocks that fit in one request from the start, and says in a last block that the rest was left out', () => {
+    const blocks = convertMarkdownToNotionBlocks(['A', 'B', 'C'].map(createLargestLine).join('\n'));
+
+    expect(blocks.map((block) => block.type)).toEqual(['bulleted_list_item', 'bulleted_list_item', 'paragraph']);
+    expect(blocks.slice(0, 2).map(readText)).toEqual(['A'.repeat(100), 'B'.repeat(100)]);
+    expect(JSON.stringify(blocks[2])).not.toContain('"link"');
+  });
+
+  it('keeps every block of a long draft that fits in one request', () => {
+    const paragraphs = Array.from({ length: 95 }, (_, index) => `${index} ${'a'.repeat(1890)}`);
+
+    expect(convertMarkdownToNotionBlocks(paragraphs.join('\n')).map(readText)).toEqual(paragraphs);
+  });
+});
+
 describe('backslashes', () => {
   it('keeps a Windows path in a reporter quote', () => {
     const [block] = convertMarkdownToNotionBlocks('> C:\\Users\\alice\\report.csv 를 못 열어요');

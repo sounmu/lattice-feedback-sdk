@@ -7,6 +7,9 @@ export type NotionBlock = Record<string, unknown>;
 // Notion rejects a text longer than 2000 characters and more than 100 blocks per request; stay below both.
 const MAX_TEXT_LENGTH = 1900;
 const MAX_BLOCK_COUNT = 95;
+// Notion also rejects a request over 500KB. The blocks may take this much of it as JSON; the rest is room for
+// the title and the board address in the same request.
+const MAX_BLOCKS_BYTES = 450_000;
 const TRUNCATION_MARK = '… (전체 내용은 관리자 화면에서 확인)';
 const OMITTED_BLOCKS_NOTE = '… 내용이 길어 일부만 옮겼어요.';
 // Notion accepts at most 100 rich-text items in one block and a link address of at most 2000 characters.
@@ -154,6 +157,28 @@ function createLineBlocks(line: string): NotionBlock[] {
   return createBlocks('paragraph', line);
 }
 
+function getJsonByteLength(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+// The blocks one request can carry, from the start of the draft. A note takes the place of what is left out;
+// its bytes are set aside first, so it always fits.
+function limitBlocks(blocks: readonly NotionBlock[]): NotionBlock[] {
+  const note = createBlocks('paragraph', OMITTED_BLOCKS_NOTE);
+  let remainingBytes = MAX_BLOCKS_BYTES - getJsonByteLength(note);
+  const kept: NotionBlock[] = [];
+  for (const block of blocks) {
+    // One more byte for the comma that joins a block to the next.
+    const blockBytes = getJsonByteLength(block) + 1;
+    if (kept.length === MAX_BLOCK_COUNT || blockBytes > remainingBytes) {
+      return [...kept, ...note];
+    }
+    kept.push(block);
+    remainingBytes -= blockBytes;
+  }
+  return kept;
+}
+
 export function convertMarkdownToNotionBlocks(markdown: string): NotionBlock[] {
   const blocks: NotionBlock[] = [];
   let quoteLines: string[] = [];
@@ -178,11 +203,7 @@ export function convertMarkdownToNotionBlocks(markdown: string): NotionBlock[] {
     }
   }
   flushQuote();
-
-  if (blocks.length <= MAX_BLOCK_COUNT) {
-    return blocks;
-  }
-  return [...blocks.slice(0, MAX_BLOCK_COUNT), ...createBlocks('paragraph', OMITTED_BLOCKS_NOTE)];
+  return limitBlocks(blocks);
 }
 
 /** The page title: one line, cut to a length Notion accepts. */
