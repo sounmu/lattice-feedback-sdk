@@ -300,7 +300,9 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     const boxTop = centerY - box.height / 2;
     // The corner handle reaches half its size past the box, so the toolbar keeps clear of it.
     const below = boxTop + box.height + TOOLBAR_GAP + HANDLE_SIZE / 2;
-    const top = below + toolbarHeight + VIEWPORT_EDGE <= viewportHeight ? below : boxTop - TOOLBAR_GAP - toolbarHeight;
+    // Above the ghost, the toolbar also keeps clear of the rotate handle that stands over its top edge.
+    const above = boxTop - ROTATE_HANDLE_OFFSET - TOOLBAR_GAP - toolbarHeight;
+    const top = below + toolbarHeight + VIEWPORT_EDGE <= viewportHeight ? below : above;
     const boxLeft = centerX - box.width / 2;
     const visibleWidth = document.documentElement?.clientWidth || viewportWidth;
     const left = Math.min(Math.max(boxLeft, VIEWPORT_EDGE), Math.max(VIEWPORT_EDGE, visibleWidth - toolbarWidth - VIEWPORT_EDGE));

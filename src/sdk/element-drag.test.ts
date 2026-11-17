@@ -225,6 +225,17 @@ describe('startElementDrag', () => {
     expect(ghost.style).toMatchObject({ width: '48px', height: '16px' });
   });
 
+  it('places the toolbar above an element near the bottom without covering the rotate handle', () => {
+    hostElement.bounds = { left: 100, top: 740, width: 120, height: 40 };
+    startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
+    const { toolbar } = getOverlay();
+    Object.assign(toolbar, { offsetWidth: 300, offsetHeight: 50 });
+    fakeDocument.dispatch(createEvent('keydown', { target: getOverlay().ghost, key: 'ArrowLeft' }));
+
+    // The rotate handle reaches 28px above the ghost's top (740), so the toolbar ends 8px above that.
+    expect(toolbar.style.top).toBe(`${740 - 28 - 8 - 50}px`);
+  });
+
   it('lets the toolbar wrap inside a narrow viewport', () => {
     startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
     const { toolbar } = getOverlay();
