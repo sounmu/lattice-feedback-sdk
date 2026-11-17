@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { areFeedbackAttachmentsAllowed } from '@/lib/capture-policy';
 import { createClarificationContext, findClarificationModelConfig, requestClarificationQuestions } from '@/lib/clarification-model';
+import { findMissingClarificationSlots } from '@/lib/clarification-slots';
 import { createApiErrorResponse } from '@/lib/http/api-error';
 import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyTextWithLimit } from '@/lib/http/read-body';
 import { consumeRateLimit, getClientAddress, RATE_LIMIT_RETRY_AFTER_SECONDS } from '@/lib/http/rate-limit';
@@ -68,8 +69,14 @@ export async function POST(request: Request) {
   if (!config) {
     return createResponse({ questions: [], model: null });
   }
+  const context = createClarificationContext(parsed.data);
+  // Nothing worth asking: the feedback goes out without calling the model at all.
+  const slots = findMissingClarificationSlots(parsed.data.type, context);
+  if (slots.length === 0) {
+    return createResponse({ questions: [], model: null });
+  }
   try {
-    const questions = await requestClarificationQuestions(config, createClarificationContext(parsed.data));
+    const questions = await requestClarificationQuestions(config, context, slots);
     return createResponse({ questions, model: questions.length > 0 ? config.model : null });
   } catch (error) {
     // The reason is logged without the feedback text; the reporter just sends without questions.

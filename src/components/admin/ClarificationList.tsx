@@ -1,3 +1,4 @@
+import { getClarificationFieldLabel } from '@/lib/clarification-slots';
 import type { FeedbackClarification } from '@/types/feedback';
 
 // The AI's questions are inference and the answers are the reporter's words; both are labelled as such so
@@ -11,7 +12,9 @@ export function ClarificationList({ clarification }: { clarification: FeedbackCl
           <li key={item.question} className="flex gap-3 rounded-(--radius-container) bg-(--admin-surface-sub) p-3">
             <span className="widget-mark-number shrink-0">{index + 1}</span>
             <div className="min-w-0">
-              <p className="text-xs text-(--admin-text-muted)">AI 질문</p>
+              <p className="text-xs text-(--admin-text-muted)">
+                <span className="font-semibold text-(--admin-text-sub)">{getClarificationFieldLabel(item.slot)}</span> · AI 질문
+              </p>
               <p>{item.question}</p>
               <p className="mt-2 text-xs text-(--admin-text-muted)">고객 답변</p>
               {item.answer === null ? (

@@ -2,6 +2,7 @@
 // Capture context excludes credentials. Reporter identity proofs and conversation
 // capabilities are transient authentication fields, never persisted as feedback metadata.
 
+import type { ClarificationSlotId } from '@/lib/clarification-slots';
 import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 import type { ConversationMessage, ReporterSignature } from '@/types/conversation';
 
@@ -105,6 +106,8 @@ export interface FeedbackAttachments {
 export interface ClarificationQuestion {
   question: string;
   options: string[];
+  /** The missing detail the question asks about. Absent on questions stored before details existed. */
+  slot?: ClarificationSlotId;
 }
 
 export interface ClarificationAnswer extends ClarificationQuestion {
