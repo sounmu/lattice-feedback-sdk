@@ -30,15 +30,22 @@
 }
 
 /* Every control shows the widget's focus ring. A status choice is a visually hidden radio inside its label,
-   so the label carries the ring. */
-.admin-root :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible,
+   so the label carries the ring. Astryx controls and the replay frame draw their own. */
+.admin-root :is(button, a, input, select, textarea, summary, [tabindex]):not([class*='astryx'], .widget-replay-frame):focus-visible,
 .admin-root label:has(> input:focus-visible) {
   outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
   outline-offset: var(--focus-outline-offset);
 }
 
-/* A press is one step darker than the hover, on neutral and accent controls alike. */
-.admin-root :is(button, a.admin-button, label:has(> input)):not(:disabled):active {
+/* A conversation or comment row is drawn inside a list that clips it, so its ring is drawn just inside it. */
+.admin-root .astryx-list-item {
+  outline-offset: calc(var(--focus-outline-width) * -1);
+}
+
+/* A press is one step darker than the hover, on neutral and accent controls alike. Astryx controls press
+   their own way, and one that cannot be used shows no press. */
+.admin-root :is(button, a.admin-button):not(:disabled, [aria-disabled='true'], [class*='astryx']):active,
+.admin-root label:has(> input:not(:disabled)):active {
   background-image: linear-gradient(var(--color-overlay-pressed), var(--color-overlay-pressed));
 }
 
@@ -66,4 +73,12 @@
 
 .admin-root :is(input, select, textarea):focus-visible {
   border-color: var(--color-accent);
+}
+
+/* The Astryx reset hides the browser's clear button in a search field. The list and duplicate searches have no
+   other way to clear, so it comes back. */
+.admin-root input[type='search']::-webkit-search-cancel-button {
+  display: revert;
+  appearance: auto;
+  -webkit-appearance: searchfield-cancel-button;
 }
