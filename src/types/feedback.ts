@@ -101,6 +101,24 @@ export interface FeedbackAttachments {
   flow: FlowAttachment | null;
 }
 
+/** A question the AI asked before the feedback was sent, with the choices it offered. */
+export interface ClarificationQuestion {
+  question: string;
+  options: string[];
+}
+
+export interface ClarificationAnswer extends ClarificationQuestion {
+  /** The reporter's answer: one of the options or their own words. Null when they skipped it. */
+  answer: string | null;
+}
+
+/** AI inference, kept apart from what the reporter wrote and what the SDK recorded. */
+export interface FeedbackClarification {
+  /** The model that wrote the questions. */
+  model: string;
+  questions: ClarificationAnswer[];
+}
+
 export interface Feedback {
   id: string;
   projectKey: string;
@@ -116,6 +134,8 @@ export interface Feedback {
   attachments: FeedbackAttachments;
   adminReply: string | null;
   messages?: ConversationMessage[];
+  /** Null or absent when no question was asked. */
+  clarification?: FeedbackClarification | null;
   /** ISO timestamp. */
   createdAt: string;
   /** ISO timestamp. */
@@ -127,7 +147,19 @@ export type CreateFeedbackInput = Pick<Feedback, 'projectKey' | 'message' | 'typ
   attachments?: Partial<FeedbackAttachments>;
   /** Saved screens uploaded before submission. They are linked to the feedback when it is created. */
   screenSnapshotIds?: string[];
+  clarification?: FeedbackClarification;
 };
+
+/** What the widget sends to ask for questions: the draft without the reporter or the saved screens. */
+export type ClarifyInput = Pick<CreateFeedbackInput, 'projectKey' | 'hostOrigin' | 'message' | 'type' | 'attachments'> & {
+  page: Pick<PageContext, 'url'>;
+};
+
+export interface ClarifyResponse {
+  questions: ClarificationQuestion[];
+  /** Null when no model is configured or it gave no usable questions. */
+  model: string | null;
+}
 
 export type UpdateFeedbackInput = Partial<Pick<Feedback, 'status' | 'adminReply' | 'duplicateOfId'>>;
 

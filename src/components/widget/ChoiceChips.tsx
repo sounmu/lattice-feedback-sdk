@@ -11,7 +11,8 @@ interface ChoiceChipsProps<Value extends string> {
   /** Names the group for assistive technology. It is not shown. */
   label: string;
   options: readonly ChoiceChipOption<Value>[];
-  value: Value;
+  /** Null while nothing is chosen yet; the first chip is then the group's tab stop. */
+  value: Value | null;
   onChange: (value: Value) => void;
   /** Keeps the chips readable and in the tab order, but no choice can be made. */
   isDisabled?: boolean;
@@ -47,7 +48,9 @@ export function ChoiceChips<Value extends string>({ label, options, value, onCha
       return;
     }
     const selectedIndex = options.findIndex((option) => option.value === value);
-    const targetIndex = findTargetIndex(event.key, selectedIndex, options.length);
+    // With nothing chosen, the next key lands on the first chip and the previous key on the last one.
+    const fromIndex = selectedIndex < 0 && PREVIOUS_KEYS.includes(event.key) ? 0 : selectedIndex;
+    const targetIndex = findTargetIndex(event.key, fromIndex, options.length);
     if (targetIndex === null) {
       return;
     }
@@ -73,6 +76,7 @@ export function ChoiceChips<Value extends string>({ label, options, value, onCha
     >
       {options.map((option) => {
         const isSelected = option.value === value;
+        const isTabStop = isSelected || (value === null && option === options[0]);
         return (
           <button
             key={option.value}
@@ -80,7 +84,7 @@ export function ChoiceChips<Value extends string>({ label, options, value, onCha
             role="radio"
             aria-checked={isSelected}
             aria-disabled={isDisabled || undefined}
-            tabIndex={isSelected ? 0 : -1}
+            tabIndex={isTabStop ? 0 : -1}
             data-value={option.value}
             className="widget-chip"
             onClick={() => handleChoose(option.value)}

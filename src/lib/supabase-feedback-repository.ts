@@ -3,6 +3,7 @@ import { FeedbackDuplicateTargetError } from '@/lib/feedback-duplicate-target-er
 import type { FeedbackRepository } from '@/lib/feedback-repository';
 import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavailable-error';
 import { getSupabaseConfiguration } from '@/lib/supabase-rest';
+import { feedbackClarificationSchema } from '@/lib/validation/clarification-schema';
 import { createFeedbackInputSchema, updateFeedbackInputSchema } from '@/lib/validation/feedback-schema';
 import type { Feedback } from '@/types/feedback';
 import type { ConversationCredentials } from '@/types/conversation';
@@ -15,7 +16,7 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const PAGE_SIZE = 100;
 const FEEDBACK_SELECT = [
   'id', 'projectKey:project_key', 'message', 'type', 'status', 'duplicateOfId:duplicate_of', 'ticketUrl:ticket_url', 'reporter', 'page',
-  'attachments', 'adminReply:admin_reply', 'createdAt:created_at', 'updatedAt:updated_at', 'messages',
+  'attachments', 'adminReply:admin_reply', 'createdAt:created_at', 'updatedAt:updated_at', 'messages', 'clarification',
 ].join(',');
 
 // How Postgres reports a refused original: a foreign key violation (missing, or in another project) or a
@@ -41,6 +42,7 @@ const feedbackRowsSchema = z.array(
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
     messages: conversationMessagesSchema.optional(),
+    clarification: feedbackClarificationSchema.nullable().optional(),
   }),
 );
 
@@ -123,6 +125,7 @@ export function createSupabaseFeedbackRepository(): FeedbackRepository {
             edits: input.attachments?.edits ?? [],
             flow: input.attachments?.flow ?? null,
           },
+          ...(input.clarification === undefined ? {} : { clarification: input.clarification }),
         }),
       });
       const feedback = rows[0];

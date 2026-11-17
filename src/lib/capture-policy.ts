@@ -1,4 +1,4 @@
-import type { CreateFeedbackInput, ElementTarget } from '@/types/feedback';
+import type { CreateFeedbackInput, ElementTarget, PageContext } from '@/types/feedback';
 
 export interface CapturePolicy {
   readonly allowedPaths: readonly string[];
@@ -104,7 +104,10 @@ export function resolveCapturePolicyFromJson(value: string | undefined): Capture
   return findCapturePolicyFromJson(value) ?? { allowedPaths: [], targets: [] };
 }
 
-export function areFeedbackAttachmentsAllowed(input: CreateFeedbackInput, policy: CapturePolicy | null): boolean {
+export function areFeedbackAttachmentsAllowed(
+  input: Pick<CreateFeedbackInput, 'hostOrigin' | 'attachments'> & { page: Pick<PageContext, 'url'> },
+  policy: CapturePolicy | null,
+): boolean {
   const comments = input.attachments?.comments ?? [];
   const edits = input.attachments?.edits ?? [];
   const flow = input.attachments?.flow;

@@ -103,6 +103,15 @@ describe('createFeedbackInputSchema', () => {
     expect(createFeedbackInputSchema.safeParse({ ...VALID_INPUT, attachments: { edits: [{ ...edit, rotation: 181 }] } }).success).toBe(false);
   });
 
+  it('accepts asked questions with answers or skips and refuses ones that break the limits', () => {
+    const clarification = { model: 'm', questions: [{ question: '언제부터인가요?', options: ['오늘', '예전부터'], answer: null }] };
+    expect(createFeedbackInputSchema.parse({ ...VALID_INPUT, clarification }).clarification).toEqual(clarification);
+    const tooManyQuestions = { ...clarification, questions: [1, 2, 3].map(() => clarification.questions[0]) };
+    expect(createFeedbackInputSchema.safeParse({ ...VALID_INPUT, clarification: tooManyQuestions }).success).toBe(false);
+    const longAnswer = { ...clarification, questions: [{ ...clarification.questions[0], answer: 'x'.repeat(501) }] };
+    expect(createFeedbackInputSchema.safeParse({ ...VALID_INPUT, clarification: longAnswer }).success).toBe(false);
+  });
+
   it('drops unknown fields instead of storing them', () => {
     const result = createFeedbackInputSchema.parse({ ...VALID_INPUT, cookie: 'session=abc' });
     expect(result).not.toHaveProperty('cookie');
