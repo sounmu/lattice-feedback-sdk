@@ -114,6 +114,14 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
     ].join('\n'),
     `## 사용자 진술\n\n${quote(feedback.message)}`,
   ];
+  if (feedback.clarification) {
+    const lines = feedback.clarification.questions.map(({ question, answer }, index) => {
+      const reply = answer === null ? '(건너뜀)' : plain(answer);
+      return `${index + 1}. AI: ${plain(question)}\n   - 사용자 답변: ${reply}`;
+    });
+    lines.push('- 질문은 AI가 만든 것이며, 답변만 사용자 진술입니다.');
+    sections.push(`## AI 확인 질문과 사용자 답변\n\n${lines.join('\n')}`);
+  }
   if (flow && flow.events.length > 0) {
     sections.push(createFlowSection(flow));
   }

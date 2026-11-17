@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_EDIT_ROTATION } from '@/lib/edit-comparison-geometry';
+import { feedbackClarificationSchema } from '@/lib/validation/clarification-schema';
 import { reporterIdentitySchema, reporterOrganizationSchema } from '@/lib/validation/conversation-schema';
 import {
   MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS,
@@ -136,7 +137,13 @@ export const createFeedbackInputSchema = z.object({
     .max(MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK)
     .refine((ids) => new Set(ids).size === ids.length, { message: 'screenSnapshotIds must be unique' })
     .default([]),
+  clarification: feedbackClarificationSchema.optional(),
 });
+
+/** The draft the widget sends to ask for questions; nothing about the reporter or the saved screens. */
+export const clarifyInputSchema = createFeedbackInputSchema
+  .pick({ projectKey: true, hostOrigin: true, message: true, type: true, attachments: true })
+  .extend({ page: createFeedbackInputSchema.shape.page.pick({ url: true }) });
 
 export const updateFeedbackInputSchema = z
   .object({

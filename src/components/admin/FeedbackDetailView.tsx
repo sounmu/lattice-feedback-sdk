@@ -3,6 +3,7 @@
 import Link from 'next/link';
 
 import { AdminSection } from '@/components/admin/AdminSection';
+import { ClarificationList } from '@/components/admin/ClarificationList';
 import { CommentAttachmentList } from '@/components/admin/CommentAttachmentList';
 import { EditScreenPreview } from '@/components/admin/EditScreenPreview';
 import { FeedbackActionPanel } from '@/components/admin/FeedbackActionPanel';
@@ -61,6 +62,12 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
             ) : null}
             <p className="whitespace-pre-wrap text-base">{feedback.message}</p>
           </AdminSection>
+
+          {feedback.clarification ? (
+            <AdminSection sectionKey="clarification" title={`AI 확인 질문 ${feedback.clarification.questions.length}개`}>
+              <ClarificationList clarification={feedback.clarification} />
+            </AdminSection>
+          ) : null}
 
           {comments.length > 0 ? (
             <AdminSection sectionKey="comments" title={`코멘트 ${comments.length}개`}>
