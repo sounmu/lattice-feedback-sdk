@@ -19,6 +19,7 @@ import {
   MAX_REPLAY_DURATION_MS,
   MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK,
 } from '@/lib/feedback-limits';
+import { describeMove, formatEditChange } from '@/lib/edit-comparison-geometry';
 import { describeTarget } from '@/lib/target-labels';
 import type { EditAttachment, ElementTarget, FlowAttachment, FlowEventType } from '@/types/feedback';
 import type { AttachmentKind, CaptureMode, CaptureState } from '@/types/sdk-message';
@@ -56,9 +57,7 @@ export function getTargetLabel(target: Pick<ElementTarget, 'feedbackId' | 'tagNa
 }
 
 function getEditSummary(edit: EditAttachment): string {
-  const deltaX = Math.round(edit.proposedRect.x - edit.originalRect.x);
-  const deltaY = Math.round(edit.proposedRect.y - edit.originalRect.y);
-  return `${getTargetLabel(edit.target)} (가로 ${deltaX}px, 세로 ${deltaY}px 이동)`;
+  return `${getTargetLabel(edit.target)} (${formatEditChange(describeMove(edit.originalRect, edit.proposedRect, edit.rotation))})`;
 }
 
 function getFlowSequence(flow: FlowAttachment): string {
@@ -397,7 +396,7 @@ export function CaptureModeView({
                 옮기는 요소 <strong>{getTargetLabel(selection)}</strong>
               </span>
               <span className="block">
-                페이지에서 끌어 옮긴 뒤 <strong>변경 첨부</strong>를 눌러 주세요. 방향키로도 옮길 수 있어요.
+                페이지에서 끌어 옮기고 모서리·위 손잡이로 크기와 각도를 바꾼 뒤 <strong>변경 첨부</strong>를 눌러 주세요.
               </span>
             </WidgetBanner>
           ) : (

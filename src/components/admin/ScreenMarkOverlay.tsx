@@ -108,6 +108,8 @@ export interface MoveBox {
   move: ScreenEditMove;
   original: { x: number; y: number; width: number; height: number };
   proposed: { x: number; y: number; width: number; height: number };
+  /** Clockwise degrees the proposed box is turned around its centre. */
+  rotation: number;
 }
 
 /** Class names of the outlines drawn for an edit. Each position has one look while the element is drawn there and one while it is not. */
@@ -131,7 +133,7 @@ export function EditMoveOverlay({ boxes, scale, showsProposed, skin }: EditMoveO
   const inverseScale = 1 / scale;
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {boxes.map(({ move, original, proposed }) => (
+      {boxes.map(({ move, original, proposed, rotation }) => (
         <div key={move.number}>
           <div
             className={`absolute ${showsProposed ? skin.vacatedOriginal : skin.original}`}
@@ -139,7 +141,13 @@ export function EditMoveOverlay({ boxes, scale, showsProposed, skin }: EditMoveO
           />
           <div
             className={`absolute ${showsProposed ? skin.shownProposed : skin.proposed}`}
-            style={{ left: proposed.x, top: proposed.y, width: proposed.width, height: proposed.height }}
+            style={{
+              left: proposed.x,
+              top: proposed.y,
+              width: proposed.width,
+              height: proposed.height,
+              transform: rotation === 0 ? undefined : `rotate(${rotation}deg)`,
+            }}
           />
           <span
             className={`absolute ${skin.label}`}

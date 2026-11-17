@@ -15,11 +15,10 @@ import {
 } from '@/components/admin/ScreenMarkOverlay';
 import { AdminTokenForm } from '@/components/admin/AdminTokenForm';
 import { PREVIEW_REPLAY_PARTS } from '@/components/widget/PreviewReplayParts';
+import { describeMove } from '@/lib/edit-comparison-geometry';
 import { GZIP_MEDIA_TYPE, isGzipBody, isGzipSupported } from '@/lib/gzip';
 import {
-  findAdjacentStep,
   findReplaySteps,
-  getCurrentStepIndex,
   getViewportAt,
   type ReplayStep,
   type ReplayStepKind,
@@ -177,6 +176,17 @@ function getMoveDelta(move: ScreenEditMove): { x: number; y: number } {
   return { x: move.proposedRect.x - move.originalRect.x, y: move.proposedRect.y - move.originalRect.y };
 }
 
+function getMoveChange(move: ScreenEditMove) {
+  return describeMove(move.originalRect, move.proposedRect, move.rotation);
+}
+
+// The proposal scales the element as it is drawn and turns it. Where the turn is centred only shifts the
+// copy, and the copy is placed by its centre afterwards, so no transform origin has to be chosen here.
+function getProposedTransform(element: Element, move: ScreenEditMove, view: Window & typeof globalThis): DOMMatrix {
+  const { scaleX, scaleY, rotation } = getMoveChange(move);
+  return new view.DOMMatrix().rotate(rotation).scale(scaleX, scaleY).multiply(getVisualTransform(element, view));
+}
+
 const MOVE_CLONE_ATTRIBUTE = 'data-lattice-move-clone';
 // Styling a very large subtree element by element would stall the viewer; the rest keeps its own rules.
 const MAX_STYLED_CLONE_ELEMENTS = 500;
@@ -277,14 +287,20 @@ function positionProposedClones(replayer: Replayer, moves: ScreenEditMove[]): vo
     }
     const bounds = element.getBoundingClientRect();
     const delta = getMoveDelta(move);
+    const { scaleX, scaleY } = getMoveChange(move);
     const targetX = bounds.left + delta.x;
     const targetY = bounds.top + delta.y;
+    const centerX = targetX + (bounds.width * scaleX) / 2;
+    const centerY = targetY + (bounds.height * scaleY) / 2;
     clone.style.setProperty('left', `${targetX + view.scrollX}px`);
     clone.style.setProperty('top', `${targetY + view.scrollY}px`);
-    // A transformed clone is drawn away from its left/top corner; one correction lines up what is seen.
+    // A transformed clone is drawn away from its left/top corner; one correction lines up the centre of
+    // what is seen, which a rotation leaves in place.
     const drawn = clone.getBoundingClientRect();
-    clone.style.setProperty('left', `${targetX + view.scrollX + targetX - drawn.left}px`);
-    clone.style.setProperty('top', `${targetY + view.scrollY + targetY - drawn.top}px`);
+    const drawnCenterX = drawn.left + drawn.width / 2;
+    const drawnCenterY = drawn.top + drawn.height / 2;
+    clone.style.setProperty('left', `${targetX + view.scrollX + centerX - drawnCenterX}px`);
+    clone.style.setProperty('top', `${targetY + view.scrollY + centerY - drawnCenterY}px`);
   }
 }
 
@@ -301,7 +317,9 @@ function measureMove(replayer: Replayer, move: ScreenEditMove): MoveBox {
     const view = replayer.iframe.contentWindow;
     original = { ...original, x: original.x - (view?.scrollX ?? 0), y: original.y - (view?.scrollY ?? 0) };
   }
-  return { move, original, proposed: { ...original, x: original.x + delta.x, y: original.y + delta.y } };
+  const { scaleX, scaleY, rotation } = getMoveChange(move);
+  const proposed = { x: original.x + delta.x, y: original.y + delta.y, width: original.width * scaleX, height: original.height * scaleY };
+  return { move, original, proposed, rotation };
 }
 
 // Only the rebuilt page in the sandboxed iframe changes; the host page is never touched. The proposal
@@ -326,15 +344,15 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
     const clone = element.cloneNode(true) as HTMLElement;
     clone.setAttribute(MOVE_CLONE_ATTRIBUTE, move.key);
     copyResolvedStyles(element, clone, view, { remaining: MAX_STYLED_CLONE_ELEMENTS });
-    // The untransformed layout size is kept and the visible transform reapplied, so a scaled or rotated
-    // element looks the same at the proposed position.
+    // The untransformed layout size is kept and the visible transform reapplied with the proposed scale and
+    // turn on top, so an element already scaled or rotated on the page keeps that look at the proposed position.
     Object.assign(clone.style, {
       position: 'absolute',
       width: `${element.offsetWidth || bounds.width}px`,
       height: `${element.offsetHeight || bounds.height}px`,
       margin: '0',
       boxSizing: 'border-box',
-      transform: getVisualTransform(element, view as Window & typeof globalThis).toString(),
+      transform: getProposedTransform(element, move, view as Window & typeof globalThis).toString(),
       transformOrigin: '0 0',
       visibility: 'visible',
       zIndex: '2147483647',

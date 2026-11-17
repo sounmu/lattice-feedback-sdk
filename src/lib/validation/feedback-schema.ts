@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_EDIT_ROTATION } from '@/lib/edit-comparison-geometry';
 import { reporterIdentitySchema, reporterOrganizationSchema } from '@/lib/validation/conversation-schema';
 import {
   MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS,
@@ -76,6 +77,7 @@ const editAttachmentSchema = z.object({
   target: elementTargetSchema,
   originalRect: elementRectSchema,
   proposedRect: elementRectSchema,
+  rotation: z.number().min(-MAX_EDIT_ROTATION).max(MAX_EDIT_ROTATION).optional(),
   viewportWidth: viewportSizeSchema,
   viewportHeight: viewportSizeSchema,
   note: z.string().max(MAX_COMMENT_LENGTH),

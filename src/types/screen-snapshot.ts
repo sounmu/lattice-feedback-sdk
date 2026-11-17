@@ -62,6 +62,8 @@ export interface ScreenEditMove {
   /** Document coordinates before and after the drag. */
   originalRect: ScreenCommentPin['rect'];
   proposedRect: ScreenCommentPin['rect'];
+  /** Clockwise degrees around the proposed box's centre; absent when the element is not rotated. */
+  rotation?: number;
   label: string;
 }
 

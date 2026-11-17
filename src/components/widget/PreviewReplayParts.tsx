@@ -30,6 +30,7 @@ import {
 } from '@/components/admin/ScreenSnapshotViewer';
 import { PauseIcon, PlayIcon, RestartIcon } from '@/components/widget/WidgetIcons';
 import { WidgetBanner } from '@/components/widget/WidgetLayout';
+import { describeMove, formatEditChange } from '@/lib/edit-comparison-geometry';
 import { findAdjacentStep, getCurrentStepIndex } from '@/lib/screen-preview';
 import { describeTarget } from '@/lib/target-labels';
 import type { ScreenEditMove } from '@/types/screen-snapshot';
@@ -69,10 +70,9 @@ function describeMarkedElement(label: string): string {
   return describeTarget({ feedbackId: null, tagName: label });
 }
 
-function describeMove(move: ScreenEditMove): string {
-  const deltaX = Math.round(move.proposedRect.x - move.originalRect.x);
-  const deltaY = Math.round(move.proposedRect.y - move.originalRect.y);
-  return `${describeMarkedElement(move.label)} · 가로 ${deltaX}px, 세로 ${deltaY}px 이동`;
+function describeEditMove(move: ScreenEditMove): string {
+  const change = formatEditChange(describeMove(move.originalRect, move.proposedRect, move.rotation));
+  return `${describeMarkedElement(move.label)} · ${change}`;
 }
 
 function PreviewReplayControls({ isPlaying, currentMs, totalMs, steps, onPlay, onPause, onSeek, onStep }: ReplayControlsProps) {
@@ -240,7 +240,7 @@ function PreviewEditMoveList({ moves, showsProposed, onToggle }: EditMoveListPro
               key={move.number}
               startContent={<span className="widget-mark-number">{move.number}</span>}
               label={`위치 편집 ${move.number}`}
-              description={describeMove(move)}
+              description={describeEditMove(move)}
             />
           ))}
         </List>

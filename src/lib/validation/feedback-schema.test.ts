@@ -87,6 +87,22 @@ describe('createFeedbackInputSchema', () => {
     });
   });
 
+  it('keeps a proposed rotation inside a half turn and rejects one beyond it', () => {
+    const edit = {
+      target: COMMENT.target,
+      originalRect: { x: 10, y: 20, width: 80, height: 30 },
+      proposedRect: { x: 0, y: 10, width: 100, height: 50 },
+      viewportWidth: 1000,
+      viewportHeight: 800,
+      note: '',
+    };
+    const parsed = createFeedbackInputSchema.parse({ ...VALID_INPUT, attachments: { edits: [{ ...edit, rotation: -45 }] } });
+
+    expect(parsed.attachments.edits[0].rotation).toBe(-45);
+    expect(createFeedbackInputSchema.parse({ ...VALID_INPUT, attachments: { edits: [edit] } }).attachments.edits[0]).not.toHaveProperty('rotation');
+    expect(createFeedbackInputSchema.safeParse({ ...VALID_INPUT, attachments: { edits: [{ ...edit, rotation: 181 }] } }).success).toBe(false);
+  });
+
   it('drops unknown fields instead of storing them', () => {
     const result = createFeedbackInputSchema.parse({ ...VALID_INPUT, cookie: 'session=abc' });
     expect(result).not.toHaveProperty('cookie');

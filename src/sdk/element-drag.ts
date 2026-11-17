@@ -6,10 +6,15 @@
 // from the element's bounds and the policy-configured id. No host text, HTML,
 // attributes, or input values are copied into the overlay or the payload.
 //
+// Size and angle: a corner handle scales the ghost around its centre and a handle above it rotates it
+// around the centre. The proposal is a visual change request, so the size is a scale of the element,
+// never a new layout width.
+//
 // Viewport freeze: the ghost is position: fixed and coordinates are converted to
 // document CSS px once at start. Any resize or scroll (including nested
 // scrollers, observed in the capture phase) would invalidate that mapping, so it
 // cancels the active edit instead of trying to re-project positions.
+import { normalizeRotation } from '@/lib/edit-comparison-geometry';
 import { describeTarget } from '@/lib/target-labels';
 import type { CaptureTarget } from '@/sdk/capture-policy';
 import { SDK_Z_INDEX } from '@/sdk/styles';
@@ -33,10 +38,18 @@ const EDIT_OVERLAY_VALUE = 'edit';
 const CONFIRM_LABEL = '변경 첨부';
 const CANCEL_LABEL = '취소';
 const TOOLBAR_LABEL = '위치 편집';
-const GHOST_LABEL_SUFFIX = ' 이동 미리보기: 끌거나 방향키로 옮기고, Enter로 첨부해요';
+const GHOST_LABEL_SUFFIX =
+  ' 편집 미리보기: 끌거나 방향키로 옮기고, 모서리나 +·- 키로 크기, 위 손잡이나 [·] 키로 회전해요. Enter로 첨부해요';
 const TOOLBAR_GAP = 8;
 const VIEWPORT_EDGE = 8;
 const KEYBOARD_STEP = 8;
+const KEYBOARD_SCALE_STEP = 0.1;
+const ROTATION_STEP = 15;
+const MIN_GHOST_SIZE = 16;
+const MAX_SCALE = 4;
+const HANDLE_SIZE = 18;
+// The rotate handle sits this far above the ghost's top edge, so it never covers the element.
+const ROTATE_HANDLE_OFFSET = 28;
 const GUARDED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'beforeinput', 'keydown', 'keyup'] as const;
 const INTERACTION_CAPTURE: AddEventListenerOptions = { capture: true, passive: false };
 
@@ -51,7 +64,8 @@ const GHOST_STYLE = [
   `background: ${getTranslucentColor(SDK_THEME.info, 0.18)}`,
   `color: ${SDK_THEME.onInfoMuted}`,
   `font: 500 12px/1.2 ${SDK_FONT_FAMILY}`,
-  'overflow: hidden',
+  'overflow: visible',
+  'transform-origin: 50% 50%',
   'cursor: grab',
   'user-select: none',
   'touch-action: none',
@@ -59,6 +73,20 @@ const GHOST_STYLE = [
   'outline: none',
   SDK_NO_TAP_HIGHLIGHT,
 ].join('; ');
+const GHOST_TEXT_STYLE = 'display: block; width: 100%; height: 100%; overflow: hidden; pointer-events: none';
+const HANDLE_STYLE = [
+  'position: absolute',
+  'box-sizing: border-box',
+  `width: ${HANDLE_SIZE}px`,
+  `height: ${HANDLE_SIZE}px`,
+  'border-radius: 50%',
+  `border: 2px solid ${SDK_THEME.info}`,
+  `background: ${SDK_THEME.surface}`,
+  'touch-action: none',
+  'pointer-events: auto',
+].join('; ');
+const RESIZE_HANDLE_STYLE = `${HANDLE_STYLE}; right: ${-HANDLE_SIZE / 2}px; bottom: ${-HANDLE_SIZE / 2}px; cursor: nwse-resize`;
+const ROTATE_HANDLE_STYLE = `${HANDLE_STYLE}; left: calc(50% - ${HANDLE_SIZE / 2}px); top: ${-ROTATE_HANDLE_OFFSET}px; cursor: grab`;
 const TOOLBAR_STYLE = [
   'position: fixed',
   'left: 0',
@@ -106,12 +134,42 @@ ${OVERLAY_SELECTOR} button[data-action="confirm"]:active { background-image: ${g
 }
 `;
 
+type DragKind = 'move' | 'resize' | 'rotate';
+
+interface DragState {
+  kind: DragKind;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  startCenterX: number;
+  startCenterY: number;
+}
+
 let activeHandle: ElementDragHandle | null = null;
 
 function clamp(value: number, size: number, viewportSize: number): number {
   // Keep the ghost fully on screen when it fits; otherwise keep it covering the viewport.
   const limit = viewportSize - size;
   return Math.min(Math.max(value, Math.min(0, limit)), Math.max(0, limit));
+}
+
+function toRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
+}
+
+// The screen box a rotated ghost covers, which is what has to stay on screen.
+function getRotatedBox(width: number, height: number, rotation: number): { width: number; height: number } {
+  const cos = Math.abs(Math.cos(toRadians(rotation)));
+  const sin = Math.abs(Math.sin(toRadians(rotation)));
+  return { width: width * cos + height * sin, height: width * sin + height * cos };
+}
+
+function findHandleKind(target: EventTarget | null): DragKind {
+  const kind = (target as { getAttribute?: (name: string) => string | null } | null)?.getAttribute?.('data-handle');
+  if (kind === 'resize' || kind === 'rotate') {
+    return kind;
+  }
+  return 'move';
 }
 
 function blockEvent(event: Event): void {
@@ -133,9 +191,15 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     width: bounds.width,
     height: bounds.height,
   };
-  let ghostLeft = bounds.left;
-  let ghostTop = bounds.top;
-  let drag: { pointerId: number; startX: number; startY: number; startLeft: number; startTop: number } | null = null;
+  // A zero-sized element still gets a ghost that can be grabbed; the size limits never shrink below it.
+  const minimumWidth = Math.min(MIN_GHOST_SIZE, bounds.width);
+  const minimumHeight = Math.min(MIN_GHOST_SIZE, bounds.height);
+  let centerX = bounds.left + bounds.width / 2;
+  let centerY = bounds.top + bounds.height / 2;
+  let ghostWidth = bounds.width;
+  let ghostHeight = bounds.height;
+  let rotation = 0;
+  let drag: DragState | null = null;
   let isEnded = false;
 
   const root = document.createElement('div');
@@ -148,9 +212,20 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   ghost.setAttribute('role', 'button');
   ghost.setAttribute('tabindex', '0');
   ghost.setAttribute('aria-label', `${targetLabel}${GHOST_LABEL_SUFFIX}`);
-  ghost.textContent = targetLabel;
-  ghost.style.width = `${bounds.width}px`;
-  ghost.style.height = `${bounds.height}px`;
+  const ghostText = document.createElement('span');
+  ghostText.setAttribute('style', GHOST_TEXT_STYLE);
+  ghostText.textContent = targetLabel;
+  const resizeHandle = document.createElement('span');
+  resizeHandle.setAttribute('data-handle', 'resize');
+  resizeHandle.setAttribute('aria-hidden', 'true');
+  resizeHandle.setAttribute('style', RESIZE_HANDLE_STYLE);
+  const rotateHandle = document.createElement('span');
+  rotateHandle.setAttribute('data-handle', 'rotate');
+  rotateHandle.setAttribute('aria-hidden', 'true');
+  rotateHandle.setAttribute('style', ROTATE_HANDLE_STYLE);
+  ghost.appendChild(ghostText);
+  ghost.appendChild(resizeHandle);
+  ghost.appendChild(rotateHandle);
 
   const toolbar = document.createElement('div');
   toolbar.setAttribute('style', TOOLBAR_STYLE);
@@ -179,17 +254,67 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   function placeToolbar(): void {
     const toolbarWidth = toolbar.offsetWidth || 0;
     const toolbarHeight = toolbar.offsetHeight || 0;
-    const below = ghostTop + bounds.height + TOOLBAR_GAP;
-    const top = below + toolbarHeight + VIEWPORT_EDGE <= viewportHeight ? below : ghostTop - TOOLBAR_GAP - toolbarHeight;
-    const left = Math.min(Math.max(ghostLeft, VIEWPORT_EDGE), Math.max(VIEWPORT_EDGE, viewportWidth - toolbarWidth - VIEWPORT_EDGE));
+    const box = getRotatedBox(ghostWidth, ghostHeight, rotation);
+    const boxTop = centerY - box.height / 2;
+    // The corner handle reaches half its size past the box, so the toolbar keeps clear of it.
+    const below = boxTop + box.height + TOOLBAR_GAP + HANDLE_SIZE / 2;
+    const top = below + toolbarHeight + VIEWPORT_EDGE <= viewportHeight ? below : boxTop - TOOLBAR_GAP - toolbarHeight;
+    const boxLeft = centerX - box.width / 2;
+    const left = Math.min(Math.max(boxLeft, VIEWPORT_EDGE), Math.max(VIEWPORT_EDGE, viewportWidth - toolbarWidth - VIEWPORT_EDGE));
     toolbar.style.left = `${left}px`;
     toolbar.style.top = `${Math.max(VIEWPORT_EDGE, top)}px`;
   }
 
+  function moveCenterTo(x: number, y: number): void {
+    const box = getRotatedBox(ghostWidth, ghostHeight, rotation);
+    centerX = clamp(x - box.width / 2, box.width, viewportWidth) + box.width / 2;
+    centerY = clamp(y - box.height / 2, box.height, viewportHeight) + box.height / 2;
+  }
+
   function placeGhost(): void {
-    ghost.style.left = `${ghostLeft}px`;
-    ghost.style.top = `${ghostTop}px`;
+    moveCenterTo(centerX, centerY);
+    ghost.style.left = `${centerX - ghostWidth / 2}px`;
+    ghost.style.top = `${centerY - ghostHeight / 2}px`;
+    ghost.style.width = `${ghostWidth}px`;
+    ghost.style.height = `${ghostHeight}px`;
+    ghost.style.transform = rotation === 0 ? 'none' : `rotate(${rotation}deg)`;
     placeToolbar();
+  }
+
+  function setSize(width: number, height: number): void {
+    ghostWidth = Math.min(Math.max(width, minimumWidth), bounds.width * MAX_SCALE);
+    ghostHeight = Math.min(Math.max(height, minimumHeight), bounds.height * MAX_SCALE);
+  }
+
+  function scaleBy(factor: number): void {
+    setSize(ghostWidth * factor, ghostHeight * factor);
+  }
+
+  function setRotation(degrees: number, snaps: boolean): void {
+    const snapped = snaps ? Math.round(degrees / ROTATION_STEP) * ROTATION_STEP : degrees;
+    rotation = normalizeRotation(Math.round(snapped));
+  }
+
+  // The corner under the pointer, measured along the ghost's own (rotated) axes from its centre, so the
+  // ghost grows symmetrically around the centre whatever its angle.
+  function resizeToward(clientX: number, clientY: number, keepsRatio: boolean): void {
+    const deltaX = clientX - centerX;
+    const deltaY = clientY - centerY;
+    const angle = toRadians(rotation);
+    const localX = Math.abs(deltaX * Math.cos(angle) + deltaY * Math.sin(angle)) * 2;
+    const localY = Math.abs(-deltaX * Math.sin(angle) + deltaY * Math.cos(angle)) * 2;
+    if (!keepsRatio || bounds.width === 0 || bounds.height === 0) {
+      setSize(localX, localY);
+      return;
+    }
+    const scale = (localX / bounds.width + localY / bounds.height) / 2;
+    setSize(bounds.width * scale, bounds.height * scale);
+  }
+
+  // The handle starts straight above the centre, so the pointer's angle from there is the rotation.
+  function rotateToward(clientX: number, clientY: number, snaps: boolean): void {
+    const degrees = (Math.atan2(clientY - centerY, clientX - centerX) * 180) / Math.PI + 90;
+    setRotation(degrees, snaps);
   }
 
   function handleGhostPointerDown(event: PointerEvent): void {
@@ -197,7 +322,14 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     if (event.button !== 0 || drag) {
       return;
     }
-    drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startLeft: ghostLeft, startTop: ghostTop };
+    drag = {
+      kind: findHandleKind(event.target),
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startCenterX: centerX,
+      startCenterY: centerY,
+    };
     ghost.setPointerCapture?.(event.pointerId);
     ghost.style.cursor = 'grabbing';
   }
@@ -207,8 +339,19 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
       return;
     }
     event.preventDefault();
-    ghostLeft = clamp(drag.startLeft + event.clientX - drag.startX, bounds.width, viewportWidth);
-    ghostTop = clamp(drag.startTop + event.clientY - drag.startY, bounds.height, viewportHeight);
+    const holdsShift = event.shiftKey === true;
+    switch (drag.kind) {
+      case 'resize':
+        resizeToward(event.clientX, event.clientY, holdsShift);
+        break;
+      case 'rotate':
+        rotateToward(event.clientX, event.clientY, holdsShift);
+        break;
+      case 'move':
+        centerX = drag.startCenterX + event.clientX - drag.startX;
+        centerY = drag.startCenterY + event.clientY - drag.startY;
+        break;
+    }
     placeGhost();
   }
 
@@ -239,14 +382,8 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
         handleConfirmClick(event);
         return;
       }
-      const directions: Record<string, [number, number]> = {
-        ArrowLeft: [-KEYBOARD_STEP, 0], ArrowRight: [KEYBOARD_STEP, 0], ArrowUp: [0, -KEYBOARD_STEP], ArrowDown: [0, KEYBOARD_STEP],
-      };
-      const direction = directions[event.key];
-      if (direction) {
+      if (applyKeyboardEdit(event.key)) {
         blockEvent(event);
-        ghostLeft = clamp(ghostLeft + direction[0], bounds.width, viewportWidth);
-        ghostTop = clamp(ghostTop + direction[1], bounds.height, viewportHeight);
         placeGhost();
         return;
       }
@@ -258,16 +395,52 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     finish(null);
   }
 
+  function applyKeyboardEdit(key: string): boolean {
+    const directions: Record<string, [number, number]> = {
+      ArrowLeft: [-KEYBOARD_STEP, 0], ArrowRight: [KEYBOARD_STEP, 0], ArrowUp: [0, -KEYBOARD_STEP], ArrowDown: [0, KEYBOARD_STEP],
+    };
+    const direction = directions[key];
+    if (direction) {
+      centerX += direction[0];
+      centerY += direction[1];
+      return true;
+    }
+    switch (key) {
+      case '+':
+      case '=':
+        scaleBy(1 + KEYBOARD_SCALE_STEP);
+        return true;
+      case '-':
+        scaleBy(1 / (1 + KEYBOARD_SCALE_STEP));
+        return true;
+      case ']':
+        setRotation(rotation + ROTATION_STEP, true);
+        return true;
+      case '[':
+        setRotation(rotation - ROTATION_STEP, true);
+        return true;
+      default:
+        return false;
+    }
+  }
+
   function handleConfirmClick(event: Event): void {
     blockEvent(event);
-    finish({
+    const attachment: EditAttachment = {
       target: { ...selection.target, rect: originalRect },
       originalRect,
-      proposedRect: { x: ghostLeft + scrollX, y: ghostTop + scrollY, width: bounds.width, height: bounds.height },
+      proposedRect: {
+        x: centerX - ghostWidth / 2 + scrollX,
+        y: centerY - ghostHeight / 2 + scrollY,
+        width: ghostWidth,
+        height: ghostHeight,
+      },
       viewportWidth,
       viewportHeight,
       note: '',
-    });
+    };
+    // An unrotated edit keeps the payload it always had.
+    finish(rotation === 0 ? attachment : { ...attachment, rotation });
   }
 
   function handleCancelClick(event: MouseEvent): void {

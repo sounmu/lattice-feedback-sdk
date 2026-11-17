@@ -106,6 +106,61 @@ describe('startElementDrag', () => {
     });
   });
 
+  it('scales the ghost around its centre from the corner handle, keeping the ratio while Shift is held', () => {
+    let attachment: EditAttachment | null = null;
+    startElementDrag(selection, { onComplete: (value) => { attachment = value; }, onCancel: vi.fn() });
+    const { ghost, confirmButton } = getOverlay();
+    const resizeHandle = ghost.children[1];
+
+    ghost.dispatch(createEvent('pointerdown', { target: resizeHandle, clientX: 220, clientY: 90 }));
+    fakeWindow.dispatch(createEvent('pointermove', { clientX: 190, clientY: 100, shiftKey: true }));
+    expect(ghost.style).toMatchObject({ width: '120px', height: '40px' });
+    fakeWindow.dispatch(createEvent('pointermove', { clientX: 250, clientY: 100 }));
+    fakeWindow.dispatch(createEvent('pointerup', { clientX: 250, clientY: 100 }));
+
+    expect(resizeHandle.getAttribute('data-handle')).toBe('resize');
+    expect(ghost.style).toMatchObject({ left: '70px', top: '40px', width: '180px', height: '60px', transform: 'none' });
+    confirmButton.dispatch(createEvent('click', { target: confirmButton }));
+    expect(attachment).toMatchObject({ proposedRect: { x: 70, y: 140, width: 180, height: 60 } });
+    expect(attachment).not.toHaveProperty('rotation');
+  });
+
+  it('turns the ghost from the handle above it, in 15 degree steps while Shift is held', () => {
+    let attachment: EditAttachment | null = null;
+    startElementDrag(selection, { onComplete: (value) => { attachment = value; }, onCancel: vi.fn() });
+    const { ghost, confirmButton } = getOverlay();
+    const rotateHandle = ghost.children[2];
+
+    ghost.dispatch(createEvent('pointerdown', { target: rotateHandle, clientX: 160, clientY: 22 }));
+    fakeWindow.dispatch(createEvent('pointermove', { clientX: 260, clientY: 75 }));
+    expect(ghost.style.transform).toBe('rotate(93deg)');
+    fakeWindow.dispatch(createEvent('pointermove', { clientX: 260, clientY: 75, shiftKey: true }));
+    fakeWindow.dispatch(createEvent('pointerup', { clientX: 260, clientY: 75 }));
+
+    expect(ghost.style).toMatchObject({ left: '100px', top: '50px', width: '120px', height: '40px', transform: 'rotate(90deg)' });
+    confirmButton.dispatch(createEvent('click', { target: confirmButton }));
+    expect(attachment).toMatchObject({ proposedRect: { x: 100, y: 150, width: 120, height: 40 }, rotation: 90 });
+  });
+
+  it('scales and turns the ghost from the keyboard and attaches it with Enter', () => {
+    const onComplete = vi.fn<(value: EditAttachment) => void>();
+    startElementDrag(selection, { onComplete, onCancel: vi.fn() });
+    const { ghost } = getOverlay();
+
+    for (const key of ['+', '[', '[']) {
+      const event = createEvent('keydown', { target: ghost, key });
+      fakeDocument.dispatch(event);
+      expect(event.preventDefault).toHaveBeenCalled();
+    }
+    expect(ghost.style.transform).toBe('rotate(-30deg)');
+    fakeDocument.dispatch(createEvent('keydown', { target: ghost, key: 'Enter' }));
+
+    const [attachment] = onComplete.mock.calls[0];
+    expect(attachment.rotation).toBe(-30);
+    expect(attachment.proposedRect.width).toBeCloseTo(132);
+    expect(attachment.proposedRect.height).toBeCloseTo(44);
+  });
+
   it('keeps the ghost inside the viewport while dragging', () => {
     const handle = startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
     const { ghost } = getOverlay();

@@ -1,3 +1,4 @@
+import { isEditRotation } from '@/lib/edit-comparison-geometry';
 import { MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS } from '@/lib/feedback-limits';
 import {
   MESSAGE_SOURCE, PROTOCOL_VERSION,
@@ -61,6 +62,7 @@ export function isCaptureState(value: unknown): value is CaptureState {
       isTarget(comment.target) && isText(comment.comment, MAX_COMMENT_LENGTH)) &&
     attachments.edits.every((edit: unknown) => isRecord(edit) && isTarget(edit.target) &&
       isRect(edit.originalRect) && isRect(edit.proposedRect) &&
+      (edit.rotation === undefined || isEditRotation(edit.rotation)) &&
       isNumber(edit.viewportWidth) && edit.viewportWidth >= 0 &&
       isNumber(edit.viewportHeight) && edit.viewportHeight >= 0 && isText(edit.note, MAX_COMMENT_LENGTH)) &&
     isFlow(attachments.flow);

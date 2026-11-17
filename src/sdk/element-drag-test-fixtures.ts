@@ -10,6 +10,7 @@ export interface FakeEvent {
   clientX: number;
   clientY: number;
   key: string;
+  shiftKey: boolean;
   preventDefault: ReturnType<typeof vi.fn>;
   stopPropagation: ReturnType<typeof vi.fn>;
   stopImmediatePropagation: ReturnType<typeof vi.fn>;
@@ -109,6 +110,7 @@ export function createEvent(type: string, overrides: Partial<FakeEvent> = {}): F
     clientX: 0,
     clientY: 0,
     key: '',
+    shiftKey: false,
     preventDefault: vi.fn(),
     stopPropagation: vi.fn(),
     stopImmediatePropagation: vi.fn(),
