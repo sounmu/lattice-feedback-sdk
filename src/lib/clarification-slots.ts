@@ -48,7 +48,8 @@ const STATED_PATTERNS: Record<ClarificationSlotId, RegExp | null> = {
   actual: /안\s?(돼|되|나와|나오|열려|열리|눌려|눌리|보여|보이|떠|넘어가|바뀌|움직)|않(아|았|고)|오류|에러|실패|멈춰|멈추|사라져|사라지|느려|깨져|깨지|튕겨|먹통|반응이?\s?없|빈\s?화면/,
   expected: /해야|돼야|되어야|될\s?줄|되길|원래|기대|했으면|하면\s?좋|으면\s?좋|게\s?해\s?주/,
   steps: /누르고|눌렀더니|누르면|클릭(하고|하면|했더니)|들어가(서|면)|선택(하고|하면|했더니)|입력(하고|하면|했더니)|한\s?다음|하고\s?나서/,
-  frequency: /항상|매번|가끔|자주|때때로|간헐|계속|매일|\d+\s?번/,
+  // A count alone is often a step ("3번 누르고"); it only answers frequency as a share or a streak ("10번 중 3번", "3번 다").
+  frequency: /항상|매번|가끔|자주|때때로|간헐|계속|매일|\d+\s?번\s?(중|에\s?\d|째|이상|넘게|연속|다|모두)/,
   // An update or deployment only dates the problem with a time word after it, not as the button that was pressed.
   since: /부터|어제|오늘|그제|지난|이후|최근|아까|(업데이트|배포)\s?(된\s?)?(후|뒤|하고\s?나서)/,
   problem: /불편|어렵|헷갈|복잡|번거|힘들|안\s?보|잘\s?안|작아|너무/,

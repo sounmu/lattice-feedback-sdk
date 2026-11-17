@@ -33,6 +33,13 @@ it('does not take an update button for the time the problem started', () => {
   expect(getClarificationSlotStates('bug', dated).find(({ id }) => id === 'since')?.status).toBe('stated');
 });
 
+it('does not take a count of button presses for how often the problem happens', () => {
+  const pressed = { ...EMPTY, message: '저장 버튼을 3번 누르고 나서 원래 저장돼야 하는데 오류가 떠요. 어제부터 그래요.' };
+  const share = { ...EMPTY, message: '10번 중 3번은 저장이 안 돼요' };
+  expect(getClarificationSlotStates('bug', pressed).find(({ id }) => id === 'frequency')?.status).toBe('missing');
+  expect(getClarificationSlotStates('bug', share).find(({ id }) => id === 'frequency')?.status).toBe('stated');
+});
+
 describe('findMissingClarificationSlots', () => {
   it('returns every missing detail in asking order, and none when nothing is missing', () => {
     expect(findMissingClarificationSlots('bug', EMPTY)).toEqual(['actual', 'expected', 'steps', 'frequency', 'since']);
