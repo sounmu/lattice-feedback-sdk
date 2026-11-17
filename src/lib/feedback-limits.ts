@@ -10,6 +10,11 @@ export const MAX_REPLAY_EVENTS = 3000;
 export const MAX_REPLAY_DURATION_MS = 5 * 60 * 1000;
 export const MAX_FEEDBACK_BYTES = 65536;
 
+/** Whether a submission body fits what the feedback API accepts. */
+export function isWithinFeedbackBytes(body: unknown): boolean {
+  return new TextEncoder().encode(JSON.stringify(body)).length <= MAX_FEEDBACK_BYTES;
+}
+
 // Saved screens carry the page's DOM, CSS, and same-origin fonts/images, so they have their own budgets.
 // Fonts and images are uploaded separately, so the screen itself stays under Vercel's 4.5 MB request limit.
 // This is the size of the upload as sent; a gzip upload may unpack to the larger size below.

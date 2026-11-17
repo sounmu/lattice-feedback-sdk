@@ -43,7 +43,10 @@ import { findAttachmentChange, type AttachmentChange, type AttachmentCounts } fr
 import { createCaptureCommand } from '@/lib/capture-protocol';
 import { createFeedbackClarification, type ClarificationChoice } from '@/lib/clarification-answers';
 import { requestClarification } from '@/lib/clarification-request';
-import type { ClarificationQuestion, FeedbackClarification, FeedbackReporter, FeedbackType } from '@/types/feedback';
+import { isWithinFeedbackBytes } from '@/lib/feedback-limits';
+import type {
+  ClarificationQuestion, CreateFeedbackInput, FeedbackClarification, FeedbackReporter, FeedbackType,
+} from '@/types/feedback';
 import type { CaptureState } from '@/types/sdk-message';
 
 const MAX_MESSAGE_LENGTH = 5000;
@@ -324,7 +327,7 @@ export function FeedbackWidget() {
       return;
     }
     const screenSnapshotIds = screens.snapshots.map((snapshot) => snapshot.id);
-    const result = await submit({
+    const input: CreateFeedbackInput = {
       projectKey: config.projectKey,
       hostOrigin: config.hostOrigin,
       message: message.trim(),
@@ -333,8 +336,10 @@ export function FeedbackWidget() {
       page,
       attachments: attachments ?? undefined,
       screenSnapshotIds,
-      ...(clarification ? { clarification } : {}),
-    });
+    };
+    // The questions are optional: a draft that only fits the size limit without them is sent without them.
+    const withClarification = clarification ? { ...input, clarification } : input;
+    const result = await submit(isWithinFeedbackBytes(withClarification) ? withClarification : input);
     if (result) {
       if (result.conversationSecret) {
         rememberConversationSecret(config.projectKey, config.hostOrigin, reporter?.id ?? null, result.conversationSecret);
@@ -649,6 +654,10 @@ export function FeedbackWidget() {
           status={<>{renderSubmitError()}{renderProgress()}</>}
           onSend={(choices) => void handleClarificationSend(choices)}
           onBack={() => {
+            // A send in flight cannot be taken back, so the draft is not reopened under it.
+            if (status === 'submitting') {
+              return;
+            }
             reset();
             setPendingQuestions(null);
           }}

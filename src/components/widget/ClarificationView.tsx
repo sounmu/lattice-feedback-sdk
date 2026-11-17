@@ -41,7 +41,7 @@ export function ClarificationView({ questions, isBusy, status, onSend, onBack, o
 
   return (
     <>
-      <WidgetHeader title="조금만 더 알려 주세요" subtitle="답하지 않아도 보낼 수 있어요" onBack={onBack} backLabel="작성 화면으로 돌아가기" onClose={onClose} />
+      <WidgetHeader title="조금만 더 알려 주세요" subtitle="답하지 않아도 보낼 수 있어요" onBack={isBusy ? undefined : onBack} backLabel="작성 화면으로 돌아가기" onClose={onClose} />
       <WidgetBody>
         <ChatMessage sender="assistant" avatar={<Avatar name={WIDGET_TEAM_NAME} size="sm" shape="rounded" tooltip={false} />} name={null}>
           <ChatMessageBubble group="first">
