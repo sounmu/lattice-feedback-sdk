@@ -35,7 +35,7 @@ export function AdminTokenForm({ onSubmit, errorMessage }: AdminTokenFormProps) 
         autoComplete="off"
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
-        className="min-h-11 rounded-[10px] border border-(--admin-border) px-3 focus:outline-2 focus:outline-(--admin-primary)"
+        className="min-h-11 rounded-(--radius-element) border border-(--admin-border) px-3"
       />
       {errorMessage ? (
         <p role="alert" className="text-sm text-(--admin-danger)">
@@ -45,7 +45,7 @@ export function AdminTokenForm({ onSubmit, errorMessage }: AdminTokenFormProps) 
       <button
         type="submit"
         disabled={!draft.trim()}
-        className="min-h-11 rounded-[10px] bg-(--admin-primary) font-semibold text-white hover:bg-(--admin-primary-hover) disabled:opacity-50"
+        className="min-h-11 rounded-(--radius-element) admin-primary-button font-semibold"
       >
         확인
       </button>

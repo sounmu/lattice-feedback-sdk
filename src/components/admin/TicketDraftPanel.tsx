@@ -52,7 +52,7 @@ export function TicketDraftPanel({ detail, projectKey }: { detail: FeedbackDetai
         value={draft.title}
         onChange={(event) => handleChange({ title: event.target.value })}
         maxLength={MAX_TICKET_TITLE_LENGTH}
-        className="min-h-11 rounded-[10px] border border-(--admin-border) px-3 focus:outline-2 focus:outline-(--admin-primary)"
+        className="min-h-11 rounded-(--radius-element) border border-(--admin-border) px-3"
       />
 
       <label htmlFor="ticket-body" className="text-sm font-semibold">
@@ -64,14 +64,14 @@ export function TicketDraftPanel({ detail, projectKey }: { detail: FeedbackDetai
         value={draft.body}
         onChange={(event) => handleChange({ body: event.target.value })}
         maxLength={MAX_TICKET_BODY_LENGTH}
-        className="rounded-[10px] border border-(--admin-border) p-3 font-mono text-sm focus:outline-2 focus:outline-(--admin-primary)"
+        className="rounded-(--radius-element) border border-(--admin-border) p-3 font-mono text-sm"
       />
 
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={handleCopy}
-          className="min-h-11 rounded-[10px] bg-(--admin-primary) px-5 font-semibold text-white hover:bg-(--admin-primary-hover)"
+          className="min-h-11 rounded-(--radius-element) admin-primary-button px-5 font-semibold"
         >
           마크다운 복사
         </button>
@@ -80,7 +80,7 @@ export function TicketDraftPanel({ detail, projectKey }: { detail: FeedbackDetai
             type="button"
             onClick={() => notion.create(draft)}
             disabled={notion.status === 'creating' || isTooLong}
-            className="min-h-11 rounded-[10px] border border-(--admin-primary) px-5 font-semibold text-(--admin-primary) hover:bg-(--admin-primary-weak) disabled:opacity-50"
+            className="min-h-11 rounded-(--radius-element) border border-(--admin-primary) px-5 font-semibold text-(--admin-primary-text) hover:bg-(--admin-primary-weak)"
           >
             {notion.status === 'creating' ? '올리는 중…' : '노션에 올리기'}
           </button>

@@ -57,7 +57,7 @@ export function FeedbackListItem({ feedback, projectKey, nowTimestamp, isSelecte
           ) : null}
           <span>{getPagePath(feedback.page.url)}</span>
           {attachmentSummary.map((item) => (
-            <span key={item.kind} className="text-(--admin-primary)">
+            <span key={item.kind} className="text-(--admin-primary-text)">
               {item.label}
             </span>
           ))}

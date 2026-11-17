@@ -1,15 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
 
 import {
-  CommentPinList,
-  CommentPinOverlay,
-  EditMoveList,
-  EditMoveOverlay,
   type CommentPinListProps,
   type CommentPinOverlayProps,
   type EditMoveListProps,
@@ -17,7 +13,8 @@ import {
   type MoveBox,
   type PinBox,
 } from '@/components/admin/ScreenMarkOverlay';
-import { MAX_REPLAY_DURATION_MS } from '@/lib/feedback-limits';
+import { AdminTokenForm } from '@/components/admin/AdminTokenForm';
+import { PREVIEW_REPLAY_PARTS } from '@/components/widget/PreviewReplayParts';
 import { GZIP_MEDIA_TYPE, isGzipBody, isGzipSupported } from '@/lib/gzip';
 import {
   findAdjacentStep,
@@ -50,12 +47,10 @@ export type ZoomMode = 'fit' | 'actual';
 type LoadResult = { key: string; snapshot: ScreenSnapshot; assets: SnapshotAssetPrefetch; timing: ReplayTiming } | { key: string; status: number };
 
 const DEFAULT_PROJECT_KEY = 'demo';
+const FRAME_LABEL = '저장한 화면';
 const UNAUTHORIZED_STATUS = 401;
 const ADMIN_TOKEN_STORAGE_KEY = 'lattice-feedback:admin-token';
 const ADMIN_TOKEN_EVENT = 'lattice-feedback:admin-token-change';
-const BUTTON_CLASS = 'min-h-11 rounded-[10px] border bg-white px-3 py-2 text-sm aria-pressed:bg-gray-900 aria-pressed:text-white';
-const REPLAY_TRUNCATED_MESSAGE =
-  `기록 한도(${MAX_REPLAY_DURATION_MS / 60_000}분·이벤트 수), 페이지 제한 또는 저장 중단으로 일부 구간이 재생에 포함되지 않았습니다.`;
 
 const MISSING_ASSET_REASON_LABELS: Record<MissingSnapshotAssetReason, string> = {
   fetch_failed: '가져오지 못함',
@@ -390,89 +385,6 @@ export const REPLAY_STEP_LABELS: Record<ReplayStepKind, string> = {
   input: '입력',
   scroll: '스크롤',
 };
-const STEP_BUTTON_CLASS = `${BUTTON_CLASS} disabled:opacity-50`;
-
-function ReplayControls({ isPlaying, currentMs, totalMs, steps, onPlay, onPause, onSeek, onStep }: ReplayControlsProps) {
-  const stepIndex = getCurrentStepIndex(steps, currentMs);
-  const previousStep = findAdjacentStep(steps, currentMs, 'previous');
-  const nextStep = findAdjacentStep(steps, currentMs, 'next');
-  return (
-    <div className="flex flex-wrap items-center gap-2" aria-label="흐름 재생">
-      <button type="button" className={BUTTON_CLASS} onClick={isPlaying ? onPause : onPlay}>
-        {isPlaying ? '일시정지' : '재생'}
-      </button>
-      <button type="button" className={BUTTON_CLASS} onClick={() => onSeek(0)}>
-        처음부터
-      </button>
-      <button
-        type="button"
-        className={STEP_BUTTON_CLASS}
-        disabled={!previousStep}
-        onClick={() => previousStep && onStep(previousStep.atMs)}
-      >
-        이전 단계
-      </button>
-      <button
-        type="button"
-        className={STEP_BUTTON_CLASS}
-        disabled={!nextStep}
-        onClick={() => nextStep && onStep(nextStep.atMs)}
-      >
-        다음 단계
-      </button>
-      <span className="text-xs text-gray-600">
-        단계 {stepIndex + 1}/{steps.length} · {REPLAY_STEP_LABELS[steps[stepIndex].kind]}
-      </span>
-      <input
-        type="range"
-        aria-label="재생 위치"
-        className="min-w-48 flex-1"
-        min={0}
-        max={Math.max(totalMs, 1)}
-        step={1}
-        value={Math.min(currentMs, totalMs)}
-        onChange={(event) => onSeek(Number(event.target.value))}
-      />
-      <span className="text-xs tabular-nums text-gray-600">
-        {formatPlaybackTime(currentMs)} / {formatPlaybackTime(totalMs)}
-      </span>
-      <span className="w-full text-xs text-gray-600">
-        기록한 조작과 페이지 이동 전후의 화면을 재생합니다. 입력값은 가려져 있습니다.
-      </span>
-    </div>
-  );
-}
-
-function AdminTokenForm() {
-  const [value, setValue] = useState('');
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (value.trim()) {
-      saveAdminToken(value.trim());
-    }
-  }
-
-  return (
-    <form className="flex max-w-md flex-col gap-2" onSubmit={handleSubmit}>
-      <label className="text-sm" htmlFor="admin-token">
-        관리자 토큰
-      </label>
-      <input
-        id="admin-token"
-        type="password"
-        autoComplete="off"
-        className="min-h-11 rounded-[10px] border bg-white p-2 text-sm"
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-      />
-      <button type="submit" className={BUTTON_CLASS}>
-        화면 열기
-      </button>
-    </form>
-  );
-}
-
 interface ScreenReplayProps {
   /** A saved screen, or one captured in this browser and not sent yet. */
   screen: Pick<CapturedScreen, 'events' | 'page'>;
@@ -487,8 +399,8 @@ interface ScreenReplayProps {
   isInert?: boolean;
   /** Marks the steps up to the first rebuilt page for the load that opened this replay. */
   timing?: ReplayTiming;
-  /** A host with its own look draws these pieces itself. Each one left out is this viewer's. */
-  parts?: Partial<ScreenReplayParts>;
+  /** The controls drawn around the rebuilt page and the marks drawn over it. */
+  parts: ScreenReplayParts;
   /** Class names of the replay and of the frame around the rebuilt page, for a host with its own look. */
   className?: string;
   frameClassName?: string;
@@ -499,49 +411,12 @@ interface ScreenReplayProps {
   frameLabel?: string;
 }
 
-interface ZoomModeButtonProps {
-  label: string;
-  isPressed: boolean;
-  onPress: () => void;
-}
-
-function ZoomModeButton({ label, isPressed, onPress }: ZoomModeButtonProps) {
-  return (
-    <button type="button" className={BUTTON_CLASS} aria-pressed={isPressed} onClick={onPress}>
-      {label}
-    </button>
-  );
-}
-
 /** The two zoom modes, the scale the chosen one gives, and how many saved files could not be loaded. */
 export interface ZoomBarProps {
   zoomMode: ZoomMode;
   scale: number;
   unloadedAssetCount: number;
   onZoomModeChange: (zoomMode: ZoomMode) => void;
-}
-
-function ZoomBar({ zoomMode, scale, unloadedAssetCount, onZoomModeChange }: ZoomBarProps) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <ZoomModeButton label="화면에 맞춤" isPressed={zoomMode === 'fit'} onPress={() => onZoomModeChange('fit')} />
-      <ZoomModeButton label="실제 크기" isPressed={zoomMode === 'actual'} onPress={() => onZoomModeChange('actual')} />
-      <span className="text-xs text-gray-600">{Math.round(scale * 100)}% · 마우스 휠로 저장된 화면을 스크롤할 수 있습니다.</span>
-      {unloadedAssetCount > 0 && (
-        <span role="alert" className="text-xs text-amber-700">
-          저장된 글꼴·이미지 {unloadedAssetCount}개를 불러오지 못했습니다.
-        </span>
-      )}
-    </div>
-  );
-}
-
-function TruncatedNotice() {
-  return (
-    <p role="alert" className="text-xs text-amber-700">
-      {REPLAY_TRUNCATED_MESSAGE}
-    </p>
-  );
 }
 
 /** The controls around the rebuilt page and the marks over it. */
@@ -555,10 +430,6 @@ export interface ScreenReplayParts {
   EditMoveList: ComponentType<EditMoveListProps>;
   CommentPinList: ComponentType<CommentPinListProps>;
 }
-
-const DEFAULT_PARTS: ScreenReplayParts = {
-  ReplayControls, TruncatedNotice, ZoomBar, EditMoveOverlay, CommentPinOverlay, EditMoveList, CommentPinList,
-};
 
 // A long Flow replay arrives as a gzip file, because the platform limits how large a response may be.
 async function readSnapshotResponse(response: Response): Promise<ScreenSnapshotDetailResponse> {
@@ -610,10 +481,10 @@ export function ScreenReplay({
   timing,
   parts,
   className = 'flex flex-col gap-2',
-  frameClassName = 'w-full overflow-auto rounded-xl border bg-white',
+  frameClassName = 'w-full overflow-auto rounded-(--radius-container) border bg-white',
   frameLabel,
 }: ScreenReplayProps) {
-  const Parts = { ...DEFAULT_PARTS, ...parts };
+  const Parts = parts;
   const frameRef = useRef<HTMLDivElement>(null);
   const [unloadedAssetCount, setUnloadedAssetCount] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -910,7 +781,18 @@ interface AdminScreenReplayProps extends Pick<ScreenReplayProps, 'initiallyShows
 // The saved files are read with the admin token inside `assets`, so the shared replay never sees it.
 export function AdminScreenReplay({ snapshot, assets, initiallyShowsProposed, timing }: AdminScreenReplayProps) {
   const loadAssetUrls = useCallback(() => assets.loadUrls(snapshot.assetHashes), [snapshot, assets]);
-  return <ScreenReplay screen={snapshot} loadAssetUrls={loadAssetUrls} initiallyShowsProposed={initiallyShowsProposed} timing={timing} />;
+  return (
+    <ScreenReplay
+      screen={snapshot}
+      loadAssetUrls={loadAssetUrls}
+      initiallyShowsProposed={initiallyShowsProposed}
+      timing={timing}
+      parts={PREVIEW_REPLAY_PARTS}
+      className="widget-replay"
+      frameClassName="widget-replay-frame"
+      frameLabel={FRAME_LABEL}
+    />
+  );
 }
 
 function ScreenSnapshotDetails({ snapshot }: { snapshot: ScreenSnapshot }) {
@@ -918,13 +800,13 @@ function ScreenSnapshotDetails({ snapshot }: { snapshot: ScreenSnapshot }) {
   return (
     <div className="flex flex-col gap-1 text-sm">
       <p className="break-all font-medium">{page.url}</p>
-      <p className="text-xs text-gray-600">
+      <p className="text-xs text-(--admin-text-sub)">
         {page.title} · {page.viewportWidth}×{page.viewportHeight} · 스크롤 ({Math.round(page.scrollX)}, {Math.round(page.scrollY)}) ·{' '}
         {new Date(snapshot.capturedAt).toLocaleString('ko-KR')} 저장
       </p>
       {missingAssets.length > 0 && (
-        <details className="text-xs text-amber-700">
-          <summary>가림·누락 기록 {missingAssets.length}개</summary>
+        <details className="text-xs text-(--admin-warning)">
+          <summary className="flex min-h-11 cursor-pointer items-center rounded-(--radius-element)">가림·누락 기록 {missingAssets.length}개</summary>
           <ul className="mt-1 flex flex-col gap-1">
             {missingAssets.map((asset) => (
               <li key={asset.url} className="break-all">
@@ -972,19 +854,23 @@ export function ScreenSnapshotViewer() {
 
   function renderBody() {
     if (!token) {
-      return <AdminTokenForm />;
+      return <AdminTokenForm onSubmit={saveAdminToken} />;
     }
     if (!result || result.key !== requestKey) {
-      return <p className="text-sm text-gray-600">저장된 화면을 불러오는 중입니다…</p>;
+      return (
+        <p role="status" className="text-sm text-(--admin-text-sub)">
+          저장한 화면을 불러오는 중이에요…
+        </p>
+      );
     }
     if ('status' in result) {
+      if (result.status === UNAUTHORIZED_STATUS) {
+        return <AdminTokenForm onSubmit={saveAdminToken} errorMessage={getLoadErrorMessage(result.status)} />;
+      }
       return (
-        <div className="flex flex-col gap-3">
-          <p role="alert" className="text-sm text-red-600">
-            {getLoadErrorMessage(result.status)}
-          </p>
-          {result.status === UNAUTHORIZED_STATUS && <AdminTokenForm />}
-        </div>
+        <p role="alert" className="rounded-(--radius-element) bg-(--admin-danger-weak) px-4 py-3 text-sm text-(--admin-danger)">
+          {getLoadErrorMessage(result.status)}
+        </p>
       );
     }
     return (
@@ -996,9 +882,11 @@ export function ScreenSnapshotViewer() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col gap-3 bg-gray-100 p-4 text-gray-900">
-      <h1 className="text-base font-semibold">저장된 화면</h1>
-      {renderBody()}
-    </main>
+    <div className="admin-root" lang="ko">
+      <main className="mx-auto flex max-w-[1440px] flex-col gap-3 p-4">
+        <h1 className="text-lg font-bold">저장한 화면</h1>
+        {renderBody()}
+      </main>
+    </div>
   );
 }
