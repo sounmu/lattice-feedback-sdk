@@ -1,12 +1,15 @@
 // Asks a model behind an OpenAI-compatible chat completions endpoint (a local server such as vLLM, Ollama or
-// LM Studio) which details a feedback still lacks. Only the reporter's words and the labels the SDK recorded
-// are sent: saved screens, page text, input values and the reporter's identity never are.
+// LM Studio) to word questions for details a feedback still lacks. Which details to ask about is decided in
+// code (clarification-slots); the model only writes the sentences and choices, and a question about any
+// other detail is dropped. Only the reporter's words and the labels the SDK recorded are sent: saved
+// screens, page text, input values and the reporter's identity never are.
 import {
   MAX_CLARIFICATION_OPTION_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_CLARIFICATION_QUESTION_LENGTH,
   MAX_CLARIFICATION_QUESTIONS, MIN_CLARIFICATION_OPTIONS,
 } from '@/lib/clarification-limits';
 import { describeMove, formatEditChange } from '@/lib/edit-comparison-geometry';
 import { FEEDBACK_TYPE_LABELS, getPagePath } from '@/lib/feedback-display';
+import { CLARIFICATION_SLOT_IDS, CLARIFICATION_SLOTS, type ClarificationSlotId } from '@/lib/clarification-slots';
 import { describeTarget } from '@/lib/target-labels';
 import { summarizeFlowSteps } from '@/lib/ticket-draft';
 import type { ClarificationQuestion, ClarifyInput } from '@/types/feedback';
@@ -94,14 +97,16 @@ export function createClarificationContext(input: ClarifyInput): ClarificationCo
 export const CLARIFICATION_SYSTEM_PROMPT = [
   '너는 웹서비스 고객 피드백을 받는 담당자를 돕는다.',
   '고객이 쓴 설명과 SDK가 기록한 맥락(가리킨 요소와 의견, 위치·크기·각도 변경 제안, 조작 순서)을 읽고,',
-  '개발자가 문제를 이해하는 데 꼭 필요한데 빠진 정보가 있을 때만 고객에게 질문한다.',
+  'askAbout에 적힌 항목마다 고객에게 물을 질문을 하나씩 만든다.',
   '규칙:',
-  `- 질문은 0개에서 ${MAX_CLARIFICATION_QUESTIONS}개. 이미 충분하면 빈 배열을 돌려준다.`,
+  `- askAbout에 없는 항목은 묻지 않는다. 질문은 최대 ${MAX_CLARIFICATION_QUESTIONS}개다.`,
+  '- 각 질문의 slot에는 askAbout의 slot 값을 그대로 적는다.',
+  '- 고객 설명에 이미 그 항목의 답이 있으면 그 항목은 건너뛴다.',
   '- 이미 알려진 요소, 위치, 변경 내용, 클릭·이동 순서, 페이지는 다시 묻지 않는다.',
   `- 질문은 한 문장의 짧은 한국어 존댓말로, 고객이 고를 수 있는 선택지 ${MIN_CLARIFICATION_OPTIONS}~${MAX_CLARIFICATION_OPTIONS}개를 함께 준다.`,
   '- 선택지는 서로 겹치지 않는 짧은 표현으로 쓴다.',
   '- 원인을 단정하지 않고, 개인정보·계정·비밀번호는 묻지 않는다.',
-  '- 다음 JSON 하나로만 답한다: {"questions":[{"question":"...","options":["...","..."]}]}',
+  '- 다음 JSON 하나로만 답한다: {"questions":[{"slot":"...","question":"...","options":["...","..."]}]}',
 ].join('\n');
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -127,8 +132,15 @@ function findOptions(value: unknown): string[] {
   return [...new Set(options)].slice(0, MAX_CLARIFICATION_OPTIONS);
 }
 
-/** The usable questions in a model's reply. A question that breaks a limit is dropped, never shortened. */
-export function parseClarificationQuestions(content: string): ClarificationQuestion[] {
+function isClarificationSlotId(value: unknown): value is ClarificationSlotId {
+  return CLARIFICATION_SLOT_IDS.some((id) => id === value);
+}
+
+/**
+ * The usable questions in a model's reply: one per asked-about detail, in the order given. A question about
+ * another detail, or one that breaks a limit, is dropped, never shortened.
+ */
+export function parseClarificationQuestions(content: string, slots: readonly ClarificationSlotId[]): ClarificationQuestion[] {
   const jsonText = findJsonText(content);
   if (jsonText === null) {
     return [];
@@ -142,9 +154,13 @@ export function parseClarificationQuestions(content: string): ClarificationQuest
   if (!isRecord(parsed) || !Array.isArray(parsed.questions)) {
     return [];
   }
-  const questions: ClarificationQuestion[] = [];
+  const questionsBySlot = new Map<ClarificationSlotId, ClarificationQuestion>();
   for (const item of parsed.questions) {
-    if (!isRecord(item) || typeof item.question !== 'string') {
+    if (!isRecord(item) || typeof item.question !== 'string' || !isClarificationSlotId(item.slot)) {
+      continue;
+    }
+    const slot = item.slot;
+    if (!slots.includes(slot) || questionsBySlot.has(slot)) {
       continue;
     }
     const question = item.question.trim();
@@ -152,9 +168,9 @@ export function parseClarificationQuestions(content: string): ClarificationQuest
     if (question.length === 0 || question.length > MAX_CLARIFICATION_QUESTION_LENGTH || options.length < MIN_CLARIFICATION_OPTIONS) {
       continue;
     }
-    questions.push({ question, options });
+    questionsBySlot.set(slot, { question, options, slot });
   }
-  return questions.slice(0, MAX_CLARIFICATION_QUESTIONS);
+  return slots.flatMap((slot) => questionsBySlot.get(slot) ?? []).slice(0, MAX_CLARIFICATION_QUESTIONS);
 }
 
 function getChatCompletionsUrl(baseUrl: string): URL {
@@ -176,8 +192,10 @@ function findReplyContent(body: unknown): string | null {
 export async function requestClarificationQuestions(
   config: ClarificationModelConfig,
   context: ClarificationContext,
+  slots: readonly ClarificationSlotId[],
   fetchImplementation: typeof fetch = fetch,
 ): Promise<ClarificationQuestion[]> {
+  const askAbout = slots.map((slot) => ({ slot, about: CLARIFICATION_SLOTS[slot].hint }));
   const response = await fetchImplementation(getChatCompletionsUrl(config.baseUrl), {
     method: 'POST',
     headers: {
@@ -191,7 +209,7 @@ export async function requestClarificationQuestions(
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: CLARIFICATION_SYSTEM_PROMPT },
-        { role: 'user', content: JSON.stringify(context) },
+        { role: 'user', content: JSON.stringify({ ...context, askAbout }) },
       ],
     }),
     signal: AbortSignal.timeout(config.timeoutMs),
@@ -203,5 +221,5 @@ export async function requestClarificationQuestions(
   if (content === null) {
     throw new Error('The clarification model reply has no message.');
   }
-  return parseClarificationQuestions(content);
+  return parseClarificationQuestions(content, slots);
 }

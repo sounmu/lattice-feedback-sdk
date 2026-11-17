@@ -57,50 +57,65 @@ describe('createClarificationContext', () => {
 
 describe('parseClarificationQuestions', () => {
   it('reads the JSON after a reasoning block or inside a code fence', () => {
-    const content = '<think>버튼 위치는 이미 알려졌다</think>\n```json\n{"questions":[{"question":"저장 뒤 어떤 일이 있었나요?","options":["오류가 떴어요","아무 반응이 없었어요"]}]}\n```';
-    expect(parseClarificationQuestions(content)).toEqual([
-      { question: '저장 뒤 어떤 일이 있었나요?', options: ['오류가 떴어요', '아무 반응이 없었어요'] },
+    const content = '<think>버튼 위치는 이미 알려졌다</think>\n```json\n{"questions":[{"slot":"actual","question":"저장 뒤 어떤 일이 있었나요?","options":["오류가 떴어요","아무 반응이 없었어요"]}]}\n```';
+    expect(parseClarificationQuestions(content, ['actual'])).toEqual([
+      { slot: 'actual', question: '저장 뒤 어떤 일이 있었나요?', options: ['오류가 떴어요', '아무 반응이 없었어요'] },
     ]);
   });
 
   it('drops questions that break a limit, removes repeated options and keeps at most two', () => {
     const questions = [
-      { question: '하나', options: ['가', '가', '나'] },
-      { question: '선택지 하나', options: ['가'] },
-      { question: 'x'.repeat(201), options: ['가', '나'] },
-      { question: '둘', options: ['가', 'x'.repeat(61), '나', '다', '라', '마'] },
-      { question: '셋', options: ['가', '나'] },
+      { slot: 'actual', question: '하나', options: ['가', '가', '나'] },
+      { slot: 'expected', question: '선택지 하나', options: ['가'] },
+      { slot: 'expected', question: 'x'.repeat(201), options: ['가', '나'] },
+      { slot: 'expected', question: '둘', options: ['가', 'x'.repeat(61), '나', '다', '라', '마'] },
     ];
-    expect(parseClarificationQuestions(JSON.stringify({ questions }))).toEqual([
-      { question: '하나', options: ['가', '나'] },
-      { question: '둘', options: ['가', '나', '다', '라'] },
+    expect(parseClarificationQuestions(JSON.stringify({ questions }), ['actual', 'expected'])).toEqual([
+      { slot: 'actual', question: '하나', options: ['가', '나'] },
+      { slot: 'expected', question: '둘', options: ['가', '나', '다', '라'] },
     ]);
   });
 
+  it('keeps one question per asked-about detail, in the asked order, and drops every other detail', () => {
+    const questions = [
+      { slot: 'since', question: '언제부터인가요?', options: ['오늘', '예전부터'] },
+      { slot: 'target', question: '어느 버튼인가요?', options: ['저장', '취소'] },
+      { question: '슬롯 없음', options: ['가', '나'] },
+      { slot: 'frequency', question: '얼마나 자주요?', options: ['매번', '가끔'] },
+      { slot: 'since', question: '언제 처음 봤나요?', options: ['어제', '지난주'] },
+    ];
+    expect(parseClarificationQuestions(JSON.stringify({ questions }), ['frequency', 'since']).map(({ question }) => question))
+      .toEqual(['얼마나 자주요?', '언제부터인가요?']);
+  });
+
   it('gives no questions for text that is not the expected JSON', () => {
-    expect(parseClarificationQuestions('질문이 없습니다')).toEqual([]);
-    expect(parseClarificationQuestions('{"questions": "none"}')).toEqual([]);
-    expect(parseClarificationQuestions('{"questions": [')).toEqual([]);
+    expect(parseClarificationQuestions('질문이 없습니다', ['actual'])).toEqual([]);
+    expect(parseClarificationQuestions('{"questions": "none"}', ['actual'])).toEqual([]);
+    expect(parseClarificationQuestions('{"questions": [', ['actual'])).toEqual([]);
   });
 });
 
 describe('requestClarificationQuestions', () => {
-  it('posts the rules and the context to the chat completions endpoint of the base URL', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => createReply('{"questions":[{"question":"언제부터인가요?","options":["오늘","예전부터"]}]}'));
-    const questions = await requestClarificationQuestions({ ...CONFIG, apiKey: 'local-key' }, createClarificationContext(INPUT), fetchMock);
+  it('posts the rules, the context and the details to ask about to the chat completions endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => createReply('{"questions":[{"slot":"since","question":"언제부터인가요?","options":["오늘","예전부터"]}]}'));
+    const questions = await requestClarificationQuestions({ ...CONFIG, apiKey: 'local-key' }, createClarificationContext(INPUT), ['since'], fetchMock);
 
-    expect(questions).toEqual([{ question: '언제부터인가요?', options: ['오늘', '예전부터'] }]);
+    expect(questions).toEqual([{ slot: 'since', question: '언제부터인가요?', options: ['오늘', '예전부터'] }]);
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe('http://localhost:11434/v1/chat/completions');
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer local-key');
     const body = JSON.parse(String(init?.body));
     expect(body.model).toBe('deepseek-v4.1-flash');
     expect(body.messages[0]).toEqual({ role: 'system', content: CLARIFICATION_SYSTEM_PROMPT });
-    expect(JSON.parse(body.messages[1].content)).toEqual(createClarificationContext(INPUT));
+    expect(JSON.parse(body.messages[1].content)).toEqual({
+      ...createClarificationContext(INPUT),
+      askAbout: [{ slot: 'since', about: expect.any(String) }],
+    });
   });
 
   it('throws when the model answers with an error or without a message', async () => {
-    await expect(requestClarificationQuestions(CONFIG, createClarificationContext(INPUT), async () => createReply('{}', 500))).rejects.toThrow('500');
-    await expect(requestClarificationQuestions(CONFIG, createClarificationContext(INPUT), async () => new Response('{"choices":[]}'))).rejects.toThrow();
+    const context = createClarificationContext(INPUT);
+    await expect(requestClarificationQuestions(CONFIG, context, ['since'], async () => createReply('{}', 500))).rejects.toThrow('500');
+    await expect(requestClarificationQuestions(CONFIG, context, ['since'], async () => new Response('{"choices":[]}'))).rejects.toThrow();
   });
 });
