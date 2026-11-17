@@ -134,9 +134,13 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
   ];
   if (feedback.details) {
     sections.push(createDetailsSection(feedback.details, feedback.clarification));
-  } else if (feedback.clarification) {
-    // Stored before details existed: one field per answered question, so the answers read as the ticket's own fields.
-    const lines = feedback.clarification.questions.map(({ question, answer, slot }) => {
+  }
+  // Questions no detail field holds: stored before details existed, or asked without a field. One line each, so
+  // the answers read as the ticket's own fields.
+  const details = feedback.details ?? [];
+  const unlisted = feedback.clarification?.questions.filter(({ slot }) => !slot || !details.some((detail) => detail.slot === slot)) ?? [];
+  if (unlisted.length > 0) {
+    const lines = unlisted.map(({ question, answer, slot }) => {
       const reply = answer === null ? '(건너뜀)' : plain(answer);
       return `- ${getClarificationFieldLabel(slot)}: ${reply} (AI 질문: ${plain(question)})`;
     });

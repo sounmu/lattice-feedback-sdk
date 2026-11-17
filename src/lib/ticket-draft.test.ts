@@ -236,3 +236,12 @@ it('lists every detail with its source, names the AI question an answer replies 
   // The answers are in the fields, so the older question list is not repeated.
   expect(body).not.toContain('## AI 확인 질문과 사용자 답변');
 });
+
+it('still lists an answer to a question that no detail field holds', () => {
+  const { body } = createTicketDraft(createDetail({
+    clarification: { model: 'm', questions: [{ question: '어느 메뉴였나요?', options: ['주문', '설정'], answer: '주문' }] },
+    details: [{ slot: 'actual', source: 'missing', value: null }],
+  }), ADMIN_ORIGIN);
+
+  expect(body).toContain('## AI 확인 질문과 사용자 답변\n\n- 추가 확인: 주문 (AI 질문: 어느 메뉴였나요?)');
+});

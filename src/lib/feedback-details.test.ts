@@ -51,6 +51,14 @@ describe('createFeedbackDetails', () => {
     expect(details[2].value).toContain('save-button');
   });
 
+  it('never cuts an emoji in half', () => {
+    const details = createFeedbackDetails({
+      ...INPUT,
+      clarification: { model: 'm', questions: [{ question: '무슨 일이?', options: ['a', 'b'], slot: 'actual', answer: '😀'.repeat(151) }] },
+    });
+    expect(details[0].value?.endsWith('😀…')).toBe(true);
+  });
+
   it('cuts a long sentence to the stored limit', () => {
     const [actual] = createFeedbackDetails({ ...INPUT, message: `${'가'.repeat(400)} 오류가 떠요` });
     expect(actual.value).toHaveLength(MAX_FEEDBACK_DETAIL_LENGTH);

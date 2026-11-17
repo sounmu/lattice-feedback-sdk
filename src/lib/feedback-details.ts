@@ -4,13 +4,15 @@
 import { createClarificationContext, type ClarificationContext } from '@/lib/clarification-model';
 import { CLARIFICATION_SLOTS_BY_TYPE, findStatedSentence, type ClarificationSlotId } from '@/lib/clarification-slots';
 import { MAX_FEEDBACK_DETAIL_LENGTH } from '@/lib/feedback-details-limits';
+import { truncateText } from '@/lib/feedback-limits';
 import type { CreateFeedbackInput, FeedbackDetail } from '@/types/feedback';
 
 const MAX_LISTED_ITEMS = 3;
 
 function truncate(text: string): string {
   const collapsed = text.replace(/\s+/g, ' ').trim();
-  return collapsed.length > MAX_FEEDBACK_DETAIL_LENGTH ? `${collapsed.slice(0, MAX_FEEDBACK_DETAIL_LENGTH - 1)}…` : collapsed;
+  // Cut by code point: half an emoji is not valid text, and the database refuses it.
+  return collapsed.length > MAX_FEEDBACK_DETAIL_LENGTH ? `${truncateText(collapsed, MAX_FEEDBACK_DETAIL_LENGTH - 1)}…` : collapsed;
 }
 
 function listWithRest(items: string[]): string {
