@@ -13,7 +13,7 @@ export function AdminFrame({ projectKey, hasToken, onSignOut, isWide = false, ch
   const widthClassName = isWide ? 'max-w-5xl xl:max-w-[1440px]' : 'max-w-5xl';
 
   return (
-    <div className="admin-root">
+    <div className="admin-root" lang="ko">
       <header className="border-b border-(--admin-border) bg-(--admin-surface)">
         <div className={`mx-auto flex items-center justify-between gap-3 px-4 py-3 ${widthClassName}`}>
           <div className="flex items-baseline gap-2">
@@ -24,7 +24,7 @@ export function AdminFrame({ projectKey, hasToken, onSignOut, isWide = false, ch
             <button
               type="button"
               onClick={onSignOut}
-              className="min-h-11 rounded-[10px] border border-(--admin-border) px-4 text-sm text-(--admin-text-sub) hover:bg-(--admin-surface-sub)"
+              className="min-h-11 rounded-(--radius-element) border border-(--admin-border) px-4 text-sm text-(--admin-text-sub) hover:bg-(--admin-surface-sub)"
             >
               토큰 지우기
             </button>

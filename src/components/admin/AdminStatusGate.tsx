@@ -31,7 +31,7 @@ export function AdminStatusGate({ status, errorMessage, onRetry, children }: Adm
       <div role="alert" className="mx-auto mt-10 flex max-w-md flex-col items-center gap-3 rounded-2xl border border-(--admin-border) bg-(--admin-surface) p-6 text-center">
         <p className="text-(--admin-danger)">{errorMessage}</p>
         {onRetry ? (
-          <button type="button" onClick={onRetry} className="min-h-11 rounded-[10px] bg-(--admin-primary) px-5 font-semibold text-white">
+          <button type="button" onClick={onRetry} className="min-h-11 rounded-(--radius-element) admin-primary-button px-5 font-semibold">
             다시 시도
           </button>
         ) : null}

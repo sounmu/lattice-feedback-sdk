@@ -93,9 +93,9 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
         {FEEDBACK_STATUSES.map((option) => (
           <label
             key={option}
-            className={`flex min-h-11 cursor-pointer items-center rounded-[10px] border px-4 font-semibold ${
+            className={`flex min-h-11 cursor-pointer items-center rounded-(--radius-element) border px-4 font-semibold ${
               status === option
-                ? 'border-(--admin-primary) bg-(--admin-primary-weak) text-(--admin-primary)'
+                ? 'border-transparent bg-(--admin-primary-weak) text-(--admin-primary-text)'
                 : 'border-(--admin-border) text-(--admin-text-sub)'
             }`}
           >
@@ -131,7 +131,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
         value={reply}
         onChange={(event) => handleReplyChange(event.target.value)}
         placeholder="작성자에게 보여줄 답변을 적어 주세요."
-        className="rounded-[10px] border border-(--admin-border) p-3 focus:outline-2 focus:outline-(--admin-primary)"
+        className="rounded-(--radius-element) border border-(--admin-border) p-3"
       />
       {isReplyUnsaved ? (
         <p className="text-xs text-(--admin-warning)">
@@ -146,7 +146,7 @@ export function FeedbackActionPanel({ feedback, saveStatus, saveErrorMessage, on
           type="button"
           onClick={() => saveChanges(changes)}
           disabled={!isChanged || isSaving || isOriginalMissing}
-          className="min-h-11 rounded-[10px] bg-(--admin-primary) px-5 font-semibold text-white hover:bg-(--admin-primary-hover) disabled:opacity-50"
+          className="min-h-11 rounded-(--radius-element) admin-primary-button px-5 font-semibold"
         >
           저장
         </button>

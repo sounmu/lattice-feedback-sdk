@@ -1,5 +1,5 @@
-/* Astryx base, components and the neutral theme, loaded for the widget route only. globals.css
-   declares the cascade-layer order these files fill, so admin pages never receive them. The theme's
+/* Astryx base, components and the neutral theme, loaded for the widget and admin routes. globals.css
+   declares the cascade-layer order these files fill. The theme's
    fonts.css is left out on purpose: it loads Figtree from a font CDN, which closed networks block. */
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";

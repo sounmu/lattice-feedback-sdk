@@ -36,7 +36,7 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
   return (
     <div className="flex flex-col gap-4">
       {isEmbedded ? null : (
-        <Link href={`/admin?projectKey=${encodeURIComponent(projectKey)}`} className="flex min-h-11 items-center text-(--admin-primary)">
+        <Link href={`/admin?projectKey=${encodeURIComponent(projectKey)}`} className="flex min-h-11 items-center text-(--admin-primary-text)">
           ← 목록으로
         </Link>
       )}
@@ -53,7 +53,7 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
                 먼저 접수된 피드백과 같은 내용으로 표시했어요.{' '}
                 <Link
                   href={`/admin/feedback/${encodeURIComponent(feedback.duplicateOfId)}?projectKey=${encodeURIComponent(projectKey)}`}
-                  className="font-semibold text-(--admin-primary)"
+                  className="font-semibold text-(--admin-primary-text)"
                 >
                   원본 피드백 보기
                 </Link>

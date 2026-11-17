@@ -25,7 +25,7 @@ export function AdminSection({ sectionKey, title, children }: AdminSectionProps)
           aria-controls={contentId}
           onClick={toggle}
           // The negative margin keeps the heading where it was while the button gets a full-size touch area.
-          className="-m-2 flex min-h-11 w-[calc(100%+1rem)] items-center justify-between gap-2 rounded-[10px] p-2 text-left text-base font-bold hover:bg-(--admin-surface-sub)"
+          className="-m-2 flex min-h-11 w-[calc(100%+1rem)] items-center justify-between gap-2 rounded-(--radius-element) p-2 text-left text-base font-bold hover:bg-(--admin-surface-sub)"
         >
           <span className="min-w-0">{title}</span>
           <svg

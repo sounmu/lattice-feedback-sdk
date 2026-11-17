@@ -21,7 +21,7 @@ export function SidePaneToggle({ isCollapsed, side, label, onToggle, className =
       aria-label={actionLabel}
       title={actionLabel}
       onClick={onToggle}
-      className={`flex size-11 shrink-0 items-center justify-center rounded-[10px] border border-(--admin-border) bg-(--admin-surface) text-(--admin-text-sub) hover:bg-(--admin-surface-sub) ${className}`}
+      className={`flex size-11 shrink-0 items-center justify-center rounded-(--radius-element) border border-(--admin-border) bg-(--admin-surface) text-(--admin-text-sub) hover:bg-(--admin-surface-sub) ${className}`}
     >
       <svg
         aria-hidden="true"

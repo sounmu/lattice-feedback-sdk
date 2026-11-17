@@ -17,7 +17,7 @@ export function FlowTimeline({ flow }: { flow: FlowAttachment }) {
       ) : (
         <ol className="flex flex-col gap-1">
           {flow.events.map((event, index) => (
-            <li key={`${event.offsetMs}-${index}`} className="flex items-baseline gap-3 rounded-lg bg-(--admin-surface-sub) px-3 py-2">
+            <li key={`${event.offsetMs}-${index}`} className="flex items-baseline gap-3 rounded-(--radius-element) bg-(--admin-surface-sub) px-3 py-2">
               <span className="w-14 shrink-0 font-mono text-xs text-(--admin-text-muted)">{formatOffset(event.offsetMs)}</span>
               <span className="w-16 shrink-0 font-semibold">{EVENT_LABELS[event.type]}</span>
               <span className="min-w-0 truncate text-(--admin-text-sub)">

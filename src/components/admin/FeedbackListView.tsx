@@ -31,7 +31,7 @@ interface FeedbackListViewProps {
 }
 
 const STATUS_TABS: StatusFilter[] = ['all', ...FEEDBACK_STATUSES];
-const FIELD_CLASS_NAME = 'min-h-11 rounded-[10px] border border-(--admin-border) bg-(--admin-surface) px-3';
+const FIELD_CLASS_NAME = 'min-h-11 rounded-(--radius-element) border border-(--admin-border) bg-(--admin-surface) px-3';
 
 function getStatusTabLabel(status: StatusFilter): string {
   return status === 'all' ? '전체' : FEEDBACK_STATUS_LABELS[status];
@@ -93,7 +93,7 @@ export function FeedbackListView({ items, projectKey, nowTimestamp, onReload, se
               aria-selected={isSelected}
               onClick={() => setQuery({ ...query, status })}
               className={`min-h-11 rounded-full px-4 font-semibold ${
-                isSelected ? 'bg-(--admin-primary) text-white' : 'border border-(--admin-border) bg-(--admin-surface) text-(--admin-text-sub)'
+                isSelected ? 'bg-(--admin-primary-weak) text-(--admin-primary-text)' : 'border border-(--admin-border) bg-(--admin-surface) text-(--admin-text-sub)'
               }`}
             >
               {getStatusTabLabel(status)} {counts[status]}
