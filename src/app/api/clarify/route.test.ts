@@ -6,7 +6,7 @@ import type { ApiErrorResponse, ClarificationQuestion, ClarifyResponse } from '@
 
 const URL_ = 'http://localhost:3000/api/clarify';
 const BODY = { projectKey: 'demo', hostOrigin: ALLOWED_ORIGIN, message: '저장이 안 돼요', type: 'bug', page: { url: `${ALLOWED_ORIGIN}/orders` } };
-// "안 돼요" already says what happened, so for this bug only the expected result and the steps are missing.
+// "안 돼요" already says what happened, so for this bug every detail but the actual result is missing.
 const QUESTION: ClarificationQuestion = { slot: 'expected', question: '원래는 어떻게 되어야 하나요?', options: ['저장 완료 표시', '목록으로 이동'] };
 
 function stubModel(response: () => Response | Promise<Response>) {
@@ -45,7 +45,7 @@ describe('POST /api/clarify', () => {
 
     expect((await response.json()).questions).toEqual([QUESTION]);
     const sent = JSON.parse(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).messages[1].content);
-    expect(sent.askAbout.map(({ slot }: { slot: string }) => slot)).toEqual(['expected', 'steps']);
+    expect(sent.askAbout.map(({ slot }: { slot: string }) => slot)).toEqual(['expected', 'steps', 'frequency', 'since']);
   });
 
   it('does not call the model when the feedback already covers every detail', async () => {

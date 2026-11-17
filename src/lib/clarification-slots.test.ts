@@ -27,8 +27,8 @@ describe('getClarificationSlotStates', () => {
 });
 
 describe('findMissingClarificationSlots', () => {
-  it('returns the first missing details, at most two, and none when nothing is missing', () => {
-    expect(findMissingClarificationSlots('bug', EMPTY)).toEqual(['actual', 'expected']);
+  it('returns every missing detail in asking order, and none when nothing is missing', () => {
+    expect(findMissingClarificationSlots('bug', EMPTY)).toEqual(['actual', 'expected', 'steps', 'frequency', 'since']);
     expect(findMissingClarificationSlots('question', { ...EMPTY, message: '엑셀로 받으려면 어떻게 해요?', comments: [{ element: '표', comment: '' }] })).toEqual([]);
   });
 });

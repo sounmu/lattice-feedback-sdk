@@ -1,7 +1,6 @@
 // What a feedback of each type should tell the developer, and which of it the feedback already does. The
 // questions are decided here, in code: the model is only asked to word a question for a detail that is
 // still missing, so it cannot ask again for an element, a change or steps the SDK already recorded.
-import { MAX_CLARIFICATION_QUESTIONS } from '@/lib/clarification-limits';
 import type { ClarificationContext } from '@/lib/clarification-model';
 import type { FeedbackType } from '@/types/feedback';
 
@@ -100,10 +99,13 @@ export function getClarificationSlotStates(type: FeedbackType, context: Clarific
   });
 }
 
-/** The details worth asking about, at most as many as the widget asks. Empty when nothing is missing. */
+/**
+ * Every detail worth asking about, in asking order. Empty when nothing is missing. All of them go to the
+ * model: when it finds one already answered in words the patterns missed, it moves on to the next, and the
+ * question limit applies only to what it returns.
+ */
 export function findMissingClarificationSlots(type: FeedbackType, context: ClarificationContext): ClarificationSlotId[] {
   return getClarificationSlotStates(type, context)
     .filter(({ status }) => status === 'missing')
-    .map(({ id }) => id)
-    .slice(0, MAX_CLARIFICATION_QUESTIONS);
+    .map(({ id }) => id);
 }

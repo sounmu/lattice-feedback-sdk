@@ -63,7 +63,7 @@ describe('parseClarificationQuestions', () => {
     ]);
   });
 
-  it('drops questions that break a limit, removes repeated options and keeps at most two', () => {
+  it('drops questions that break a limit, removes repeated options and keeps at most two of many candidates', () => {
     const questions = [
       { slot: 'actual', question: '하나', options: ['가', '가', '나'] },
       { slot: 'expected', question: '선택지 하나', options: ['가'] },
