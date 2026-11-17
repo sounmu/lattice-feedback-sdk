@@ -65,6 +65,8 @@ export interface EditAttachment {
   target: ElementTarget;
   originalRect: ElementRect;
   proposedRect: ElementRect;
+  /** Clockwise degrees around the proposed box's centre; absent when the element is not rotated. */
+  rotation?: number;
   viewportWidth: number;
   viewportHeight: number;
   note: string;

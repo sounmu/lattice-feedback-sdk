@@ -8,7 +8,7 @@ export interface CommentPinSource extends Pick<ScreenCommentPin, 'number' | 'key
 }
 
 /** A proposed move to show on the saved screen, with the live element that was dragged. */
-export interface EditMoveSource extends Pick<ScreenEditMove, 'number' | 'key' | 'label' | 'originalRect' | 'proposedRect'> {
+export interface EditMoveSource extends Pick<ScreenEditMove, 'number' | 'key' | 'label' | 'originalRect' | 'proposedRect' | 'rotation'> {
   element: Element;
 }
 
@@ -48,8 +48,9 @@ export function createEditMoves(sources: readonly EditMoveSource[], findNodeId: 
       const bounds = element.getBoundingClientRect();
       return element.isConnected && bounds.width > 0 && bounds.height > 0;
     })
-    .map(({ element, number, key, label, originalRect, proposedRect }) => {
+    .map(({ element, number, key, label, originalRect, proposedRect, rotation }) => {
       const nodeId = findNodeId(element);
-      return { number, key, nodeId: nodeId >= 0 ? nodeId : null, originalRect, proposedRect, label: truncateText(label, MAX_LABEL_LENGTH) };
+      const move: ScreenEditMove = { number, key, nodeId: nodeId >= 0 ? nodeId : null, originalRect, proposedRect, label: truncateText(label, MAX_LABEL_LENGTH) };
+      return rotation === undefined ? move : { ...move, rotation };
     });
 }

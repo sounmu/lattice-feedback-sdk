@@ -20,7 +20,7 @@ interface DuplicateOriginalPickerProps {
 }
 
 const MAX_OPTION_SUMMARY_LENGTH = 40;
-const FIELD_CLASS_NAME = 'min-h-11 w-full rounded-[10px] border border-(--admin-border) bg-(--admin-surface) px-3';
+const FIELD_CLASS_NAME = 'min-h-11 w-full rounded-(--radius-element) border border-(--admin-border) bg-(--admin-surface) px-3';
 
 function getOptionLabel(feedback: Feedback): string {
   const firstLine = feedback.message.trim().split('\n')[0];

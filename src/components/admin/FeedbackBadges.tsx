@@ -3,7 +3,7 @@ import type { FeedbackStatus, FeedbackType } from '@/types/feedback';
 
 const STATUS_CLASS_NAMES: Record<FeedbackStatus, string> = {
   open: 'bg-(--admin-warning-weak) text-(--admin-warning)',
-  in_progress: 'bg-(--admin-primary-weak) text-(--admin-primary)',
+  in_progress: 'bg-(--admin-primary-weak) text-(--admin-primary-text)',
   resolved: 'bg-(--admin-success-weak) text-(--admin-success)',
   rejected: 'bg-(--admin-surface-sub) text-(--admin-text-sub)',
   duplicate: 'bg-(--admin-surface-sub) text-(--admin-text-sub)',

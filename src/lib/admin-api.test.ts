@@ -111,6 +111,34 @@ describe('updateFeedback', () => {
   });
 });
 
+describe('browser caching', () => {
+  it.each([
+    { name: 'list', call: () => getFeedbackList({ projectKey: 'demo', token: 'secret' }), body: { items: [] } },
+    {
+      name: 'detail',
+      call: () => getFeedbackDetail({ projectKey: 'demo', token: 'secret', id: 'fb_0001' }),
+      body: { feedback: MOCK_FEEDBACKS[0], screenSnapshots: [] },
+    },
+  ])('leaves the $name GET to the browser cache, which revalidates it with the ETag', async ({ call, body }) => {
+    const fetchMock = mockFetchResponse(body);
+
+    await call();
+
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty('cache');
+  });
+
+  it.each([
+    { name: 'update', call: () => updateFeedback({ projectKey: 'demo', token: 'secret', id: 'fb_0001', changes: { status: 'open' } }) },
+    { name: 'ticket', call: () => createTicket({ projectKey: 'demo', token: 'secret', id: 'fb_0001', ticket: { title: 't', body: 'b' } }) },
+  ])('never caches the $name write', async ({ call }) => {
+    const fetchMock = mockFetchResponse({});
+
+    await call();
+
+    expect(fetchMock.mock.calls[0][1]).toHaveProperty('cache', 'no-store');
+  });
+});
+
 const TICKET = { title: '[버그] 제목', body: '## 요약' };
 describe('createTicket', () => {
   it('posts to the ticket endpoint and returns the link', async () => {

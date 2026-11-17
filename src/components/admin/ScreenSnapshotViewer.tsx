@@ -1,15 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Replayer } from '@rrweb/replay';
 import '@rrweb/replay/dist/style.css';
 
 import {
-  CommentPinList,
-  CommentPinOverlay,
-  EditMoveList,
-  EditMoveOverlay,
   type CommentPinListProps,
   type CommentPinOverlayProps,
   type EditMoveListProps,
@@ -17,18 +13,25 @@ import {
   type MoveBox,
   type PinBox,
 } from '@/components/admin/ScreenMarkOverlay';
-import { MAX_REPLAY_DURATION_MS } from '@/lib/feedback-limits';
+import { AdminTokenForm } from '@/components/admin/AdminTokenForm';
+import { PREVIEW_REPLAY_PARTS } from '@/components/widget/PreviewReplayParts';
+import { describeMove } from '@/lib/edit-comparison-geometry';
 import { GZIP_MEDIA_TYPE, isGzipBody, isGzipSupported } from '@/lib/gzip';
 import {
-  findAdjacentStep,
   findReplaySteps,
-  getCurrentStepIndex,
   getViewportAt,
   type ReplayStep,
   type ReplayStepKind,
 } from '@/lib/screen-preview';
 import { findCommentPins, findEditMoves, hasReplayEvents, isReplayTruncated } from '@/lib/screen-snapshot';
-import { resolveAssetReferences } from '@/lib/snapshot-asset-references';
+import { loadReplayModule } from '@/lib/replay-module';
+import { createReplayTiming, type ReplayTiming } from '@/lib/replay-timing';
+import { copyWithResolvedAssetReferences } from '@/lib/snapshot-asset-references';
+import {
+  createSnapshotAssetPrefetch,
+  findRememberedAssetHashes,
+  type SnapshotAssetPrefetch,
+} from '@/lib/snapshot-asset-prefetch';
 import type {
   CapturedScreen,
   MissingSnapshotAssetReason,
@@ -40,15 +43,13 @@ import type {
 
 type ReplayerEvents = ConstructorParameters<typeof Replayer>[0];
 export type ZoomMode = 'fit' | 'actual';
-type LoadResult = { key: string; snapshot: ScreenSnapshot } | { key: string; status: number };
+type LoadResult = { key: string; snapshot: ScreenSnapshot; assets: SnapshotAssetPrefetch; timing: ReplayTiming } | { key: string; status: number };
 
 const DEFAULT_PROJECT_KEY = 'demo';
+const FRAME_LABEL = '저장한 화면';
 const UNAUTHORIZED_STATUS = 401;
 const ADMIN_TOKEN_STORAGE_KEY = 'lattice-feedback:admin-token';
 const ADMIN_TOKEN_EVENT = 'lattice-feedback:admin-token-change';
-const BUTTON_CLASS = 'min-h-11 rounded-[10px] border bg-white px-3 py-2 text-sm aria-pressed:bg-gray-900 aria-pressed:text-white';
-const REPLAY_TRUNCATED_MESSAGE =
-  `기록 한도(${MAX_REPLAY_DURATION_MS / 60_000}분·이벤트 수), 페이지 제한 또는 저장 중단으로 일부 구간이 재생에 포함되지 않았습니다.`;
 
 const MISSING_ASSET_REASON_LABELS: Record<MissingSnapshotAssetReason, string> = {
   fetch_failed: '가져오지 못함',
@@ -175,6 +176,17 @@ function getMoveDelta(move: ScreenEditMove): { x: number; y: number } {
   return { x: move.proposedRect.x - move.originalRect.x, y: move.proposedRect.y - move.originalRect.y };
 }
 
+function getMoveChange(move: ScreenEditMove) {
+  return describeMove(move.originalRect, move.proposedRect, move.rotation);
+}
+
+// The proposal scales the element as it is drawn and turns it. Where the turn is centred only shifts the
+// copy, and the copy is placed by its centre afterwards, so no transform origin has to be chosen here.
+function getProposedTransform(element: Element, move: ScreenEditMove, view: Window & typeof globalThis): DOMMatrix {
+  const { scaleX, scaleY, rotation } = getMoveChange(move);
+  return new view.DOMMatrix().rotate(rotation).scale(scaleX, scaleY).multiply(getVisualTransform(element, view));
+}
+
 const MOVE_CLONE_ATTRIBUTE = 'data-lattice-move-clone';
 // Styling a very large subtree element by element would stall the viewer; the rest keeps its own rules.
 const MAX_STYLED_CLONE_ELEMENTS = 500;
@@ -275,14 +287,20 @@ function positionProposedClones(replayer: Replayer, moves: ScreenEditMove[]): vo
     }
     const bounds = element.getBoundingClientRect();
     const delta = getMoveDelta(move);
+    const { scaleX, scaleY } = getMoveChange(move);
     const targetX = bounds.left + delta.x;
     const targetY = bounds.top + delta.y;
+    const centerX = targetX + (bounds.width * scaleX) / 2;
+    const centerY = targetY + (bounds.height * scaleY) / 2;
     clone.style.setProperty('left', `${targetX + view.scrollX}px`);
     clone.style.setProperty('top', `${targetY + view.scrollY}px`);
-    // A transformed clone is drawn away from its left/top corner; one correction lines up what is seen.
+    // A transformed clone is drawn away from its left/top corner; one correction lines up the centre of
+    // what is seen, which a rotation leaves in place.
     const drawn = clone.getBoundingClientRect();
-    clone.style.setProperty('left', `${targetX + view.scrollX + targetX - drawn.left}px`);
-    clone.style.setProperty('top', `${targetY + view.scrollY + targetY - drawn.top}px`);
+    const drawnCenterX = drawn.left + drawn.width / 2;
+    const drawnCenterY = drawn.top + drawn.height / 2;
+    clone.style.setProperty('left', `${targetX + view.scrollX + centerX - drawnCenterX}px`);
+    clone.style.setProperty('top', `${targetY + view.scrollY + centerY - drawnCenterY}px`);
   }
 }
 
@@ -299,7 +317,9 @@ function measureMove(replayer: Replayer, move: ScreenEditMove): MoveBox {
     const view = replayer.iframe.contentWindow;
     original = { ...original, x: original.x - (view?.scrollX ?? 0), y: original.y - (view?.scrollY ?? 0) };
   }
-  return { move, original, proposed: { ...original, x: original.x + delta.x, y: original.y + delta.y } };
+  const { scaleX, scaleY, rotation } = getMoveChange(move);
+  const proposed = { x: original.x + delta.x, y: original.y + delta.y, width: original.width * scaleX, height: original.height * scaleY };
+  return { move, original, proposed, rotation };
 }
 
 // Only the rebuilt page in the sandboxed iframe changes; the host page is never touched. The proposal
@@ -324,15 +344,15 @@ function showProposedPositions(replayer: Replayer, moves: ScreenEditMove[], isSh
     const clone = element.cloneNode(true) as HTMLElement;
     clone.setAttribute(MOVE_CLONE_ATTRIBUTE, move.key);
     copyResolvedStyles(element, clone, view, { remaining: MAX_STYLED_CLONE_ELEMENTS });
-    // The untransformed layout size is kept and the visible transform reapplied, so a scaled or rotated
-    // element looks the same at the proposed position.
+    // The untransformed layout size is kept and the visible transform reapplied with the proposed scale and
+    // turn on top, so an element already scaled or rotated on the page keeps that look at the proposed position.
     Object.assign(clone.style, {
       position: 'absolute',
       width: `${element.offsetWidth || bounds.width}px`,
       height: `${element.offsetHeight || bounds.height}px`,
       margin: '0',
       boxSizing: 'border-box',
-      transform: getVisualTransform(element, view as Window & typeof globalThis).toString(),
+      transform: getProposedTransform(element, move, view as Window & typeof globalThis).toString(),
       transformOrigin: '0 0',
       visibility: 'visible',
       zIndex: '2147483647',
@@ -383,89 +403,6 @@ export const REPLAY_STEP_LABELS: Record<ReplayStepKind, string> = {
   input: '입력',
   scroll: '스크롤',
 };
-const STEP_BUTTON_CLASS = `${BUTTON_CLASS} disabled:opacity-50`;
-
-function ReplayControls({ isPlaying, currentMs, totalMs, steps, onPlay, onPause, onSeek, onStep }: ReplayControlsProps) {
-  const stepIndex = getCurrentStepIndex(steps, currentMs);
-  const previousStep = findAdjacentStep(steps, currentMs, 'previous');
-  const nextStep = findAdjacentStep(steps, currentMs, 'next');
-  return (
-    <div className="flex flex-wrap items-center gap-2" aria-label="흐름 재생">
-      <button type="button" className={BUTTON_CLASS} onClick={isPlaying ? onPause : onPlay}>
-        {isPlaying ? '일시정지' : '재생'}
-      </button>
-      <button type="button" className={BUTTON_CLASS} onClick={() => onSeek(0)}>
-        처음부터
-      </button>
-      <button
-        type="button"
-        className={STEP_BUTTON_CLASS}
-        disabled={!previousStep}
-        onClick={() => previousStep && onStep(previousStep.atMs)}
-      >
-        이전 단계
-      </button>
-      <button
-        type="button"
-        className={STEP_BUTTON_CLASS}
-        disabled={!nextStep}
-        onClick={() => nextStep && onStep(nextStep.atMs)}
-      >
-        다음 단계
-      </button>
-      <span className="text-xs text-gray-600">
-        단계 {stepIndex + 1}/{steps.length} · {REPLAY_STEP_LABELS[steps[stepIndex].kind]}
-      </span>
-      <input
-        type="range"
-        aria-label="재생 위치"
-        className="min-w-48 flex-1"
-        min={0}
-        max={Math.max(totalMs, 1)}
-        step={1}
-        value={Math.min(currentMs, totalMs)}
-        onChange={(event) => onSeek(Number(event.target.value))}
-      />
-      <span className="text-xs tabular-nums text-gray-600">
-        {formatPlaybackTime(currentMs)} / {formatPlaybackTime(totalMs)}
-      </span>
-      <span className="w-full text-xs text-gray-600">
-        기록한 조작과 페이지 이동 전후의 화면을 재생합니다. 입력값은 가려져 있습니다.
-      </span>
-    </div>
-  );
-}
-
-function AdminTokenForm() {
-  const [value, setValue] = useState('');
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (value.trim()) {
-      saveAdminToken(value.trim());
-    }
-  }
-
-  return (
-    <form className="flex max-w-md flex-col gap-2" onSubmit={handleSubmit}>
-      <label className="text-sm" htmlFor="admin-token">
-        관리자 토큰
-      </label>
-      <input
-        id="admin-token"
-        type="password"
-        autoComplete="off"
-        className="min-h-11 rounded-[10px] border bg-white p-2 text-sm"
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-      />
-      <button type="submit" className={BUTTON_CLASS}>
-        화면 열기
-      </button>
-    </form>
-  );
-}
-
 interface ScreenReplayProps {
   /** A saved screen, or one captured in this browser and not sent yet. */
   screen: Pick<CapturedScreen, 'events' | 'page'>;
@@ -478,8 +415,10 @@ interface ScreenReplayProps {
   initiallyShowsProposed?: boolean;
   /** Keeps the rebuilt page out of the tab order: it is shown as a picture, and its links and buttons do nothing. */
   isInert?: boolean;
-  /** A host with its own look draws these pieces itself. Each one left out is this viewer's. */
-  parts?: Partial<ScreenReplayParts>;
+  /** Marks the steps up to the first rebuilt page for the load that opened this replay. */
+  timing?: ReplayTiming;
+  /** The controls drawn around the rebuilt page and the marks drawn over it. */
+  parts: ScreenReplayParts;
   /** Class names of the replay and of the frame around the rebuilt page, for a host with its own look. */
   className?: string;
   frameClassName?: string;
@@ -490,49 +429,12 @@ interface ScreenReplayProps {
   frameLabel?: string;
 }
 
-interface ZoomModeButtonProps {
-  label: string;
-  isPressed: boolean;
-  onPress: () => void;
-}
-
-function ZoomModeButton({ label, isPressed, onPress }: ZoomModeButtonProps) {
-  return (
-    <button type="button" className={BUTTON_CLASS} aria-pressed={isPressed} onClick={onPress}>
-      {label}
-    </button>
-  );
-}
-
 /** The two zoom modes, the scale the chosen one gives, and how many saved files could not be loaded. */
 export interface ZoomBarProps {
   zoomMode: ZoomMode;
   scale: number;
   unloadedAssetCount: number;
   onZoomModeChange: (zoomMode: ZoomMode) => void;
-}
-
-function ZoomBar({ zoomMode, scale, unloadedAssetCount, onZoomModeChange }: ZoomBarProps) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <ZoomModeButton label="화면에 맞춤" isPressed={zoomMode === 'fit'} onPress={() => onZoomModeChange('fit')} />
-      <ZoomModeButton label="실제 크기" isPressed={zoomMode === 'actual'} onPress={() => onZoomModeChange('actual')} />
-      <span className="text-xs text-gray-600">{Math.round(scale * 100)}% · 마우스 휠로 저장된 화면을 스크롤할 수 있습니다.</span>
-      {unloadedAssetCount > 0 && (
-        <span role="alert" className="text-xs text-amber-700">
-          저장된 글꼴·이미지 {unloadedAssetCount}개를 불러오지 못했습니다.
-        </span>
-      )}
-    </div>
-  );
-}
-
-function TruncatedNotice() {
-  return (
-    <p role="alert" className="text-xs text-amber-700">
-      {REPLAY_TRUNCATED_MESSAGE}
-    </p>
-  );
 }
 
 /** The controls around the rebuilt page and the marks over it. */
@@ -547,10 +449,6 @@ export interface ScreenReplayParts {
   CommentPinList: ComponentType<CommentPinListProps>;
 }
 
-const DEFAULT_PARTS: ScreenReplayParts = {
-  ReplayControls, TruncatedNotice, ZoomBar, EditMoveOverlay, CommentPinOverlay, EditMoveList, CommentPinList,
-};
-
 // A long Flow replay arrives as a gzip file, because the platform limits how large a response may be.
 async function readSnapshotResponse(response: Response): Promise<ScreenSnapshotDetailResponse> {
   if (!response.body || !isGzipBody(response.headers)) {
@@ -564,36 +462,30 @@ async function readSnapshotResponse(response: Response): Promise<ScreenSnapshotD
 export type SavedScreenResult = { snapshot: ScreenSnapshot } | { status: number };
 
 /** Reads one saved screen with the admin token. Status 0 means the request never reached the server. */
-export async function fetchSavedScreen(id: string, projectKey: string, token: string, signal?: AbortSignal): Promise<SavedScreenResult> {
+export async function fetchSavedScreen(
+  id: string,
+  projectKey: string,
+  token: string,
+  signal?: AbortSignal,
+  timing?: ReplayTiming,
+): Promise<SavedScreenResult> {
   try {
     const response = await fetch(`/api/snapshots/${encodeURIComponent(id)}?projectKey=${encodeURIComponent(projectKey)}`, {
       headers: { authorization: `Bearer ${token}`, accept: isGzipSupported() ? GZIP_MEDIA_TYPE : 'application/json' },
       signal,
     });
+    timing?.mark('snapshot-headers');
     if (!response.ok) {
       return { status: response.status };
     }
     const body = await readSnapshotResponse(response);
+    timing?.mark('snapshot-parsed');
     return { snapshot: body.snapshot };
   } catch (error) {
     if (signal?.aborted) {
       throw error;
     }
     return { status: 0 };
-  }
-}
-
-async function fetchAssetUrl(hash: string, projectKey: string, token: string): Promise<string | null> {
-  try {
-    const response = await fetch(`/api/snapshots/assets/${hash}?projectKey=${encodeURIComponent(projectKey)}`, {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return URL.createObjectURL(await response.blob());
-  } catch {
-    return null;
   }
 }
 
@@ -604,12 +496,13 @@ export function ScreenReplay({
   loadAssetUrls,
   initiallyShowsProposed = false,
   isInert = false,
+  timing,
   parts,
   className = 'flex flex-col gap-2',
-  frameClassName = 'w-full overflow-auto rounded-xl border bg-white',
+  frameClassName = 'w-full overflow-auto rounded-(--radius-container) border bg-white',
   frameLabel,
 }: ScreenReplayProps) {
-  const Parts = { ...DEFAULT_PARTS, ...parts };
+  const Parts = parts;
   const frameRef = useRef<HTMLDivElement>(null);
   const [unloadedAssetCount, setUnloadedAssetCount] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -766,10 +659,12 @@ export function ScreenReplay({
     }
 
     async function mount(root: HTMLDivElement) {
-      // Loaded in the browser only: rrweb expects a DOM when its module is evaluated.
       const [{ Replayer: ReplayerClass }, urls] = await Promise.all([
-        import('@rrweb/replay'),
-        loadAssetUrls(),
+        loadReplayModule(),
+        loadAssetUrls().then((loaded) => {
+          timing?.mark('assets-ready');
+          return loaded;
+        }),
       ]);
       assetUrls = urls;
       if (isCancelled) {
@@ -777,15 +672,23 @@ export function ScreenReplay({
         return;
       }
       setUnloadedAssetCount(urls.filter((url) => url === null).length);
-      const events = JSON.parse(
-        resolveAssetReferences(JSON.stringify(screen.events), (index) => urls[index] ?? null),
-      ) as ReplayerEvents;
+      timing?.mark('rewrite-start');
+      const events = copyWithResolvedAssetReferences(screen.events, (index) => urls[index] ?? null) as ReplayerEvents;
+      timing?.mark('rewrite-end');
       // rrweb strips scripts and rebuilds into an iframe sandboxed without allow-scripts.
       replayer = new ReplayerClass(events, {
         root,
         mouseTail: false,
         showWarning: false,
         triggerFocus: false,
+      });
+      timing?.mark('replayer-created');
+      let hasRebuilt = false;
+      replayer.on('fullsnapshot-rebuilded', () => {
+        if (!hasRebuilt) {
+          hasRebuilt = true;
+          timing?.mark('first-rebuilt');
+        }
       });
       if (isInert) {
         replayer.iframe.inert = true;
@@ -828,7 +731,7 @@ export function ScreenReplay({
       stage.replaceChildren();
       assetUrls.forEach((url) => url && URL.revokeObjectURL(url));
     };
-  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed, isInert]);
+  }, [screen, loadAssetUrls, pins, moves, measureMarks, isReplay, initiallyShowsProposed, isInert, timing]);
 
   // Rendered at the captured viewport size and scaled as a whole, so the page never reflows.
   let scale = 1;
@@ -888,19 +791,26 @@ export function ScreenReplay({
   );
 }
 
-interface AdminScreenReplayProps extends Pick<ScreenReplayProps, 'initiallyShowsProposed'> {
+interface AdminScreenReplayProps extends Pick<ScreenReplayProps, 'initiallyShowsProposed' | 'timing'> {
   snapshot: ScreenSnapshot;
-  projectKey: string;
-  token: string;
+  assets: SnapshotAssetPrefetch;
 }
 
-// The saved files are read with the admin token here, so the shared replay never sees it.
-export function AdminScreenReplay({ snapshot, projectKey, token, initiallyShowsProposed }: AdminScreenReplayProps) {
-  const loadAssetUrls = useCallback(
-    () => Promise.all(snapshot.assetHashes.map((hash) => fetchAssetUrl(hash, projectKey, token))),
-    [snapshot, projectKey, token],
+// The saved files are read with the admin token inside `assets`, so the shared replay never sees it.
+export function AdminScreenReplay({ snapshot, assets, initiallyShowsProposed, timing }: AdminScreenReplayProps) {
+  const loadAssetUrls = useCallback(() => assets.loadUrls(snapshot.assetHashes), [snapshot, assets]);
+  return (
+    <ScreenReplay
+      screen={snapshot}
+      loadAssetUrls={loadAssetUrls}
+      initiallyShowsProposed={initiallyShowsProposed}
+      timing={timing}
+      parts={PREVIEW_REPLAY_PARTS}
+      className="widget-replay"
+      frameClassName="widget-replay-frame"
+      frameLabel={FRAME_LABEL}
+    />
   );
-  return <ScreenReplay screen={snapshot} loadAssetUrls={loadAssetUrls} initiallyShowsProposed={initiallyShowsProposed} />;
 }
 
 function ScreenSnapshotDetails({ snapshot }: { snapshot: ScreenSnapshot }) {
@@ -908,13 +818,13 @@ function ScreenSnapshotDetails({ snapshot }: { snapshot: ScreenSnapshot }) {
   return (
     <div className="flex flex-col gap-1 text-sm">
       <p className="break-all font-medium">{page.url}</p>
-      <p className="text-xs text-gray-600">
+      <p className="text-xs text-(--admin-text-sub)">
         {page.title} · {page.viewportWidth}×{page.viewportHeight} · 스크롤 ({Math.round(page.scrollX)}, {Math.round(page.scrollY)}) ·{' '}
         {new Date(snapshot.capturedAt).toLocaleString('ko-KR')} 저장
       </p>
       {missingAssets.length > 0 && (
-        <details className="text-xs text-amber-700">
-          <summary>가림·누락 기록 {missingAssets.length}개</summary>
+        <details className="text-xs text-(--admin-warning)">
+          <summary className="flex min-h-11 cursor-pointer items-center rounded-(--radius-element)">가림·누락 기록 {missingAssets.length}개</summary>
           <ul className="mt-1 flex flex-col gap-1">
             {missingAssets.map((asset) => (
               <li key={asset.url} className="break-all">
@@ -940,43 +850,61 @@ export function ScreenSnapshotViewer() {
       return;
     }
     const controller = new AbortController();
+    // The rrweb module and the files the list already knows load while the saved screen is still being read.
+    const timing = createReplayTiming();
+    timing.mark('snapshot-start');
+    const assets = createSnapshotAssetPrefetch({ projectKey, token, signal: controller.signal }, timing);
+    timing.mark('import-start');
+    // ScreenReplay asks for the module again when it needs it, so a failed early load is not reported here.
+    loadReplayModule().then(() => timing.mark('import-end'), () => undefined);
+    assets.prefetch(findRememberedAssetHashes(projectKey, id));
 
-    fetchSavedScreen(id, projectKey, token, controller.signal).then(
-      (loaded) => setResult({ key: requestKey, ...loaded }),
-      () => undefined,
-    );
+    fetchSavedScreen(id, projectKey, token, controller.signal, timing).then((loaded) => {
+      if ('status' in loaded) {
+        setResult({ key: requestKey, status: loaded.status });
+        return;
+      }
+      assets.prefetch(loaded.snapshot.assetHashes);
+      setResult({ key: requestKey, snapshot: loaded.snapshot, assets, timing });
+    }, () => undefined);
     return () => controller.abort();
   }, [id, projectKey, token, requestKey]);
 
   function renderBody() {
     if (!token) {
-      return <AdminTokenForm />;
+      return <AdminTokenForm onSubmit={saveAdminToken} />;
     }
     if (!result || result.key !== requestKey) {
-      return <p className="text-sm text-gray-600">저장된 화면을 불러오는 중입니다…</p>;
+      return (
+        <p role="status" className="text-sm text-(--admin-text-sub)">
+          저장한 화면을 불러오는 중이에요…
+        </p>
+      );
     }
     if ('status' in result) {
+      if (result.status === UNAUTHORIZED_STATUS) {
+        return <AdminTokenForm onSubmit={saveAdminToken} errorMessage={getLoadErrorMessage(result.status)} />;
+      }
       return (
-        <div className="flex flex-col gap-3">
-          <p role="alert" className="text-sm text-red-600">
-            {getLoadErrorMessage(result.status)}
-          </p>
-          {result.status === UNAUTHORIZED_STATUS && <AdminTokenForm />}
-        </div>
+        <p role="alert" className="rounded-(--radius-element) bg-(--admin-danger-weak) px-4 py-3 text-sm text-(--admin-danger)">
+          {getLoadErrorMessage(result.status)}
+        </p>
       );
     }
     return (
       <>
         <ScreenSnapshotDetails snapshot={result.snapshot} />
-        <AdminScreenReplay snapshot={result.snapshot} projectKey={projectKey} token={token} />
+        <AdminScreenReplay snapshot={result.snapshot} assets={result.assets} timing={result.timing} />
       </>
     );
   }
 
   return (
-    <main className="flex min-h-screen flex-col gap-3 bg-gray-100 p-4 text-gray-900">
-      <h1 className="text-base font-semibold">저장된 화면</h1>
-      {renderBody()}
-    </main>
+    <div className="admin-root" lang="ko">
+      <main className="mx-auto flex max-w-[1440px] flex-col gap-3 p-4">
+        <h1 className="text-lg font-bold">저장한 화면</h1>
+        {renderBody()}
+      </main>
+    </div>
   );
 }

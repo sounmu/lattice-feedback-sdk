@@ -5,8 +5,8 @@ export function CommentAttachmentList({ comments }: { comments: CommentAttachmen
   return (
     <ol className="flex flex-col gap-2">
       {comments.map((item, index) => (
-        <li key={`${item.target.selector}-${index}`} className="flex gap-3 rounded-xl bg-(--admin-surface-sub) p-3">
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-(--admin-primary) text-xs font-bold text-white">
+        <li key={`${item.target.selector}-${index}`} className="flex gap-3 rounded-(--radius-container) bg-(--admin-surface-sub) p-3">
+          <span className="widget-mark-number shrink-0">
             {index + 1}
           </span>
           <div className="min-w-0">

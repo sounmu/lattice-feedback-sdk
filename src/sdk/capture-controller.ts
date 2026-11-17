@@ -435,12 +435,12 @@ export function createCaptureController(options: CaptureControllerOptions) {
   }
 
   function getEditMoveSources(): EditMoveSource[] {
-    return attachments.edits.flatMap(({ target, originalRect, proposedRect }, index) => {
+    return attachments.edits.flatMap(({ target, originalRect, proposedRect, rotation }, index) => {
       if (target.pagePath !== undefined && target.pagePath !== window.location.pathname) {
         return [];
       }
       const label = target.feedbackId ?? target.tagName.toLowerCase();
-      return [{ number: index + 1, key: editKeys[index], label, originalRect, proposedRect, element: editElements[index] }];
+      return [{ number: index + 1, key: editKeys[index], label, originalRect, proposedRect, rotation, element: editElements[index] }];
     });
   }
 

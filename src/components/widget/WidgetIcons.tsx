@@ -71,6 +71,31 @@ export function PlayIcon(props: IconProps) {
   );
 }
 
+export function RefreshIcon(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5" />
+    </Glyph>
+  );
+}
+
+// Lucide's panel-left/right open and close glyphs: the pane edge, and an arrow the way the pane will move.
+const PANE_PATHS = {
+  left: { edge: 'M9 3v18', arrowLeft: 'M16 15l-3-3 3-3', arrowRight: 'M14 9l3 3-3 3' },
+  right: { edge: 'M15 3v18', arrowLeft: 'M10 15l-3-3 3-3', arrowRight: 'M8 9l3 3-3 3' },
+} as const;
+
+export function PaneIcon({ side, pointsLeft, ...props }: IconProps & { side: 'left' | 'right'; pointsLeft: boolean }) {
+  const paths = PANE_PATHS[side];
+  return (
+    <Glyph {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d={paths.edge} />
+      <path d={pointsLeft ? paths.arrowLeft : paths.arrowRight} />
+    </Glyph>
+  );
+}
+
 export function PauseIcon(props: IconProps) {
   return (
     <Glyph {...props}>

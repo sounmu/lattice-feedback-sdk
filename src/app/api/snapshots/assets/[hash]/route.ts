@@ -4,6 +4,7 @@ import { FeedbackStorageUnavailableError } from '@/lib/feedback-storage-unavaila
 import { MAX_SNAPSHOT_ASSET_BYTES } from '@/lib/feedback-limits';
 import { authorizeAdmin } from '@/lib/http/admin-auth';
 import { createApiErrorResponse } from '@/lib/http/api-error';
+import { ServerTiming } from '@/lib/http/server-timing';
 import { BodyTooLargeError, isDeclaredBodyTooLarge, readBodyBytesWithLimit } from '@/lib/http/read-body';
 import { findProject } from '@/lib/projects';
 import { SNAPSHOT_ASSET_HASH_PATTERN } from '@/lib/snapshot-asset-references';
@@ -83,12 +84,13 @@ export async function PUT(request: Request, context: RouteContext) {
 
 // Served only to the project's admin. The viewer fetches it with the admin token and loads it from a blob: URL.
 export async function GET(request: Request, context: RouteContext) {
+  const timing = new ServerTiming();
   const { hash } = await context.params;
   const project = findProject(new URL(request.url).searchParams.get('projectKey') ?? '');
   if (!project) {
     return createApiErrorResponse(404, 'project_not_found', 'Project not found.');
   }
-  if (!authorizeAdmin(request, project)) {
+  if (!(await timing.measure('auth', () => authorizeAdmin(request, project)))) {
     return createApiErrorResponse(401, 'unauthorized', 'Admin authorization is required.');
   }
   if (!SNAPSHOT_ASSET_HASH_PATTERN.test(hash)) {
@@ -111,13 +113,13 @@ export async function GET(request: Request, context: RouteContext) {
       validator?.split(',').some((tag) => tag.trim() === etag || tag.trim() === `W/${etag}`);
     if (matches) {
       // Check this project's existence without loading the bytea payload, after authorization.
-      const missing = await repository.findMissingAssetHashes(project.projectKey, [hash]);
+      const missing = await timing.measure('db', () => repository.findMissingAssetHashes(project.projectKey, [hash]));
       if (missing.length > 0) {
         return createApiErrorResponse(404, 'screen_snapshot_asset_not_found', 'Saved screen file not found.');
       }
-      return new Response(null, { status: 304, headers });
+      return new Response(null, { status: 304, headers: { ...headers, ...timing.toHeaders() } });
     }
-    const asset = await repository.findAsset(project.projectKey, hash);
+    const asset = await timing.measure('db', () => repository.findAsset(project.projectKey, hash));
     if (!asset) {
       return createApiErrorResponse(404, 'screen_snapshot_asset_not_found', 'Saved screen file not found.');
     }
@@ -133,6 +135,7 @@ export async function GET(request: Request, context: RouteContext) {
         ...headers,
         'Content-Type': asset.contentType,
         'Content-Length': String(asset.data.byteLength),
+        ...timing.toHeaders(),
       },
     });
   } catch (error) {

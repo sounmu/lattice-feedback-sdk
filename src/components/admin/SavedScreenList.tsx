@@ -1,6 +1,9 @@
+'use client';
+
 import Link from 'next/link';
 
 import { formatDateTime, getPagePath } from '@/lib/feedback-display';
+import { rememberSnapshotAssetHashes } from '@/lib/snapshot-asset-prefetch';
 import type { ScreenSnapshotSummary } from '@/types/screen-snapshot';
 
 interface SavedScreenListProps {
@@ -12,7 +15,7 @@ export function SavedScreenList({ screens, projectKey }: SavedScreenListProps) {
   return (
     <ul className="flex flex-col gap-2">
       {screens.map((screen) => (
-        <li key={screen.id} className="flex items-center justify-between gap-3 rounded-xl bg-(--admin-surface-sub) p-3">
+        <li key={screen.id} className="flex items-center justify-between gap-3 rounded-(--radius-container) bg-(--admin-surface-sub) p-3">
           <div className="min-w-0">
             <p className="truncate font-medium">{screen.page.title || getPagePath(screen.page.url)}</p>
             <p className="text-xs text-(--admin-text-muted)">
@@ -22,7 +25,8 @@ export function SavedScreenList({ screens, projectKey }: SavedScreenListProps) {
           </div>
           <Link
             href={`/admin/snapshots/${encodeURIComponent(screen.id)}?projectKey=${encodeURIComponent(projectKey)}`}
-            className="flex min-h-11 shrink-0 items-center rounded-[10px] bg-(--admin-primary) px-4 font-semibold text-white hover:bg-(--admin-primary-hover)"
+            onClick={() => rememberSnapshotAssetHashes(projectKey, screen.id, screen.assetHashes)}
+            className="flex min-h-11 shrink-0 items-center rounded-(--radius-element) admin-primary-button px-4 font-semibold"
           >
             화면 보기
           </Link>
