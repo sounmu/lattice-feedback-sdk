@@ -97,6 +97,11 @@ const TOOLBAR_STYLE = [
   'left: 0',
   'top: 0',
   'display: flex',
+  // Five buttons do not fit a phone's width on one line; wrapping keeps attach and cancel on screen.
+  'flex-wrap: wrap',
+  'box-sizing: border-box',
+  // The overlay root fills the viewport without its scrollbar, so 100% here is the width that is visible.
+  `max-width: calc(100% - ${VIEWPORT_EDGE * 2}px)`,
   'gap: 8px',
   'padding: 8px',
   `border-radius: ${SDK_RADIUS.container}`,
@@ -286,6 +291,9 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
 
   // The toolbar sits under the ghost and follows it, above it when there is no room below.
   function placeToolbar(): void {
+    // A fixed box shrinks to the room right of its current left edge, so it is measured from the left edge;
+    // otherwise a wrapped toolbar would widen again once moved left and run past the screen.
+    toolbar.style.left = '0px';
     const toolbarWidth = toolbar.offsetWidth || 0;
     const toolbarHeight = toolbar.offsetHeight || 0;
     const box = getRotatedBox(ghostWidth, ghostHeight, rotation);
@@ -294,19 +302,21 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     const below = boxTop + box.height + TOOLBAR_GAP + HANDLE_SIZE / 2;
     const top = below + toolbarHeight + VIEWPORT_EDGE <= viewportHeight ? below : boxTop - TOOLBAR_GAP - toolbarHeight;
     const boxLeft = centerX - box.width / 2;
-    const left = Math.min(Math.max(boxLeft, VIEWPORT_EDGE), Math.max(VIEWPORT_EDGE, viewportWidth - toolbarWidth - VIEWPORT_EDGE));
+    const visibleWidth = document.documentElement?.clientWidth || viewportWidth;
+    const left = Math.min(Math.max(boxLeft, VIEWPORT_EDGE), Math.max(VIEWPORT_EDGE, visibleWidth - toolbarWidth - VIEWPORT_EDGE));
     toolbar.style.left = `${left}px`;
     toolbar.style.top = `${Math.max(VIEWPORT_EDGE, top)}px`;
   }
 
-  function moveCenterTo(x: number, y: number): void {
+  // Only an edit gesture is kept on screen. The starting position (and going back to it) stays exactly where
+  // the element is, even when it is partly scrolled out of view.
+  function keepOnScreen(): void {
     const box = getRotatedBox(ghostWidth, ghostHeight, rotation);
-    centerX = clamp(x - box.width / 2, box.width, viewportWidth) + box.width / 2;
-    centerY = clamp(y - box.height / 2, box.height, viewportHeight) + box.height / 2;
+    centerX = clamp(centerX - box.width / 2, box.width, viewportWidth) + box.width / 2;
+    centerY = clamp(centerY - box.height / 2, box.height, viewportHeight) + box.height / 2;
   }
 
   function placeGhost(): void {
-    moveCenterTo(centerX, centerY);
     ghost.style.left = `${centerX - ghostWidth / 2}px`;
     ghost.style.top = `${centerY - ghostHeight / 2}px`;
     ghost.style.width = `${ghostWidth}px`;
@@ -382,8 +392,24 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     ghostHeight = Math.min(Math.max(height, minimumHeight), bounds.height * MAX_SCALE);
   }
 
+  // One scale for both sides, limited so neither side passes its minimum or maximum and the ratio holds.
+  function setScaledSize(baseWidth: number, baseHeight: number, scale: number): void {
+    if (baseWidth === 0 || baseHeight === 0) {
+      setSize(baseWidth * scale, baseHeight * scale);
+      return;
+    }
+    const lower = Math.max(minimumWidth / baseWidth, minimumHeight / baseHeight);
+    const upper = Math.min((bounds.width * MAX_SCALE) / baseWidth, (bounds.height * MAX_SCALE) / baseHeight);
+    if (lower > upper) {
+      return;
+    }
+    const limited = Math.min(Math.max(scale, lower), upper);
+    ghostWidth = baseWidth * limited;
+    ghostHeight = baseHeight * limited;
+  }
+
   function scaleBy(factor: number): void {
-    setSize(ghostWidth * factor, ghostHeight * factor);
+    setScaledSize(ghostWidth, ghostHeight, factor);
   }
 
   function setRotation(degrees: number, snaps: boolean): void {
@@ -403,8 +429,7 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
       setSize(localX, localY);
       return;
     }
-    const scale = (localX / bounds.width + localY / bounds.height) / 2;
-    setSize(bounds.width * scale, bounds.height * scale);
+    setScaledSize(bounds.width, bounds.height, (localX / bounds.width + localY / bounds.height) / 2);
   }
 
   // The handle starts straight above the centre, so the pointer's angle from there is the rotation.
@@ -448,6 +473,7 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
         centerY = drag.startCenterY + event.clientY - drag.startY;
         break;
     }
+    keepOnScreen();
     placeGhost();
   }
 
@@ -491,6 +517,7 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
       }
       if (applyKeyboardEdit(event.key)) {
         blockEvent(event);
+        keepOnScreen();
         placeGhost();
         recordStep();
         return;

@@ -198,6 +198,41 @@ describe('startElementDrag', () => {
     expect(onComplete.mock.calls[0][0]).toMatchObject({ proposedRect: { x: 108, y: 150 }, rotation: 15 });
   });
 
+  it('starts and resets at the real position of an element partly scrolled out of view', () => {
+    hostElement.bounds = { left: 940, top: 50, width: 120, height: 40 };
+    const onComplete = vi.fn<(value: EditAttachment) => void>();
+    startElementDrag(selection, { onComplete, onCancel: vi.fn() });
+    const { ghost, resetButton, confirmButton } = getOverlay();
+
+    expect(ghost.style).toMatchObject({ left: '940px', top: '50px' });
+    fakeDocument.dispatch(createEvent('keydown', { target: ghost, key: 'ArrowDown' }));
+    expect(ghost.style).toMatchObject({ left: '880px', top: '58px' });
+    resetButton.dispatch(createEvent('click', { target: resetButton }));
+    expect(ghost.style).toMatchObject({ left: '940px', top: '50px' });
+
+    confirmButton.dispatch(createEvent('click', { target: confirmButton }));
+    expect(onComplete.mock.calls[0][0].proposedRect).toEqual({ x: 940, y: 150, width: 120, height: 40 });
+  });
+
+  it('keeps the original ratio at the smallest size while Shift is held', () => {
+    startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
+    const { ghost } = getOverlay();
+    const resizeHandle = ghost.children[1];
+
+    ghost.dispatch(createEvent('pointerdown', { target: resizeHandle, clientX: 220, clientY: 90 }));
+    fakeWindow.dispatch(createEvent('pointermove', { clientX: 172, clientY: 74, shiftKey: true }));
+
+    expect(ghost.style).toMatchObject({ width: '48px', height: '16px' });
+  });
+
+  it('lets the toolbar wrap inside a narrow viewport', () => {
+    startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
+    const { toolbar } = getOverlay();
+
+    expect(toolbar.getAttribute('style')).toContain('flex-wrap: wrap');
+    expect(toolbar.getAttribute('style')).toContain('max-width: calc(100% - 16px)');
+  });
+
   it('keeps the ghost inside the viewport while dragging', () => {
     const handle = startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
     const { ghost } = getOverlay();
