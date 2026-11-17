@@ -52,9 +52,20 @@ const KEYBOARD_SCALE_STEP = 0.1;
 const ROTATION_STEP = 15;
 const MIN_GHOST_SIZE = 16;
 const MAX_SCALE = 4;
-const HANDLE_SIZE = 18;
+const HANDLE_SIZE = 32;
+const HANDLE_ICON_SIZE = 18;
+const HANDLE_BORDER = 2;
+// The pressable area reaches past the drawn circle to the 44px touch target. It is placed from inside the
+// border, so the border is added back.
+const HANDLE_HIT_OUTSET = (44 - HANDLE_SIZE) / 2 + HANDLE_BORDER;
 // The rotate handle sits this far above the ghost's top edge, so it never covers the element.
-const ROTATE_HANDLE_OFFSET = 28;
+const ROTATE_HANDLE_OFFSET = HANDLE_SIZE + 12;
+const RESIZE_HANDLE_LABEL = '모서리를 끌어 크기 조절';
+const ROTATE_HANDLE_LABEL = '끌어서 회전';
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+// Lucide's move-diagonal-2 and rotate-cw, the icon set the widget uses.
+const RESIZE_ICON_PATHS = ['M19 13v6h-6', 'M5 11V5h6', 'M5 5l14 14'];
+const ROTATE_ICON_PATHS = ['M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8', 'M21 3v5h-5'];
 const GUARDED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'beforeinput', 'keydown', 'keyup'] as const;
 const INTERACTION_CAPTURE: AddEventListenerOptions = { capture: true, passive: false };
 
@@ -84,12 +95,18 @@ const HANDLE_STYLE = [
   'box-sizing: border-box',
   `width: ${HANDLE_SIZE}px`,
   `height: ${HANDLE_SIZE}px`,
+  'display: flex',
+  'align-items: center',
+  'justify-content: center',
   'border-radius: 50%',
-  `border: 2px solid ${SDK_THEME.info}`,
+  `border: ${HANDLE_BORDER}px solid ${SDK_THEME.info}`,
   `background: ${SDK_THEME.surface}`,
+  `color: ${SDK_THEME.info}`,
+  `box-shadow: ${SDK_SHADOW.high}`,
   'touch-action: none',
   'pointer-events: auto',
 ].join('; ');
+const HANDLE_ICON_STYLE = 'display: block; pointer-events: none';
 const RESIZE_HANDLE_STYLE = `${HANDLE_STYLE}; right: ${-HANDLE_SIZE / 2}px; bottom: ${-HANDLE_SIZE / 2}px; cursor: nwse-resize`;
 const ROTATE_HANDLE_STYLE = `${HANDLE_STYLE}; left: calc(50% - ${HANDLE_SIZE / 2}px); top: ${-ROTATE_HANDLE_OFFSET}px; cursor: grab`;
 const TOOLBAR_STYLE = [
@@ -139,6 +156,12 @@ ${SDK_HOVER_MEDIA} {
   ${OVERLAY_SELECTOR} button[data-action="confirm"]:hover { background-image: ${getStateLayer(SDK_THEME_DARK.accentHover)} !important; }
 }
 ${OVERLAY_SELECTOR} button[data-action="confirm"]:active { background-image: ${getStateLayer(SDK_THEME_DARK.accentPressed)} !important; }
+${OVERLAY_SELECTOR} [data-handle]::before {
+  content: '';
+  position: absolute;
+  inset: ${-HANDLE_HIT_OUTSET}px;
+  border-radius: 50%;
+}
 @media (prefers-reduced-motion: reduce) {
   ${OVERLAY_SELECTOR} button { transition: none !important; }
   ${OVERLAY_SELECTOR} button:active { transform: none !important; }
@@ -186,6 +209,31 @@ function getRotatedBox(width: number, height: number, rotation: number): { width
   const cos = Math.abs(Math.cos(toRadians(rotation)));
   const sin = Math.abs(Math.sin(toRadians(rotation)));
   return { width: width * cos + height * sin, height: width * sin + height * cos };
+}
+
+function createHandleIcon(paths: readonly string[]): Element {
+  const icon = document.createElementNS(SVG_NAMESPACE, 'svg');
+  const attributes: Record<string, string> = {
+    viewBox: '0 0 24 24',
+    width: String(HANDLE_ICON_SIZE),
+    height: String(HANDLE_ICON_SIZE),
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': '2.25',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+    'aria-hidden': 'true',
+    style: HANDLE_ICON_STYLE,
+  };
+  for (const [name, value] of Object.entries(attributes)) {
+    icon.setAttribute(name, value);
+  }
+  for (const shape of paths) {
+    const path = document.createElementNS(SVG_NAMESPACE, 'path');
+    path.setAttribute('d', shape);
+    icon.appendChild(path);
+  }
+  return icon;
 }
 
 function findHandleKind(target: EventTarget | null): DragKind {
@@ -243,10 +291,14 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   resizeHandle.setAttribute('data-handle', 'resize');
   resizeHandle.setAttribute('aria-hidden', 'true');
   resizeHandle.setAttribute('style', RESIZE_HANDLE_STYLE);
+  resizeHandle.setAttribute('title', RESIZE_HANDLE_LABEL);
+  resizeHandle.appendChild(createHandleIcon(RESIZE_ICON_PATHS));
   const rotateHandle = document.createElement('span');
   rotateHandle.setAttribute('data-handle', 'rotate');
   rotateHandle.setAttribute('aria-hidden', 'true');
   rotateHandle.setAttribute('style', ROTATE_HANDLE_STYLE);
+  rotateHandle.setAttribute('title', ROTATE_HANDLE_LABEL);
+  rotateHandle.appendChild(createHandleIcon(ROTATE_ICON_PATHS));
   ghost.appendChild(ghostText);
   ghost.appendChild(resizeHandle);
   ghost.appendChild(rotateHandle);
