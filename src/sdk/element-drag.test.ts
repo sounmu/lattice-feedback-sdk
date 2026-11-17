@@ -13,8 +13,8 @@ let selection: CaptureTarget;
 function getOverlay() {
   const root = fakeDocument.body.children[0];
   const [ghost, toolbar] = root.children;
-  const [confirmButton, cancelButton] = toolbar.children;
-  return { root, ghost, toolbar, confirmButton, cancelButton };
+  const [undoButton, redoButton, resetButton, confirmButton, cancelButton] = toolbar.children;
+  return { root, ghost, toolbar, undoButton, redoButton, resetButton, confirmButton, cancelButton };
 }
 
 function expectCleanedUp(): void {
@@ -159,6 +159,43 @@ describe('startElementDrag', () => {
     expect(attachment.rotation).toBe(-30);
     expect(attachment.proposedRect.width).toBeCloseTo(132);
     expect(attachment.proposedRect.height).toBeCloseTo(44);
+  });
+
+  it('undoes, redoes and resets the steps of one edit, and leaves out steps that changed nothing', () => {
+    const onComplete = vi.fn<(value: EditAttachment) => void>();
+    startElementDrag(selection, { onComplete, onCancel: vi.fn() });
+    const { ghost, undoButton, redoButton, resetButton, confirmButton } = getOverlay();
+    const press = (key: string, modifiers: { ctrlKey?: boolean; shiftKey?: boolean } = {}) =>
+      fakeDocument.dispatch(createEvent('keydown', { target: ghost, key, ...modifiers }));
+    const click = (button: typeof undoButton) => button.dispatch(createEvent('click', { target: button }));
+
+    expect([undoButton.textContent, redoButton.textContent, resetButton.textContent]).toEqual(['되돌리기', '다시 하기', '원래대로']);
+    expect([undoButton.disabled, redoButton.disabled, resetButton.disabled]).toEqual([true, true, true]);
+
+    ghost.dispatch(createEvent('pointerdown', { target: ghost, clientX: 110, clientY: 60 }));
+    fakeWindow.dispatch(createEvent('pointerup', { clientX: 110, clientY: 60 }));
+    expect(undoButton.disabled).toBe(true);
+
+    press(']');
+    press('ArrowRight');
+    expect(ghost.style).toMatchObject({ left: '108px', transform: 'rotate(15deg)' });
+    click(undoButton);
+    expect(ghost.style).toMatchObject({ left: '100px', transform: 'rotate(15deg)' });
+    press('z', { ctrlKey: true });
+    expect(ghost.style).toMatchObject({ left: '100px', transform: 'none' });
+    expect([undoButton.disabled, redoButton.disabled, resetButton.disabled]).toEqual([true, false, true]);
+    press('z', { ctrlKey: true, shiftKey: true });
+    click(redoButton);
+    expect(ghost.style).toMatchObject({ left: '108px', transform: 'rotate(15deg)' });
+
+    click(resetButton);
+    expect(ghost.style).toMatchObject({ left: '100px', top: '50px', width: '120px', height: '40px', transform: 'none' });
+    expect([undoButton.disabled, resetButton.disabled]).toEqual([false, true]);
+    click(undoButton);
+    expect(ghost.style).toMatchObject({ left: '108px', transform: 'rotate(15deg)' });
+
+    click(confirmButton);
+    expect(onComplete.mock.calls[0][0]).toMatchObject({ proposedRect: { x: 108, y: 150 }, rotation: 15 });
   });
 
   it('keeps the ghost inside the viewport while dragging', () => {

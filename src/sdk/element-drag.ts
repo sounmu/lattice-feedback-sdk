@@ -37,6 +37,11 @@ const EDIT_OVERLAY_ATTRIBUTE = 'data-lattice-overlay';
 const EDIT_OVERLAY_VALUE = 'edit';
 const CONFIRM_LABEL = '변경 첨부';
 const CANCEL_LABEL = '취소';
+const UNDO_LABEL = '되돌리기';
+const REDO_LABEL = '다시 하기';
+const RESET_LABEL = '원래대로';
+// Steps kept for undo within one edit; older steps are dropped first.
+const MAX_HISTORY = 50;
 const TOOLBAR_LABEL = '위치 편집';
 const GHOST_LABEL_SUFFIX =
   ' 편집 미리보기: 끌거나 방향키로 옮기고, 모서리나 +·- 키로 크기, 위 손잡이나 [·] 키로 회전해요. Enter로 첨부해요';
@@ -118,9 +123,10 @@ ${OVERLAY_SELECTOR} button:focus-visible {
   outline-offset: ${SDK_FOCUS_OUTLINE.offset} !important;
 }
 ${SDK_HOVER_MEDIA} {
-  ${OVERLAY_SELECTOR} button:hover { background-image: ${getStateLayer(SDK_THEME_DARK.overlayHover)} !important; }
+  ${OVERLAY_SELECTOR} button:not(:disabled):hover { background-image: ${getStateLayer(SDK_THEME_DARK.overlayHover)} !important; }
 }
-${OVERLAY_SELECTOR} button:active {
+${OVERLAY_SELECTOR} button:disabled { color: ${SDK_THEME_DARK.textSecondary} !important; cursor: default !important; }
+${OVERLAY_SELECTOR} button:not(:disabled):active {
   background-image: ${getStateLayer(SDK_THEME_DARK.overlayPressed)} !important;
   transform: ${SDK_PRESSED_SCALE} !important;
 }
@@ -135,6 +141,19 @@ ${OVERLAY_SELECTOR} button[data-action="confirm"]:active { background-image: ${g
 `;
 
 type DragKind = 'move' | 'resize' | 'rotate';
+
+interface GhostState {
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
+  rotation: number;
+}
+
+function isSameState(first: GhostState, second: GhostState): boolean {
+  return first.centerX === second.centerX && first.centerY === second.centerY && first.width === second.width &&
+    first.height === second.height && first.rotation === second.rotation;
+}
 
 interface DragState {
   kind: DragKind;
@@ -238,8 +257,23 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   confirmButton.textContent = CONFIRM_LABEL;
   const cancelButton = document.createElement('button');
   cancelButton.setAttribute('type', 'button');
+  cancelButton.setAttribute('data-action', 'cancel');
   cancelButton.setAttribute('style', CANCEL_BUTTON_STYLE);
   cancelButton.textContent = CANCEL_LABEL;
+  function createHistoryButton(action: string, label: string): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.setAttribute('type', 'button');
+    button.setAttribute('data-action', action);
+    button.setAttribute('style', CANCEL_BUTTON_STYLE);
+    button.textContent = label;
+    return button;
+  }
+  const undoButton = createHistoryButton('undo', UNDO_LABEL);
+  const redoButton = createHistoryButton('redo', REDO_LABEL);
+  const resetButton = createHistoryButton('reset', RESET_LABEL);
+  toolbar.appendChild(undoButton);
+  toolbar.appendChild(redoButton);
+  toolbar.appendChild(resetButton);
   toolbar.appendChild(confirmButton);
   toolbar.appendChild(cancelButton);
 
@@ -279,6 +313,68 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     ghost.style.height = `${ghostHeight}px`;
     ghost.style.transform = rotation === 0 ? 'none' : `rotate(${rotation}deg)`;
     placeToolbar();
+  }
+
+  function readState(): GhostState {
+    return { centerX, centerY, width: ghostWidth, height: ghostHeight, rotation };
+  }
+
+  function applyState(state: GhostState): void {
+    ({ centerX, centerY, width: ghostWidth, height: ghostHeight, rotation } = state);
+    placeGhost();
+  }
+
+  const initialState = readState();
+  const history: GhostState[] = [initialState];
+  let historyIndex = 0;
+
+  function setButtonEnabled(button: HTMLButtonElement, isEnabled: boolean): void {
+    button.disabled = !isEnabled;
+  }
+
+  function updateHistoryButtons(): void {
+    setButtonEnabled(undoButton, historyIndex > 0);
+    setButtonEnabled(redoButton, historyIndex < history.length - 1);
+    setButtonEnabled(resetButton, !isSameState(readState(), initialState));
+  }
+
+  // A finished gesture or key press becomes one undo step; a step that changed nothing is not kept.
+  function recordStep(): void {
+    const state = readState();
+    if (isSameState(state, history[historyIndex])) {
+      return;
+    }
+    history.splice(historyIndex + 1);
+    history.push(state);
+    if (history.length > MAX_HISTORY) {
+      history.shift();
+    }
+    historyIndex = history.length - 1;
+    updateHistoryButtons();
+  }
+
+  function undo(): void {
+    if (historyIndex === 0) {
+      return;
+    }
+    historyIndex -= 1;
+    applyState(history[historyIndex]);
+    updateHistoryButtons();
+  }
+
+  function redo(): void {
+    if (historyIndex >= history.length - 1) {
+      return;
+    }
+    historyIndex += 1;
+    applyState(history[historyIndex]);
+    updateHistoryButtons();
+  }
+
+  // Going back to the original is itself a step, so it can be undone.
+  function resetToOriginal(): void {
+    applyState(initialState);
+    recordStep();
   }
 
   function setSize(width: number, height: number): void {
@@ -361,6 +457,7 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     }
     drag = null;
     ghost.style.cursor = 'grab';
+    recordStep();
   }
 
   // Keep activation and field edits away from the original while preserving
@@ -377,6 +474,16 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   }
 
   function handleKeyDown(event: KeyboardEvent): void {
+    const isInOverlay = event.target instanceof Node && root.contains(event.target);
+    if (isInOverlay && (event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'Z' || event.key === 'y')) {
+      blockEvent(event);
+      if (event.key === 'y' || event.shiftKey) {
+        redo();
+        return;
+      }
+      undo();
+      return;
+    }
     if (event.target === ghost) {
       if (event.key === 'Enter') {
         handleConfirmClick(event);
@@ -385,6 +492,7 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
       if (applyKeyboardEdit(event.key)) {
         blockEvent(event);
         placeGhost();
+        recordStep();
         return;
       }
     }
@@ -448,6 +556,21 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     finish(null);
   }
 
+  function handleUndoClick(event: MouseEvent): void {
+    blockEvent(event);
+    undo();
+  }
+
+  function handleRedoClick(event: MouseEvent): void {
+    blockEvent(event);
+    redo();
+  }
+
+  function handleResetClick(event: MouseEvent): void {
+    blockEvent(event);
+    resetToOriginal();
+  }
+
   function handleViewportChange(): void {
     finish(null);
   }
@@ -458,6 +581,9 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
     toolbar.removeEventListener('pointerdown', stopPropagation);
     confirmButton.removeEventListener('click', handleConfirmClick);
     cancelButton.removeEventListener('click', handleCancelClick);
+    undoButton.removeEventListener('click', handleUndoClick);
+    redoButton.removeEventListener('click', handleRedoClick);
+    resetButton.removeEventListener('click', handleResetClick);
     window.removeEventListener('pointermove', handlePointerMove, true);
     window.removeEventListener('pointerup', handlePointerEnd, true);
     window.removeEventListener('pointercancel', handlePointerEnd, true);
@@ -502,6 +628,10 @@ export function startElementDrag(selection: CaptureTarget, options: ElementDragO
   toolbar.addEventListener('pointerdown', stopPropagation);
   confirmButton.addEventListener('click', handleConfirmClick);
   cancelButton.addEventListener('click', handleCancelClick);
+  undoButton.addEventListener('click', handleUndoClick);
+  redoButton.addEventListener('click', handleRedoClick);
+  resetButton.addEventListener('click', handleResetClick);
+  updateHistoryButtons();
   window.addEventListener('pointermove', handlePointerMove, true);
   window.addEventListener('pointerup', handlePointerEnd, true);
   window.addEventListener('pointercancel', handlePointerEnd, true);
