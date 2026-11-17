@@ -40,3 +40,18 @@ it('keeps the recorded rects of a move and adds the node id of the dragged eleme
 
   expect(moves).toEqual([{ number: 1, key: 'edit-1', nodeId: 4, label: 'save', ...rects }]);
 });
+
+it('carries a proposed rotation onto the saved move and leaves it out when there is none', () => {
+  const dragged = createElement(true);
+  const rects = { originalRect: { x: 10, y: 20, width: 80, height: 30 }, proposedRect: { x: 0, y: 15, width: 100, height: 40 } };
+  const [rotated, plain] = createEditMoves(
+    [
+      { number: 1, key: 'edit-1', label: 'save', element: dragged, rotation: 30, ...rects },
+      { number: 2, key: 'edit-2', label: 'save', element: dragged, ...rects },
+    ],
+    () => 4,
+  );
+
+  expect(rotated).toEqual({ number: 1, key: 'edit-1', nodeId: 4, label: 'save', rotation: 30, ...rects });
+  expect(plain).not.toHaveProperty('rotation');
+});

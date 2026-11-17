@@ -1,6 +1,6 @@
 // Turns a feedback into a ticket draft the admin can paste into an issue tracker. It restates what the
 // reporter wrote and what the SDK recorded, kept apart, and never guesses a cause.
-import { describeMove, formatSignedPixels } from '@/lib/edit-comparison-geometry';
+import { describeMove, formatEditChange } from '@/lib/edit-comparison-geometry';
 import { FEEDBACK_TYPE_LABELS, formatDateTime, findUnverifiedOrganizationName, getElementLabel, getPagePath } from '@/lib/feedback-display';
 import type { FeedbackDetailResponse, FlowAttachment, FlowEvent } from '@/types/feedback';
 
@@ -123,12 +123,11 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
   }
   if (edits.length > 0) {
     const lines = edits.map((edit, index) => {
-      const move = describeMove(edit.originalRect, edit.proposedRect);
+      const change = formatEditChange(describeMove(edit.originalRect, edit.proposedRect, edit.rotation));
       const note = plain(edit.note);
-      const moved = `가로 ${formatSignedPixels(move.deltaX)}, 세로 ${formatSignedPixels(move.deltaY)}`;
-      return `${index + 1}. ${code(getElementLabel(edit.target))}: ${moved}${note ? ` (${note})` : ''}`;
+      return `${index + 1}. ${code(getElementLabel(edit.target))}: ${change}${note ? ` (${note})` : ''}`;
     });
-    lines.push('- 좌표 이동은 변경 요청을 나타내며 실제 레이아웃 코드 수정과 같지 않습니다.');
+    lines.push('- 좌표 이동·크기·회전은 변경 요청을 나타내며 실제 레이아웃 코드 수정과 같지 않습니다.');
     sections.push(`## 위치 변경 제안\n\n${lines.join('\n')}`);
   }
   if (screenSnapshots.length > 0) {

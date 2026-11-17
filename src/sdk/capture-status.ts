@@ -109,13 +109,13 @@ const INSTRUCTIONS: Record<StatusPhase, string> = {
   'comment-pick': '페이지에서 요소를 클릭하세요. 클릭해도 원래 버튼은 실행되지 않아요.',
   'comment-write': '고른 자리에 의견을 적고 코멘트 첨부를 눌러 주세요.',
   'edit-pick': '옮길 요소를 클릭하세요. 클릭해도 원래 버튼은 실행되지 않아요.',
-  'edit-drag': '끌어서 옮긴 뒤 변경 첨부를 눌러 주세요. 방향키로도 옮길 수 있어요.',
+  'edit-drag': '끌어서 옮기고, 모서리 손잡이로 크기를, 위 손잡이로 각도를 바꾼 뒤 변경 첨부를 눌러 주세요.',
   'flow-recording': '평소처럼 페이지를 사용하다가 문제가 나면 기록을 종료하세요.',
   'flow-paused': '이 페이지는 기록하지 않아요. 허용된 화면으로 돌아가면 이어서 기록해요.',
 };
 
 const COMMENT_COLLECTS = '저장: 고른 요소의 위치와 적은 의견';
-const EDIT_COLLECTS = '저장: 요소의 원래 위치와 옮긴 위치 · 실제 화면은 바뀌지 않아요';
+const EDIT_COLLECTS = '저장: 요소의 원래 위치와 바꾼 위치·크기·각도 · 실제 화면은 바뀌지 않아요';
 const FLOW_COLLECTS = '기록: 클릭·입력·화면 이동과 화면 변화 · 입력한 값은 가려요';
 const COLLECTS: Record<StatusPhase, string> = {
   'comment-pick': COMMENT_COLLECTS,

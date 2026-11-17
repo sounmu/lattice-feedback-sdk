@@ -65,6 +65,8 @@ it('accepts proposed moves next to comment pins and reads each kind separately',
   expect(findCommentPins(events)).toEqual([PIN]);
   expect(isCapturedScreen(createScreen([createEditMoveEvent({ ...move, number: 11 }, 1)]))).toBe(false);
   expect(isCapturedScreen(createScreen([createEditMoveEvent({ ...move, proposedRect: { x: 0, y: 0, width: -1, height: 0 } }, 1)]))).toBe(false);
+  expect(isCapturedScreen(createScreen([createEditMoveEvent({ ...move, rotation: -45 }, 1)]))).toBe(true);
+  expect(isCapturedScreen(createScreen([createEditMoveEvent({ ...move, rotation: 181 }, 1)]))).toBe(false);
 });
 
 it('drops the marks of deleted comments and edits from a saved screen and renumbers each kind', () => {

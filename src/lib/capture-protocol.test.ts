@@ -62,3 +62,27 @@ describe('capture protocol', () => {
       .toBe(false);
   });
 });
+
+describe('capture update edits', () => {
+  const EDIT = {
+    target: { selector: 'main .save', feedbackId: null, tagName: 'button', rect: { x: 10, y: 20, width: 80, height: 30 } },
+    originalRect: { x: 10, y: 20, width: 80, height: 30 },
+    proposedRect: { x: 0, y: 10, width: 100, height: 50 },
+    viewportWidth: 1000,
+    viewportHeight: 800,
+    note: '',
+  };
+
+  function createEditState(edit: Record<string, unknown>): CaptureState {
+    return { ...STATE, attachments: { ...STATE.attachments, edits: [edit as unknown as CaptureState['attachments']['edits'][number]] }, editKeys: ['edit-1'] };
+  }
+
+  it('accepts a resized edit with or without a rotation inside a half turn', () => {
+    expect(isCaptureUpdate(createCaptureUpdate(createEditState(EDIT)))).toBe(true);
+    expect(isCaptureUpdate(createCaptureUpdate(createEditState({ ...EDIT, rotation: -180 })))).toBe(true);
+  });
+
+  it.each([181, Number.NaN, '15'])('rejects the rotation %s', (rotation) => {
+    expect(isCaptureUpdate(createCaptureUpdate(createEditState({ ...EDIT, rotation })))).toBe(false);
+  });
+});

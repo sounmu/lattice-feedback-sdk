@@ -1,4 +1,4 @@
-import { describeMove, formatRect, formatSignedPixels, getComparisonBounds } from '@/lib/edit-comparison-geometry';
+import { describeMove, formatEditChange, formatRect, getComparisonBounds } from '@/lib/edit-comparison-geometry';
 import { getElementLabel } from '@/lib/feedback-display';
 import type { EditAttachment } from '@/types/feedback';
 
@@ -6,7 +6,7 @@ import type { EditAttachment } from '@/types/feedback';
 export function EditComparison({ edit }: { edit: EditAttachment }) {
   const { originalRect, proposedRect } = edit;
   const bounds = getComparisonBounds(edit.viewportWidth, edit.viewportHeight, [originalRect, proposedRect]);
-  const move = describeMove(originalRect, proposedRect);
+  const change = formatEditChange(describeMove(originalRect, proposedRect, edit.rotation));
 
   function getBoxStyle(rect: EditAttachment['originalRect']) {
     return {
@@ -21,19 +21,21 @@ export function EditComparison({ edit }: { edit: EditAttachment }) {
     <figure className="flex flex-col gap-2 rounded-(--radius-container) bg-(--admin-surface-sub) p-3">
       <div
         role="img"
-        aria-label={`${getElementLabel(edit.target)} 위치 변경: 가로 ${formatSignedPixels(move.deltaX)}, 세로 ${formatSignedPixels(move.deltaY)}`}
+        aria-label={`${getElementLabel(edit.target)} 변경: ${change}`}
         className="relative w-full overflow-hidden rounded-(--radius-element) border border-(--admin-border) bg-(--admin-surface)"
         style={{ aspectRatio: `${bounds.width} / ${bounds.height}` }}
       >
         <div className="absolute border-2 border-dashed border-(--admin-text-muted)" style={getBoxStyle(originalRect)} />
-        <div className="absolute border-2 border-(--color-info) bg-(--color-info-muted)" style={getBoxStyle(proposedRect)} />
+        <div
+          className="absolute border-2 border-(--color-info) bg-(--color-info-muted)"
+          style={{ ...getBoxStyle(proposedRect), transform: edit.rotation ? `rotate(${edit.rotation}deg)` : undefined }}
+        />
       </div>
       <figcaption className="flex flex-col gap-1">
         <p className="font-mono text-xs text-(--admin-text-muted)">{getElementLabel(edit.target)}</p>
         <p>
-          <span className="text-(--admin-text-sub)">이동 </span>
-          가로 {formatSignedPixels(move.deltaX)}, 세로 {formatSignedPixels(move.deltaY)}
-          {move.isResized ? ' · 크기도 바뀌었어요' : ''}
+          <span className="text-(--admin-text-sub)">변경 </span>
+          {change}
         </p>
         <p className="text-xs text-(--admin-text-muted)">
           원래 {formatRect(originalRect)} → 제안 {formatRect(proposedRect)}

@@ -10,6 +10,9 @@ export interface FakeEvent {
   clientX: number;
   clientY: number;
   key: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
   preventDefault: ReturnType<typeof vi.fn>;
   stopPropagation: ReturnType<typeof vi.fn>;
   stopImmediatePropagation: ReturnType<typeof vi.fn>;
@@ -55,6 +58,7 @@ export class FakeElement extends FakeEventTarget {
   readonly children: FakeElement[] = [];
   parent: FakeElement | null = null;
   textContent = '';
+  disabled = false;
   bounds = { left: 0, top: 0, width: 0, height: 0 };
   setPointerCapture = vi.fn();
 
@@ -109,6 +113,9 @@ export function createEvent(type: string, overrides: Partial<FakeEvent> = {}): F
     clientX: 0,
     clientY: 0,
     key: '',
+    shiftKey: false,
+    ctrlKey: false,
+    metaKey: false,
     preventDefault: vi.fn(),
     stopPropagation: vi.fn(),
     stopImmediatePropagation: vi.fn(),

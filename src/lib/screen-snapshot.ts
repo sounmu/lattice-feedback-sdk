@@ -1,5 +1,6 @@
 // Dependency-free runtime for saved screens. The SDK bundle imports this file,
 // so it must not pull in zod or any other package.
+import { isEditRotation } from '@/lib/edit-comparison-geometry';
 import {
   MAX_COMMENT_LENGTH,
   MAX_COMMENTS,
@@ -84,7 +85,10 @@ function isMarkBase(value: Record<string, unknown>, maxNumber: number): boolean 
 }
 
 export function isScreenEditMove(value: unknown): value is ScreenEditMove {
-  return isRecord(value) && isMarkBase(value, MAX_EDITS) && isMarkRect(value.originalRect) && isMarkRect(value.proposedRect);
+  return (
+    isRecord(value) && isMarkBase(value, MAX_EDITS) && isMarkRect(value.originalRect) && isMarkRect(value.proposedRect) &&
+    (value.rotation === undefined || isEditRotation(value.rotation))
+  );
 }
 
 function isFraction(value: unknown): boolean {
