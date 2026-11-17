@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { Icon } from '@astryxdesign/core/Icon';
+import { IconButton } from '@astryxdesign/core/IconButton';
 
 import { FeedbackListItem } from '@/components/admin/FeedbackListItem';
 import { ShortcutKey } from '@/components/admin/ShortcutKey';
 import { SidePaneToggle } from '@/components/admin/SidePaneToggle';
+import { RefreshIcon } from '@/components/widget/WidgetIcons';
 import {
   countFeedbacksByStatus,
   DEFAULT_FEEDBACK_LIST_QUERY,
@@ -31,6 +34,7 @@ interface FeedbackListViewProps {
 }
 
 const STATUS_TABS: StatusFilter[] = ['all', ...FEEDBACK_STATUSES];
+const RELOAD_LABEL = '새로고침';
 const FIELD_CLASS_NAME = 'min-h-11 rounded-(--radius-element) border border-(--admin-border) bg-(--admin-surface) px-3';
 
 function getStatusTabLabel(status: StatusFilter): string {
@@ -75,9 +79,14 @@ export function FeedbackListView({ items, projectKey, nowTimestamp, onReload, se
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-bold">받은 피드백</h1>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onReload} className={`${FIELD_CLASS_NAME} text-(--admin-text-sub)`}>
-            새로고침
-          </button>
+          <IconButton
+            label={RELOAD_LABEL}
+            tooltip={RELOAD_LABEL}
+            icon={<Icon icon={RefreshIcon} />}
+            variant="ghost"
+            size="lg"
+            onClick={onReload}
+          />
           {onCollapse ? <SidePaneToggle isCollapsed={false} side="left" label="피드백 목록" onToggle={onCollapse} /> : null}
         </div>
       </div>
