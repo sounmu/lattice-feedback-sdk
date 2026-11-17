@@ -6,7 +6,11 @@ import type { EditAttachment } from '@/types/feedback';
 import { FakeElement, FakeEventTarget, createEvent } from '@/sdk/element-drag-test-fixtures';
 
 let fakeWindow: FakeEventTarget & { scrollX: number; scrollY: number; innerWidth: number; innerHeight: number };
-let fakeDocument: FakeEventTarget & { body: FakeElement; createElement: (tagName: string) => FakeElement };
+let fakeDocument: FakeEventTarget & {
+  body: FakeElement;
+  createElement: (tagName: string) => FakeElement;
+  createElementNS: (namespace: string, tagName: string) => FakeElement;
+};
 let hostElement: FakeElement;
 let selection: CaptureTarget;
 
@@ -28,6 +32,7 @@ beforeEach(() => {
   fakeDocument = Object.assign(new FakeEventTarget(), {
     body: new FakeElement('body'),
     createElement: (tagName: string) => tagName === 'host-button' ? hostElement : new FakeElement(tagName),
+    createElementNS: (_namespace: string, tagName: string) => new FakeElement(tagName),
   });
   vi.stubGlobal('window', fakeWindow);
   vi.stubGlobal('document', fakeDocument);
@@ -232,8 +237,24 @@ describe('startElementDrag', () => {
     Object.assign(toolbar, { offsetWidth: 300, offsetHeight: 50 });
     fakeDocument.dispatch(createEvent('keydown', { target: getOverlay().ghost, key: 'ArrowLeft' }));
 
-    // The rotate handle reaches 28px above the ghost's top (740), so the toolbar ends 8px above that.
-    expect(toolbar.style.top).toBe(`${740 - 28 - 8 - 50}px`);
+    // The rotate handle reaches 44px above the ghost's top (740), so the toolbar ends 8px above that.
+    expect(toolbar.style.top).toBe(`${740 - 44 - 8 - 50}px`);
+  });
+
+  it('draws the resize and rotate handles as 32px circles with their icons and tooltips', () => {
+    startElementDrag(selection, { onComplete: vi.fn(), onCancel: vi.fn() });
+    const { ghost } = getOverlay();
+    const [, resizeHandle, rotateHandle] = ghost.children;
+
+    for (const handle of [resizeHandle, rotateHandle]) {
+      expect(handle.getAttribute('style')).toContain('width: 32px');
+      expect(handle.children[0].tagName).toBe('svg');
+      expect(handle.children[0].getAttribute('aria-hidden')).toBe('true');
+    }
+    expect(resizeHandle.children[0].children.map((path) => path.getAttribute('d'))).toEqual(['M19 13v6h-6', 'M5 11V5h6', 'M5 5l14 14']);
+    expect(rotateHandle.children[0].children).toHaveLength(2);
+    expect([resizeHandle.getAttribute('title'), rotateHandle.getAttribute('title')]).toEqual(['모서리를 끌어 크기 조절', '끌어서 회전']);
+    expect(rotateHandle.getAttribute('style')).toContain('top: -44px');
   });
 
   it('lets the toolbar wrap inside a narrow viewport', () => {
