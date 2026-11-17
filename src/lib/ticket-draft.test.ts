@@ -245,3 +245,12 @@ it('still lists an answer to a question that no detail field holds', () => {
 
   expect(body).toContain('## AI 확인 질문과 사용자 답변\n\n- 추가 확인: 주문 (AI 질문: 어느 메뉴였나요?)');
 });
+
+it('keeps an answer to a question without a field next to the details', () => {
+  const { body } = createTicketDraft(createDetail({
+    clarification: { model: 'm', questions: [{ question: '언제부터인가요?', options: ['오늘', '예전부터'], answer: '오늘' }] },
+    details: [{ slot: 'since', source: 'missing', value: null }],
+  }), ADMIN_ORIGIN);
+
+  expect(body).toContain('- 발생 시점: (비어 있음)\n- 추가 확인: 오늘 (AI 질문: 언제부터인가요?)');
+});

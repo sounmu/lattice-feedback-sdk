@@ -96,7 +96,17 @@ function createDetailsSection(details: FeedbackDetail[], clarification: Feedback
     const origin = question ? `${FEEDBACK_DETAIL_SOURCE_LABELS[source]}, AI 질문: ${plain(question)}` : FEEDBACK_DETAIL_SOURCE_LABELS[source];
     return `- ${label}: ${plain(value)} (${origin})`;
   });
-  if (details.some(({ source }) => source === 'answered')) {
+  // Answers to questions without a field, or skipped ones, are not in the fields above; they stay listed here.
+  const unlisted = (clarification?.questions ?? []).filter(({ slot, answer }) =>
+    !details.some((detail) => detail.slot === slot && detail.source === 'answered' && answer !== null));
+  for (const { question, answer, slot } of unlisted) {
+    if (slot && answer === null && details.some((detail) => detail.slot === slot)) {
+      continue;
+    }
+    const reply = answer === null ? '(건너뜀)' : plain(answer);
+    lines.push(`- ${getClarificationFieldLabel(slot)}: ${reply} (AI 질문: ${plain(question)})`);
+  }
+  if (clarification) {
     lines.push('- AI 질문은 AI가 만든 것이며, 답변만 사용자 진술입니다.');
   }
   return `## 확인 항목\n\n${lines.join('\n')}`;
