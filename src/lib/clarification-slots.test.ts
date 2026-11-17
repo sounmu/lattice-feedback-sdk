@@ -26,6 +26,13 @@ describe('getClarificationSlotStates', () => {
   });
 });
 
+it('does not take an update button for the time the problem started', () => {
+  const pressed = { ...EMPTY, message: '업데이트 버튼을 누르고 나서 원래 저장돼야 하는데 오류가 떠요. 매번 그래요.' };
+  const dated = { ...EMPTY, message: '배포 후 저장이 안 돼요' };
+  expect(getClarificationSlotStates('bug', pressed).find(({ id }) => id === 'since')?.status).toBe('missing');
+  expect(getClarificationSlotStates('bug', dated).find(({ id }) => id === 'since')?.status).toBe('stated');
+});
+
 describe('findMissingClarificationSlots', () => {
   it('returns every missing detail in asking order, and none when nothing is missing', () => {
     expect(findMissingClarificationSlots('bug', EMPTY)).toEqual(['actual', 'expected', 'steps', 'frequency', 'since']);
