@@ -3,6 +3,8 @@ import { expect, it } from 'vitest';
 import {
   MAX_COMMENT_LENGTH, MAX_COMMENTS, MAX_EDITS, MAX_FLOW_EVENTS, MAX_MISSING_SNAPSHOT_ASSETS, MAX_SCREEN_SNAPSHOTS_PER_FEEDBACK,
 } from '@/lib/feedback-limits';
+import { MAX_CLARIFICATION_OPTION_LENGTH, MAX_CLARIFICATION_QUESTION_LENGTH, MAX_CLARIFICATION_QUESTIONS } from '@/lib/clarification-limits';
+import { MAX_FEEDBACK_DETAIL_LENGTH } from '@/lib/feedback-details-limits';
 import { SCREEN_SNAPSHOT_FORMAT } from '@/lib/screen-snapshot';
 import { createTicketDraft, MAX_TICKET_FLOW_STEPS, summarizeFlowSteps } from '@/lib/ticket-draft';
 import { MAX_TICKET_BODY_LENGTH, MAX_TICKET_TITLE_LENGTH } from '@/lib/ticket-limits';
@@ -171,6 +173,16 @@ function createLargestDetail(): FeedbackDetailResponse {
       reporter: { id: 'user-1', name: '*'.repeat(200), verifiedOrganization: { id: '*'.repeat(200), name: '_'.repeat(200) } },
       page: { url: LONGEST_PAGE_URL, title: '주문', viewportWidth: Number.MAX_VALUE, viewportHeight: Number.MAX_VALUE, userAgent: 'vitest' },
       attachments: { comments, edits, flow },
+      clarification: {
+        model: 'm',
+        questions: Array.from({ length: MAX_CLARIFICATION_QUESTIONS }, () => ({
+          slot: 'problem' as const,
+          question: '*'.repeat(MAX_CLARIFICATION_QUESTION_LENGTH),
+          options: ['*'.repeat(MAX_CLARIFICATION_OPTION_LENGTH), '_'.repeat(MAX_CLARIFICATION_OPTION_LENGTH)],
+          answer: '*',
+        })),
+      },
+      details: (['problem', 'desired', 'target'] as const).map((slot) => ({ slot, source: 'answered' as const, value: '*'.repeat(MAX_FEEDBACK_DETAIL_LENGTH) })),
     },
     screens,
   );
@@ -196,4 +208,31 @@ it('fills one field per asked-about detail with the reporter answer', () => {
 
   expect(body).toContain('## AI 확인 질문과 사용자 답변\n\n- 실제 결과: 오류가 떴어요 (AI 질문: 저장 뒤 어떤 일이 있었나요?)\n- 추가 확인: (건너뜀) (AI 질문: 언제부터인가요?)');
   expect(createTicketDraft(createDetail(), ADMIN_ORIGIN).body).not.toContain('AI 확인 질문');
+});
+
+it('lists every detail with its source, names the AI question an answer replies to, and marks missing ones', () => {
+  const { body } = createTicketDraft(createDetail({
+    clarification: {
+      model: 'm',
+      questions: [{ slot: 'expected', question: '원래는 어떻게 되어야 하나요?', options: ['저장 완료', '목록 이동'], answer: '저장 완료' }],
+    },
+    details: [
+      { slot: 'actual', source: 'stated', value: '저장하면 오류가 떠요.' },
+      { slot: 'expected', source: 'answered', value: '저장 완료' },
+      { slot: 'steps', source: 'observed', value: '흐름 기록 1단계: \`/orders\`에서 \`저장\` 클릭' },
+      { slot: 'frequency', source: 'missing', value: null },
+    ],
+  }), ADMIN_ORIGIN);
+
+  expect(body).toContain([
+    '## 확인 항목',
+    '',
+    '- 실제 결과: 저장하면 오류가 떠요. (고객 설명)',
+    '- 기대한 결과: 저장 완료 (고객 답변, AI 질문: 원래는 어떻게 되어야 하나요?)',
+    "- 재현 순서: 흐름 기록 1단계: \\\`/orders\\\`에서 \\\`저장\\\` 클릭 (SDK 기록)",
+    '- 재현 빈도: (비어 있음)',
+    '- AI 질문은 AI가 만든 것이며, 답변만 사용자 진술입니다.',
+  ].join('\n'));
+  // The answers are in the fields, so the older question list is not repeated.
+  expect(body).not.toContain('## AI 확인 질문과 사용자 답변');
 });

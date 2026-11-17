@@ -12,6 +12,7 @@ import { isSameOriginRequest } from '@/lib/http/request-origin';
 import { findProject, isOriginAllowed } from '@/lib/projects';
 import { getScreenSnapshotRepository } from '@/lib/screen-snapshot-repository';
 import { createFeedbackInputSchema } from '@/lib/validation/feedback-schema';
+import { createFeedbackDetails } from '@/lib/feedback-details';
 import { createFeedbackWithClaimedScreens } from '@/lib/feedback-submission';
 import { createConversationSecret, findVerifiedReporterIdentity, hashConversationSecret } from '@/lib/reporter-identity';
 import type { CreateFeedbackResponse, Feedback, FeedbackListResponse, FeedbackReporter } from '@/types/feedback';
@@ -74,7 +75,9 @@ export async function POST(request: Request) {
     return createApiErrorResponse(401, 'verification_required', 'A verified identity is required to send feedback.');
   }
 
-  const { screenSnapshotIds, ...feedbackInput } = parsed.data;
+  const { screenSnapshotIds, ...requestInput } = parsed.data;
+  // Worked out here from what was sent, never taken from the request.
+  const feedbackInput = { ...requestInput, details: createFeedbackDetails(requestInput) };
   const conversationSecret = createConversationSecret();
   const access = {
     browserSecretHash: hashConversationSecret(conversationSecret),

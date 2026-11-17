@@ -1,9 +1,9 @@
 // Turns a feedback into a ticket draft the admin can paste into an issue tracker. It restates what the
 // reporter wrote and what the SDK recorded, kept apart, and never guesses a cause.
-import { getClarificationFieldLabel } from '@/lib/clarification-slots';
+import { CLARIFICATION_SLOTS, FEEDBACK_DETAIL_SOURCE_LABELS, getClarificationFieldLabel } from '@/lib/clarification-slots';
 import { describeMove, formatEditChange } from '@/lib/edit-comparison-geometry';
 import { FEEDBACK_TYPE_LABELS, formatDateTime, findUnverifiedOrganizationName, getElementLabel, getPagePath } from '@/lib/feedback-display';
-import type { FeedbackDetailResponse, FlowAttachment, FlowEvent } from '@/types/feedback';
+import type { FeedbackClarification, FeedbackDetail, FeedbackDetailResponse, FlowAttachment, FlowEvent } from '@/types/feedback';
 
 const MAX_TITLE_LENGTH = 60;
 /** Steps listed in a draft. The rest of a longer recording is read in the admin screen. */
@@ -85,6 +85,23 @@ function createFlowSection(flow: FlowAttachment): string {
   return `## 재현 절차 (SDK가 기록한 동작)\n\n${lines.join('\n')}`;
 }
 
+// One line per field, each with its source. An answered field also names the AI question it answers.
+function createDetailsSection(details: FeedbackDetail[], clarification: FeedbackClarification | null | undefined): string {
+  const lines = details.map(({ slot, source, value }) => {
+    const label = CLARIFICATION_SLOTS[slot].label;
+    if (value === null) {
+      return `- ${label}: (${FEEDBACK_DETAIL_SOURCE_LABELS.missing})`;
+    }
+    const question = source === 'answered' ? clarification?.questions.find((item) => item.slot === slot)?.question : undefined;
+    const origin = question ? `${FEEDBACK_DETAIL_SOURCE_LABELS[source]}, AI 질문: ${plain(question)}` : FEEDBACK_DETAIL_SOURCE_LABELS[source];
+    return `- ${label}: ${plain(value)} (${origin})`;
+  });
+  if (details.some(({ source }) => source === 'answered')) {
+    lines.push('- AI 질문은 AI가 만든 것이며, 답변만 사용자 진술입니다.');
+  }
+  return `## 확인 항목\n\n${lines.join('\n')}`;
+}
+
 /**
  * A ticket title and Markdown body for a feedback. adminOrigin is the address of this admin app, which the
  * links back to the feedback and its saved screens start with.
@@ -115,8 +132,10 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
     ].join('\n'),
     `## 사용자 진술\n\n${quote(feedback.message)}`,
   ];
-  if (feedback.clarification) {
-    // One field per detail, so the answers read as the ticket's own fields.
+  if (feedback.details) {
+    sections.push(createDetailsSection(feedback.details, feedback.clarification));
+  } else if (feedback.clarification) {
+    // Stored before details existed: one field per answered question, so the answers read as the ticket's own fields.
     const lines = feedback.clarification.questions.map(({ question, answer, slot }) => {
       const reply = answer === null ? '(건너뜀)' : plain(answer);
       return `- ${getClarificationFieldLabel(slot)}: ${reply} (AI 질문: ${plain(question)})`;

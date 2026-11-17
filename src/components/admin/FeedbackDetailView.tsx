@@ -7,6 +7,7 @@ import { ClarificationList } from '@/components/admin/ClarificationList';
 import { CommentAttachmentList } from '@/components/admin/CommentAttachmentList';
 import { EditScreenPreview } from '@/components/admin/EditScreenPreview';
 import { FeedbackActionPanel } from '@/components/admin/FeedbackActionPanel';
+import { FeedbackDetailList } from '@/components/admin/FeedbackDetailList';
 import { StatusBadge, TypeBadge } from '@/components/admin/FeedbackBadges';
 import { FlowTimeline } from '@/components/admin/FlowTimeline';
 import { SavedScreenList } from '@/components/admin/SavedScreenList';
@@ -62,6 +63,15 @@ export function FeedbackDetailView({ detail, projectKey, saveStatus, saveErrorMe
             ) : null}
             <p className="whitespace-pre-wrap text-base">{feedback.message}</p>
           </AdminSection>
+
+          {feedback.details ? (
+            <AdminSection
+              sectionKey="details"
+              title={`확인 항목 · 빈 항목 ${feedback.details.filter(({ source }) => source === 'missing').length}개`}
+            >
+              <FeedbackDetailList details={feedback.details} />
+            </AdminSection>
+          ) : null}
 
           {feedback.clarification ? (
             <AdminSection sectionKey="clarification" title={`AI 확인 질문 ${feedback.clarification.questions.length}개`}>

@@ -67,6 +67,7 @@ export function createMemoryFeedbackRepository(): FeedbackRepository {
         adminReply: null,
         messages: [],
         clarification: input.clarification ?? null,
+        details: input.details ?? null,
         createdAt: now,
         updatedAt: now,
       };
