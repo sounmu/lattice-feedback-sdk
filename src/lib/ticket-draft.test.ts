@@ -182,3 +182,18 @@ it('fits the largest draft the stored-feedback limits allow within the ticket bo
   expect(body.length).toBeLessThanOrEqual(MAX_TICKET_BODY_LENGTH);
   expect(title.length).toBeLessThanOrEqual(MAX_TICKET_TITLE_LENGTH);
 });
+
+it('fills one field per asked-about detail with the reporter answer', () => {
+  const { body } = createTicketDraft(createDetail({
+    clarification: {
+      model: 'm',
+      questions: [
+        { slot: 'actual', question: '저장 뒤 어떤 일이 있었나요?', options: ['오류가 떴어요', '반응 없음'], answer: '오류가 떴어요' },
+        { question: '언제부터인가요?', options: ['오늘', '예전부터'], answer: null },
+      ],
+    },
+  }), ADMIN_ORIGIN);
+
+  expect(body).toContain('## AI 확인 질문과 사용자 답변\n\n- 실제 결과: 오류가 떴어요 (AI 질문: 저장 뒤 어떤 일이 있었나요?)\n- 추가 확인: (건너뜀) (AI 질문: 언제부터인가요?)');
+  expect(createTicketDraft(createDetail(), ADMIN_ORIGIN).body).not.toContain('AI 확인 질문');
+});

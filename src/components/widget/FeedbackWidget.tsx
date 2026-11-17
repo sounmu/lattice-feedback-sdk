@@ -28,6 +28,7 @@ import {
   countAttachments,
 } from '@/components/widget/CaptureControls';
 import { ChoiceChips } from '@/components/widget/ChoiceChips';
+import { ClarificationView } from '@/components/widget/ClarificationView';
 import { ScreenSnapshotControls } from '@/components/widget/ScreenSnapshotControls';
 import { SendIcon } from '@/components/widget/WidgetIcons';
 import {
@@ -40,7 +41,12 @@ import {
 } from '@/components/widget/WidgetLayout';
 import { findAttachmentChange, type AttachmentChange, type AttachmentCounts } from '@/lib/attachment-notice';
 import { createCaptureCommand } from '@/lib/capture-protocol';
-import type { FeedbackReporter, FeedbackType } from '@/types/feedback';
+import { createFeedbackClarification, type ClarificationChoice } from '@/lib/clarification-answers';
+import { requestClarification } from '@/lib/clarification-request';
+import { isWithinFeedbackBytes } from '@/lib/feedback-limits';
+import type {
+  ClarificationQuestion, CreateFeedbackInput, FeedbackClarification, FeedbackReporter, FeedbackType,
+} from '@/types/feedback';
 import type { CaptureState } from '@/types/sdk-message';
 
 const MAX_MESSAGE_LENGTH = 5000;
@@ -171,6 +177,8 @@ export function FeedbackWidget() {
   const [message, setMessage] = useState('');
   const [type, setType] = useState<FeedbackType>('bug');
   const [submittedSummary, setSubmittedSummary] = useState<SubmittedSummary | null>(null);
+  const [isClarifying, setIsClarifying] = useState(false);
+  const [pendingQuestions, setPendingQuestions] = useState<{ model: string; questions: ClarificationQuestion[] } | null>(null);
   const [attachmentNotice, setAttachmentNotice] = useState<AttachmentChange | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -190,7 +198,7 @@ export function FeedbackWidget() {
   );
 
   const canSubmit = isInitialized && page !== null && message.trim().length > 0 &&
-    status !== 'submitting' && !activeMode && screens.status === 'idle';
+    status !== 'submitting' && !isClarifying && !activeMode && screens.status === 'idle';
 
   const showAttachmentNotice = useCallback((change: AttachmentChange | null) => {
     if (noticeTimer.current !== null) {
@@ -281,15 +289,45 @@ export function FeedbackWidget() {
       return;
     }
     target.focus({ preventScroll: true });
-  }, [isInitialized, page, activeMode, status]);
+  }, [isInitialized, page, activeMode, status, pendingQuestions]);
 
+  // Before sending, the AI may ask about what the draft still leaves open. No questions, or any failure,
+  // sends the feedback straight away.
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!config || !page || !canSubmit) {
       return;
     }
+    setIsClarifying(true);
+    const { questions, model } = await requestClarification({
+      projectKey: config.projectKey,
+      hostOrigin: config.hostOrigin,
+      message: message.trim(),
+      type,
+      page: { url: page.url },
+      attachments: attachments ?? undefined,
+    });
+    setIsClarifying(false);
+    if (questions.length > 0 && model) {
+      setPendingQuestions({ model, questions });
+      return;
+    }
+    await send();
+  }
+
+  async function handleClarificationSend(choices: ClarificationChoice[]) {
+    if (!pendingQuestions) {
+      return;
+    }
+    await send(createFeedbackClarification(pendingQuestions.model, pendingQuestions.questions, choices));
+  }
+
+  async function send(clarification?: FeedbackClarification) {
+    if (!config || !page) {
+      return;
+    }
     const screenSnapshotIds = screens.snapshots.map((snapshot) => snapshot.id);
-    const result = await submit({
+    const input: CreateFeedbackInput = {
       projectKey: config.projectKey,
       hostOrigin: config.hostOrigin,
       message: message.trim(),
@@ -298,7 +336,10 @@ export function FeedbackWidget() {
       page,
       attachments: attachments ?? undefined,
       screenSnapshotIds,
-    });
+    };
+    // The questions are optional: a draft that only fits the size limit without them is sent without them.
+    const withClarification = clarification ? { ...input, clarification } : input;
+    const result = await submit(isWithinFeedbackBytes(withClarification) ? withClarification : input);
     if (result) {
       if (result.conversationSecret) {
         rememberConversationSecret(config.projectKey, config.hostOrigin, reporter?.id ?? null, result.conversationSecret);
@@ -325,6 +366,7 @@ export function FeedbackWidget() {
     setMessage('');
     setType('bug');
     setSubmittedSummary(null);
+    setPendingQuestions(null);
     reset();
     screens.reset();
     sendCaptureCommand(createCaptureCommand({ type: 'draft:reset', payload: {} }));
@@ -408,6 +450,9 @@ export function FeedbackWidget() {
   }
 
   function renderProgress() {
+    if (isClarifying) {
+      return <WidgetBanner tone="info">보내기 전에 더 여쭤볼 내용이 있는지 보고 있어요…</WidgetBanner>;
+    }
     if (status === 'submitting') {
       return <WidgetBanner tone="info">보내는 중이에요…</WidgetBanner>;
     }
@@ -476,7 +521,7 @@ export function FeedbackWidget() {
   }
 
   function renderCompose() {
-    const isBusy = status === 'submitting';
+    const isBusy = status === 'submitting' || isClarifying;
     const attachmentCount = (attachments ? countAttachments(attachments) : 0) + screens.snapshots.length;
     const isReady = isInitialized && captureState !== null;
 
@@ -599,6 +644,26 @@ export function FeedbackWidget() {
     }
     if (status === 'success') {
       return renderSuccess();
+    }
+    if (pendingQuestions) {
+      return (
+        <ClarificationView
+          key={pendingQuestions.questions.map((question) => question.question).join('\n')}
+          questions={pendingQuestions.questions}
+          isBusy={status === 'submitting'}
+          status={<>{renderSubmitError()}{renderProgress()}</>}
+          onSend={(choices) => void handleClarificationSend(choices)}
+          onBack={() => {
+            // A send in flight cannot be taken back, so the draft is not reopened under it.
+            if (status === 'submitting') {
+              return;
+            }
+            reset();
+            setPendingQuestions(null);
+          }}
+          onClose={notifyClose}
+        />
+      );
     }
     if (isInitialized && captureState?.activeMode) {
       return (

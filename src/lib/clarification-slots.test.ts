@@ -1,0 +1,48 @@
+import { describe, expect, it } from 'vitest';
+import type { ClarificationContext } from '@/lib/clarification-model';
+import { findMissingClarificationSlots, getClarificationSlotStates } from '@/lib/clarification-slots';
+
+const EMPTY: ClarificationContext = { feedbackType: '버그', message: '', pagePath: '/', comments: [], edits: [], flowSteps: [] };
+
+describe('getClarificationSlotStates', () => {
+  it('marks what the SDK recorded as observed, what the reporter wrote as stated and the rest as missing', () => {
+    const context = { ...EMPTY, message: '어제부터 저장이 안 돼요', flowSteps: ['`/orders`에서 `저장` 클릭'] };
+    expect(getClarificationSlotStates('bug', context)).toEqual([
+      { id: 'actual', status: 'stated' },
+      { id: 'expected', status: 'missing' },
+      { id: 'steps', status: 'observed' },
+      { id: 'frequency', status: 'missing' },
+      { id: 'since', status: 'stated' },
+    ]);
+  });
+
+  it('reads comments and edit notes as the reporter words, and takes an edit as the desired look and target', () => {
+    const context = {
+      ...EMPTY,
+      comments: [{ element: '버튼', comment: '글씨가 작아서 불편해요' }],
+      edits: [{ element: '버튼', change: '가로 +40px 이동' }],
+    };
+    expect(getClarificationSlotStates('improvement', context).map(({ status }) => status)).toEqual(['stated', 'observed', 'observed']);
+  });
+});
+
+it('does not take an update button for the time the problem started', () => {
+  const pressed = { ...EMPTY, message: '업데이트 버튼을 누르고 나서 원래 저장돼야 하는데 오류가 떠요. 매번 그래요.' };
+  const dated = { ...EMPTY, message: '배포 후 저장이 안 돼요' };
+  expect(getClarificationSlotStates('bug', pressed).find(({ id }) => id === 'since')?.status).toBe('missing');
+  expect(getClarificationSlotStates('bug', dated).find(({ id }) => id === 'since')?.status).toBe('stated');
+});
+
+it('does not take a count of button presses for how often the problem happens', () => {
+  const pressed = { ...EMPTY, message: '저장 버튼을 3번 누르고 나서 원래 저장돼야 하는데 오류가 떠요. 어제부터 그래요.' };
+  const share = { ...EMPTY, message: '10번 중 3번은 저장이 안 돼요' };
+  expect(getClarificationSlotStates('bug', pressed).find(({ id }) => id === 'frequency')?.status).toBe('missing');
+  expect(getClarificationSlotStates('bug', share).find(({ id }) => id === 'frequency')?.status).toBe('stated');
+});
+
+describe('findMissingClarificationSlots', () => {
+  it('returns every missing detail in asking order, and none when nothing is missing', () => {
+    expect(findMissingClarificationSlots('bug', EMPTY)).toEqual(['actual', 'expected', 'steps', 'frequency', 'since']);
+    expect(findMissingClarificationSlots('question', { ...EMPTY, message: '엑셀로 받으려면 어떻게 해요?', comments: [{ element: '표', comment: '' }] })).toEqual([]);
+  });
+});

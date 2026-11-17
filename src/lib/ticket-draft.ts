@@ -1,5 +1,6 @@
 // Turns a feedback into a ticket draft the admin can paste into an issue tracker. It restates what the
 // reporter wrote and what the SDK recorded, kept apart, and never guesses a cause.
+import { getClarificationFieldLabel } from '@/lib/clarification-slots';
 import { describeMove, formatEditChange } from '@/lib/edit-comparison-geometry';
 import { FEEDBACK_TYPE_LABELS, formatDateTime, findUnverifiedOrganizationName, getElementLabel, getPagePath } from '@/lib/feedback-display';
 import type { FeedbackDetailResponse, FlowAttachment, FlowEvent } from '@/types/feedback';
@@ -114,6 +115,15 @@ export function createTicketDraft({ feedback, screenSnapshots }: FeedbackDetailR
     ].join('\n'),
     `## 사용자 진술\n\n${quote(feedback.message)}`,
   ];
+  if (feedback.clarification) {
+    // One field per detail, so the answers read as the ticket's own fields.
+    const lines = feedback.clarification.questions.map(({ question, answer, slot }) => {
+      const reply = answer === null ? '(건너뜀)' : plain(answer);
+      return `- ${getClarificationFieldLabel(slot)}: ${reply} (AI 질문: ${plain(question)})`;
+    });
+    lines.push('- 질문은 AI가 만든 것이며, 답변만 사용자 진술입니다.');
+    sections.push(`## AI 확인 질문과 사용자 답변\n\n${lines.join('\n')}`);
+  }
   if (flow && flow.events.length > 0) {
     sections.push(createFlowSection(flow));
   }
