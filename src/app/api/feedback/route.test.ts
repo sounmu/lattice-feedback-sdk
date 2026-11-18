@@ -33,6 +33,18 @@ describe('POST /api/feedback', () => {
     expect(body.feedback).not.toHaveProperty('hostOrigin');
   });
 
+  it('stores the details the server works out and ignores any details the request sends', async () => {
+    const forged = [{ slot: 'actual', source: 'observed', value: 'forged' }];
+    const response = await POST(createJsonRequest(COLLECTION_URL, 'POST', createFeedbackBody({ message: '저장하면 오류가 떠요', details: forged })));
+    const body = (await response.json()) as CreateFeedbackResponse;
+
+    expect(response.status).toBe(201);
+    expect(body.feedback.details?.map(({ slot, source }) => [slot, source])).toEqual([
+      ['actual', 'stated'], ['expected', 'missing'], ['steps', 'missing'], ['frequency', 'missing'], ['since', 'missing'],
+    ]);
+    expect(body.feedback.details?.[0].value).toBe('저장하면 오류가 떠요');
+  });
+
   it('returns 403 origin_not_allowed for a disallowed origin', async () => {
     const request = createJsonRequest(
       COLLECTION_URL,
