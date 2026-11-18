@@ -122,6 +122,20 @@ export interface FeedbackClarification {
   questions: ClarificationAnswer[];
 }
 
+/**
+ * answered: the reporter's answer to an AI question. observed: the SDK recorded it. stated: a sentence of the
+ * reporter's own description. missing: nothing gives it.
+ */
+export type FeedbackDetailSource = 'answered' | 'observed' | 'stated' | 'missing';
+
+/** One field a developer needs for this type of feedback, worked out by the server when the feedback is stored. */
+export interface FeedbackDetail {
+  slot: ClarificationSlotId;
+  source: FeedbackDetailSource;
+  /** Null exactly when the detail is missing. */
+  value: string | null;
+}
+
 export interface Feedback {
   id: string;
   projectKey: string;
@@ -139,6 +153,8 @@ export interface Feedback {
   messages?: ConversationMessage[];
   /** Null or absent when no question was asked. */
   clarification?: FeedbackClarification | null;
+  /** The type's details in asking order. Null or absent on feedback stored before details existed. */
+  details?: FeedbackDetail[] | null;
   /** ISO timestamp. */
   createdAt: string;
   /** ISO timestamp. */
@@ -151,6 +167,8 @@ export type CreateFeedbackInput = Pick<Feedback, 'projectKey' | 'message' | 'typ
   /** Saved screens uploaded before submission. They are linked to the feedback when it is created. */
   screenSnapshotIds?: string[];
   clarification?: FeedbackClarification;
+  /** Set by the server from the rest of the input before storing; never read from the request. */
+  details?: FeedbackDetail[];
 };
 
 /** What the widget sends to ask for questions: the draft without the reporter or the saved screens. */

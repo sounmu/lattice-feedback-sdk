@@ -2,7 +2,7 @@
 // questions are decided here, in code: the model is only asked to word a question for a detail that is
 // still missing, so it cannot ask again for an element, a change or steps the SDK already recorded.
 import type { ClarificationContext } from '@/lib/clarification-model';
-import type { FeedbackType } from '@/types/feedback';
+import type { FeedbackDetailSource, FeedbackType } from '@/types/feedback';
 
 export const CLARIFICATION_SLOT_IDS = [
   'actual', 'expected', 'steps', 'frequency', 'since', 'problem', 'desired', 'target', 'goal',
@@ -27,6 +27,14 @@ export const CLARIFICATION_SLOTS: Record<ClarificationSlotId, ClarificationSlot>
   desired: { label: '원하는 모습', hint: '어떻게 바뀌면 좋겠는지' },
   target: { label: '대상 요소', hint: '화면의 어느 부분에 대한 이야기인지' },
   goal: { label: '하려던 일', hint: '무엇을 하려다가 막혔는지' },
+};
+
+/** Where a detail of a stored feedback came from, kept apart so a reader can tell words from records. */
+export const FEEDBACK_DETAIL_SOURCE_LABELS: Record<FeedbackDetailSource, string> = {
+  answered: '고객 답변',
+  observed: 'SDK 기록',
+  stated: '고객 설명',
+  missing: '비어 있음',
 };
 
 /** The field a question fills, for display. Questions stored before details existed have none. */
@@ -79,22 +87,33 @@ function isObserved(id: ClarificationSlotId, context: ClarificationContext): boo
   }
 }
 
-function getReporterText(context: ClarificationContext): string {
+// The reporter's words sentence by sentence, so a stated detail can be shown with the sentence that states it.
+function getReporterSentences(context: ClarificationContext): string[] {
   return [
     context.message,
     ...context.comments.map(({ comment }) => comment),
     ...context.edits.flatMap(({ note }) => (note ? [note] : [])),
-  ].join('\n');
+  ]
+    .flatMap((text) => text.split(/\n+|(?<=[.!?。])\s+/))
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+}
+
+/** The reporter's sentence that already gives this detail, or null when none does. */
+export function findStatedSentence(id: ClarificationSlotId, context: ClarificationContext): string | null {
+  const pattern = STATED_PATTERNS[id];
+  if (!pattern) {
+    return null;
+  }
+  return getReporterSentences(context).find((sentence) => pattern.test(sentence)) ?? null;
 }
 
 export function getClarificationSlotStates(type: FeedbackType, context: ClarificationContext): ClarificationSlotState[] {
-  const text = getReporterText(context);
   return CLARIFICATION_SLOTS_BY_TYPE[type].map((id) => {
     if (isObserved(id, context)) {
       return { id, status: 'observed' };
     }
-    const pattern = STATED_PATTERNS[id];
-    if (pattern && pattern.test(text)) {
+    if (findStatedSentence(id, context) !== null) {
       return { id, status: 'stated' };
     }
     return { id, status: 'missing' };
